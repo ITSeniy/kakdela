@@ -134,13 +134,18 @@ export function Shell() {
   // а ThreadPanel — overlay (см. ниже отдельный layout).
   // Ширины колонок — из designs/final-chrome.jsx: рельса 56, каналы 216,
   // участники 220. DM-список — 256 (final-dm.jsx). Тред-панель остаётся 360.
+  // grid-rows-[minmax(0,1fr)] обязателен: без него единственный implicit-ряд
+  // растёт по контенту, и при переполнении (длинный чат) вся вёрстка уезжает
+  // за вьюпорт вместо скролла внутри колонок.
+  const gridBase =
+    'h-full grid grid-rows-[minmax(0,1fr)] bg-kd-bg text-kd-text font-sans overflow-hidden'
   const gridClass = inSidebarMode
     ? inDmMode
-      ? 'h-full grid grid-cols-[56px_256px_1fr] bg-kd-bg text-kd-text font-sans overflow-hidden'
-      : 'h-full grid grid-cols-[56px_216px_1fr] bg-kd-bg text-kd-text font-sans overflow-hidden'
+      ? `${gridBase} grid-cols-[56px_256px_1fr]`
+      : `${gridBase} grid-cols-[56px_216px_1fr]`
     : showThreadPanel
-      ? 'h-full grid grid-cols-[56px_216px_1fr_360px] bg-kd-bg text-kd-text font-sans overflow-hidden'
-      : 'h-full grid grid-cols-[56px_216px_1fr] lg:grid-cols-[56px_216px_1fr_220px] bg-kd-bg text-kd-text font-sans overflow-hidden'
+      ? `${gridBase} grid-cols-[56px_216px_1fr_360px]`
+      : `${gridBase} grid-cols-[56px_216px_1fr] lg:grid-cols-[56px_216px_1fr_220px]`
 
   return (
     <div className={gridClass}>

@@ -313,7 +313,7 @@ export function InboxScreen() {
   return (
     <>
       <Sidebar unreadTotal={unreadTotal} activeFilter={filter} onSelectFilter={setFilter} />
-      <div className="flex-1 min-w-0 flex flex-col bg-kd-bg">
+      <div className="flex-1 min-w-0 min-h-0 flex flex-col bg-kd-bg">
         <div className="px-[18px] py-2 border-b border-kd-border bg-kd-panel-alt flex items-center gap-2.5 shrink-0">
           <Icon.Inbox size={14} className="text-kd-warm shrink-0" />
           <span className="text-[13px] font-bold text-kd-text">входящие</span>

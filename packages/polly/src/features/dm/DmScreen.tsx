@@ -258,7 +258,7 @@ export function DmScreen({ channelId }: DmScreenProps) {
   }
 
   return (
-    <div className="flex-1 min-w-0 flex flex-col bg-kd-bg">
+    <div className="flex-1 min-w-0 min-h-0 flex flex-col bg-kd-bg">
       <Header summary={summary} onOpenProfile={openProfile} />
       <DmBubbleList
         channelId={channelId}

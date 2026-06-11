@@ -145,7 +145,7 @@ export function SearchScreen() {
   const errorMsg = error instanceof Error ? error.message : null
 
   return (
-    <div className="flex-1 min-w-0 col-span-2 flex flex-col bg-kd-bg">
+    <div className="flex-1 min-w-0 min-h-0 col-span-2 flex flex-col bg-kd-bg">
       <div className="px-4 py-2.5 border-b border-kd-border bg-kd-panel-alt shrink-0">
         <div className="bg-kd-panel border border-kd-border rounded-kd px-3 py-2 flex items-center gap-2.5">
           <Icon.Search size={16} className="text-kd-text-mute shrink-0" />

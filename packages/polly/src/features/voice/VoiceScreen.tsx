@@ -381,7 +381,7 @@ export function VoiceScreen({ serverId, channel }: VoiceScreenProps) {
   }
 
   return (
-    <div className="relative flex-1 min-w-0 flex flex-col bg-kd-bg">
+    <div className="relative flex-1 min-w-0 min-h-0 flex flex-col bg-kd-bg">
       <Header
         channel={channel}
         connected={connectedToThis}

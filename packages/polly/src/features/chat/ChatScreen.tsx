@@ -214,7 +214,7 @@ export function ChatScreen({ serverId, channelId }: ChatScreenProps) {
   }
 
   return (
-    <div className="flex-1 min-w-0 flex flex-col bg-kd-bg">
+    <div className="flex-1 min-w-0 min-h-0 flex flex-col bg-kd-bg">
       <Header channel={channel} memberCount={serverDetail?.memberCount ?? 0} />
       <MessageList
         serverId={serverId}
