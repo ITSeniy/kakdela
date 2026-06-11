@@ -50,6 +50,9 @@ export type AttachmentKind = z.infer<typeof AttachmentKindSchema>
 export const AttachmentSchema = z.object({
   id: z.string().uuid(),
   url: z.string().url(),
+  /** Серверная миниатюра (webp ≤480px) для превью в чате; null у gif,
+      мелких картинок и не-изображений. Оригинал — всегда в url. */
+  thumbUrl: z.string().url().nullable().optional(),
   kind: AttachmentKindSchema,
   contentType: z.string(),
   originalName: z.string(),

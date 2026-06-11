@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useState } from 'react'
 
 import type { Attachment } from '@kakdela/ginzu/api-types'
 
@@ -19,8 +19,15 @@ function isImage(file: File): boolean {
 }
 
 function ThumbImage({ file }: { file: File }) {
-  const objectUrl = useMemo(() => URL.createObjectURL(file), [file])
-  useEffect(() => () => URL.revokeObjectURL(objectUrl), [objectUrl])
+  // URL создаём и отзываем строго в одном эффекте: связка useMemo + cleanup
+  // ломалась под StrictMode (double-mount отзывал URL, memo не пересоздавал).
+  const [objectUrl, setObjectUrl] = useState<string | null>(null)
+  useEffect(() => {
+    const url = URL.createObjectURL(file)
+    setObjectUrl(url)
+    return () => URL.revokeObjectURL(url)
+  }, [file])
+  if (!objectUrl) return null
   return <img src={objectUrl} alt="" className="w-full h-full object-cover" />
 }
 

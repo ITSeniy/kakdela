@@ -164,6 +164,8 @@ export const files = pgTable(
     ownerId:      uuid('owner_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
     messageId:    uuid('message_id').references((): AnyPgColumn => messages.id, { onDelete: 'cascade' }),
     key:          text('key').notNull(),
+    // S3-ключ миниатюры (webp ≤480px), генерируется на finalize для картинок.
+    thumbKey:     text('thumb_key'),
     originalName: text('original_name').notNull(),
     contentType:  text('content_type').notNull(),
     sizeBytes:    integer('size_bytes').notNull(),

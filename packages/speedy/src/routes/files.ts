@@ -5,6 +5,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { and, eq, inArray } from 'drizzle-orm'
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod'
 import probe from 'probe-image-size'
+import sharp from 'sharp'
 import { z } from 'zod'
 
 import {
@@ -33,6 +34,13 @@ const PRESIGN_TTL_SECONDS = 300
 // and probe-image-size for non-streamed buffers also reads headers only.
 const MAGIC_PREFIX_BYTES = 64 * 1024
 
+// Миниатюры для чата: webp, длинная сторона ≤480px. GIF не трогаем (теряется
+// анимация), картинки уже ≤480px — тоже (нет выигрыша). Файлы крупнее лимита
+// не миниатюризируем, чтобы не раздувать память процесса.
+const THUMB_MAX_SIDE = 480
+const THUMB_WEBP_QUALITY = 82
+const THUMB_SOURCE_MAX_BYTES = 25 * 1024 * 1024
+
 function kindFromMime(mime: string): AttachmentKind {
   if (mime.startsWith('image/')) return 'image'
   if (mime.startsWith('video/')) return 'video'
@@ -50,6 +58,7 @@ function publicUrlFor(key: string): string {
 export function toAttachment(row: {
   id: string
   key: string
+  thumbKey: string | null
   originalName: string
   contentType: string
   sizeBytes: number
@@ -59,6 +68,7 @@ export function toAttachment(row: {
   return {
     id:           row.id,
     url:          publicUrlFor(row.key),
+    thumbUrl:     row.thumbKey ? publicUrlFor(row.thumbKey) : null,
     kind:         kindFromMime(row.contentType),
     contentType:  row.contentType,
     originalName: row.originalName,
@@ -82,6 +92,48 @@ async function readPrefix(key: string, bytes: number): Promise<Uint8Array> {
     chunks.push(chunk instanceof Buffer ? chunk : Buffer.from(chunk))
   }
   return Uint8Array.from(Buffer.concat(chunks))
+}
+
+async function readFull(key: string): Promise<Buffer> {
+  const res = await s3.send(new GetObjectCommand({ Bucket: S3_BUCKET, Key: key }))
+  const body = res.Body
+  if (!body) throw new Error('no body in GetObject response')
+  const chunks: Buffer[] = []
+  for await (const chunk of body as AsyncIterable<Buffer | Uint8Array>) {
+    chunks.push(chunk instanceof Buffer ? chunk : Buffer.from(chunk))
+  }
+  return Buffer.concat(chunks)
+}
+
+/** Генерирует миниатюру и кладёт в S3. Возвращает thumbKey либо null
+    (gif / мелкая картинка / слишком большой файл / ошибка — не фатально). */
+async function makeThumbnail(file: {
+  id: string
+  key: string
+  ownerId: string
+  contentType: string
+  sizeBytes: number
+}, width: number | null, height: number | null): Promise<string | null> {
+  if (!file.contentType.startsWith('image/')) return null
+  if (file.contentType === 'image/gif') return null
+  if (file.sizeBytes > THUMB_SOURCE_MAX_BYTES) return null
+  if (width !== null && height !== null && Math.max(width, height) <= THUMB_MAX_SIDE) return null
+
+  const original = await readFull(file.key)
+  const thumb = await sharp(original)
+    .rotate() // уважаем EXIF-ориентацию фото
+    .resize(THUMB_MAX_SIDE, THUMB_MAX_SIDE, { fit: 'inside', withoutEnlargement: true })
+    .webp({ quality: THUMB_WEBP_QUALITY })
+    .toBuffer()
+
+  const thumbKey = `public/${file.ownerId}/${file.id}.thumb.webp`
+  await s3.send(new PutObjectCommand({
+    Bucket: S3_BUCKET,
+    Key: thumbKey,
+    Body: thumb,
+    ContentType: 'image/webp',
+  }))
+  return thumbKey
 }
 
 async function deleteObject(key: string): Promise<void> {
@@ -234,9 +286,18 @@ export const filesRoutes: FastifyPluginAsyncZod = async (app) => {
         }
       }
 
+      // Миниатюра для чата — best-effort: при ошибке файл всё равно ready,
+      // клиент покажет оригинал.
+      let thumbKey: string | null = null
+      try {
+        thumbKey = await makeThumbnail(file, width, height)
+      } catch (err) {
+        req.log.warn({ err, fileId: id }, '[files] thumbnail generation failed (non-fatal)')
+      }
+
       const updated = await db
         .update(files)
-        .set({ status: 'ready', width, height })
+        .set({ status: 'ready', width, height, thumbKey })
         .where(eq(files.id, id))
         .returning()
       const fresh = updated[0]

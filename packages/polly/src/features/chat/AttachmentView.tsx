@@ -42,7 +42,7 @@ function ImageThumb({
       title={attachment.originalName}
     >
       <img
-        src={attachment.url}
+        src={attachment.thumbUrl ?? attachment.url}
         alt={attachment.originalName}
         className="w-full h-full object-cover"
         loading="lazy"
