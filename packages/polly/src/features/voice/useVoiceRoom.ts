@@ -1,0 +1,254 @@
+import { useCallback } from 'react'
+import { Track } from 'livekit-client'
+import type { Room } from 'livekit-client'
+
+import { ApiError } from '../../lib/api.js'
+import {
+  applyDeafenVolume,
+  createAndConnectRoom,
+  disposeRoom,
+  disposeVoiceRoom,
+  getActiveRoom,
+  installVoiceRoom,
+} from '../../lib/livekit.js'
+import { joinVoiceChannel, leaveVoiceChannel } from './api.js'
+import { useVoiceInputSettings } from './inputSettings.js'
+import { audioCaptureOptions } from './noiseSettings.js'
+import { useVoiceStore } from './store.js'
+
+export interface UseVoiceRoom {
+  join(channelId: string): Promise<void>
+  leave(): Promise<void>
+  toggleMute(): Promise<void>
+  toggleDeafen(): Promise<void>
+}
+
+// Все mutating-операции с комнатой (join/leave) проходят через один queue
+// и нумеруются последовательно. Это даёт два свойства:
+//   1) `join(A)` и `join(B)` не запускают параллельные `room.connect` —
+//      они стоят в очереди.
+//   2) Любая «устаревшая» операция (joinSeq уже двинулся вперёд из-за
+//      нового join/leave) на каждом checkpoint бросает работу и убирает
+//      за собой свою in-flight Room, не трогая глобальные.
+// Toggle-actions (mute/deafen) идемпотентны и не вызывают сетевых
+// операций — их сериализовать не нужно.
+let joinSequence = 0
+let opQueue: Promise<void> = Promise.resolve()
+
+function enqueueVoiceOp(action: () => Promise<void>): Promise<void> {
+  opQueue = opQueue.catch(() => {}).then(action)
+  return opQueue
+}
+
+/**
+ * Голосовая сессия должна переживать переключение текстовых каналов в шелле,
+ * поэтому хук — это просто связка экшенов без собственного эффекта. Можно
+ * вызывать из любого компонента, они все увидят один Room и один store.
+ *
+ * Подключение явное — VoiceScreen рендерит CTA «Подключиться», который дёргает
+ * join(channelId). Авто-джойн на смену URL'а сломал бы UX (пользователь зашёл
+ * посмотреть, кто там — и сразу попал в эфир).
+ */
+export function useVoiceRoom(): UseVoiceRoom {
+  const join = useCallback((channelId: string) => {
+    // Бампаем seq СИНХРОННО — чтобы любая уже-стоящая в очереди операция
+    // прочитала актуальный «победитель», ещё не дойдя до своей работы.
+    const seq = ++joinSequence
+    return enqueueVoiceOp(() => runJoin(channelId, seq))
+  }, [])
+
+  const leave = useCallback(() => leaveVoiceRoom(), [])
+
+  const toggleMute = useCallback(async () => {
+    // В PTT режиме mute-кнопка отключена — мик управляется только клавишей,
+    // чтобы поведение было предсказуемым (см. T-035 hint).
+    if (useVoiceInputSettings.getState().inputMode === 'push-to-talk') return
+
+    const room = getActiveRoom()
+    const { muted, deafened, setMuted, setDeafened } = useVoiceStore.getState()
+    const nextMuted = !muted
+    setMuted(nextMuted)
+    if (deafened && !nextMuted) {
+      setDeafened(false)
+      applyDeafenVolume(room, false)
+    }
+    if (room) {
+      try {
+        await room.localParticipant.setMicrophoneEnabled(!nextMuted, audioCaptureOptions())
+      } catch (err) {
+        const name = err instanceof Error ? err.name : ''
+        const code = name === 'NotAllowedError' ? 'no-mic-permission' : 'mic-toggle-failed'
+        useVoiceStore.getState().setError(code)
+      }
+    }
+  }, [])
+
+  const toggleDeafen = useCallback(async () => {
+    const room = getActiveRoom()
+    const { deafened, muted, setDeafened, setMuted } = useVoiceStore.getState()
+    const nextDeafened = !deafened
+    setDeafened(nextDeafened)
+    applyDeafenVolume(room, nextDeafened)
+    if (nextDeafened && !muted) {
+      setMuted(true)
+      if (room) {
+        try {
+          await room.localParticipant.setMicrophoneEnabled(false)
+        } catch (err) {
+          console.warn('[voice] mic disable failed on deafen', err)
+        }
+      }
+    }
+  }, [])
+
+  return { join, leave, toggleMute, toggleDeafen }
+}
+
+/**
+ * Завершает голосовую сессию из любого места приложения — logout, навигация,
+ * `beforeunload`. Не требует React-контекста. Идёт через ту же очередь, что
+ * и `join`, поэтому надёжно прерывает любой in-flight join.
+ */
+export function leaveVoiceRoom(): Promise<void> {
+  joinSequence += 1
+  return enqueueVoiceOp(() => runLeave())
+}
+
+/**
+ * Повторная попытка опубликовать микрофон — используется из MicPermission
+ * диалога после того, как пользователь дал разрешение в системных
+ * настройках. Возвращает true если удалось, иначе сохраняет error и
+ * возвращает false (диалог остаётся открытым).
+ */
+export async function retryMicrophone(): Promise<boolean> {
+  const room = getActiveRoom()
+  if (!room) {
+    useVoiceStore.getState().setError('no-active-room')
+    return false
+  }
+  try {
+    await room.localParticipant.setMicrophoneEnabled(true, audioCaptureOptions())
+    useVoiceStore.getState().setMuted(false)
+    useVoiceStore.getState().setError(null)
+    return true
+  } catch (err) {
+    const name = err instanceof Error ? err.name : ''
+    const code = name === 'NotAllowedError' ? 'no-mic-permission' : 'mic-publish-failed'
+    useVoiceStore.getState().setError(code)
+    return false
+  }
+}
+
+async function runJoin(channelId: string, seq: number): Promise<void> {
+  if (seq !== joinSequence) return
+
+  // Если до нас была активная комната — закрываем перед новым подключением.
+  if (useVoiceStore.getState().activeChannelId) {
+    await teardownActive()
+    if (seq !== joinSequence) return
+  }
+
+  const s = useVoiceStore.getState()
+  s.setActiveChannelId(channelId)
+  s.setStatus('connecting')
+  s.setError(null)
+
+  let joinResponse
+  try {
+    joinResponse = await joinVoiceChannel(channelId)
+  } catch (err) {
+    if (seq === joinSequence) {
+      const code =
+        err instanceof ApiError ? err.code : err instanceof Error ? err.message : 'join-failed'
+      useVoiceStore.getState().setError(code)
+      useVoiceStore.getState().setStatus('failed')
+      useVoiceStore.getState().setActiveChannelId(null)
+    }
+    return
+  }
+  if (seq !== joinSequence) {
+    void leaveVoiceChannel(channelId).catch(() => {})
+    return
+  }
+
+  // Предварительный snapshot — чтобы UI показал peer'ов до того, как
+  // LiveKit договорится handshake. После install мы пересоберём список
+  // из room.remoteParticipants (это уже после `room.connect()` resolve'а).
+  useVoiceStore.getState().applySnapshot(joinResponse.participants)
+
+  let room: Room
+  try {
+    room = await createAndConnectRoom({
+      url: joinResponse.url,
+      token: joinResponse.token,
+    })
+  } catch (err) {
+    if (seq === joinSequence) {
+      const code = err instanceof Error ? err.message : 'connect-failed'
+      useVoiceStore.getState().setError(code)
+      useVoiceStore.getState().setStatus('failed')
+    }
+    return
+  }
+  if (seq !== joinSequence) {
+    // Поздно — успели отменить. Аккуратно сворачиваем эту orphan-комнату,
+    // не трогая глобальное state (мы там и не успели стать «активными»).
+    await disposeRoom(room)
+    void leaveVoiceChannel(channelId).catch(() => {})
+    return
+  }
+
+  installVoiceRoom(room)
+
+  const { muted, deafened } = useVoiceStore.getState()
+  const { inputMode } = useVoiceInputSettings.getState()
+  // PTT режим: всё равно публикуем mic-трек, чтобы unmute по клавише
+  // занимал ~10ms, а не ~100ms re-publish. Сразу выключаем — пользователь
+  // включит через зажатие.
+  const shouldPublish = inputMode === 'push-to-talk' || (!muted && !deafened)
+  if (shouldPublish) {
+    try {
+      await room.localParticipant.setMicrophoneEnabled(true, audioCaptureOptions())
+    } catch (err) {
+      const name = err instanceof Error ? err.name : ''
+      const code = name === 'NotAllowedError' ? 'no-mic-permission' : 'mic-publish-failed'
+      useVoiceStore.getState().setError(code)
+      useVoiceStore.getState().setMuted(true)
+    }
+  }
+  if (inputMode === 'push-to-talk') {
+    await muteMicPublication(room)
+    useVoiceStore.getState().setMuted(true)
+    useVoiceStore.getState().setPttHolding(false)
+  }
+  if (deafened) applyDeafenVolume(room, true)
+
+  // Между mic-publish'ом и сюда тоже могли отменить — финальный check.
+  if (seq !== joinSequence) {
+    await disposeRoom(room)
+    void leaveVoiceChannel(channelId).catch(() => {})
+    return
+  }
+
+  useVoiceStore.getState().setStatus('connected')
+}
+
+async function runLeave(): Promise<void> {
+  await teardownActive()
+}
+
+async function teardownActive(): Promise<void> {
+  const channelId = useVoiceStore.getState().activeChannelId
+  await disposeVoiceRoom()
+  useVoiceStore.getState().reset()
+  if (channelId) {
+    leaveVoiceChannel(channelId).catch(() => {})
+  }
+}
+
+async function muteMicPublication(room: Room): Promise<void> {
+  const pub = room.localParticipant.getTrackPublication(Track.Source.Microphone)
+  if (pub?.track) {
+    try { await pub.mute() } catch (err) { console.warn('[voice] mic mute failed', err) }
+  }
+}

@@ -1,0 +1,1 @@
+{"default":{"identifier":"default","description":"default capability — что окну позволено","local":true,"windows":["main"],"permissions":["core:default","os:allow-platform","os:allow-version","os:allow-os-type","os:allow-arch","notification:default",{"identifier":"shell:allow-open","allow":[{"url":"https://**"},{"url":"http://**"},{"url":"ms-settings:**"}]}]}}

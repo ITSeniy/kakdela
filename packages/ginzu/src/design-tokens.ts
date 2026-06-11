@@ -1,0 +1,61 @@
+export const KD_LIGHT = {
+  bg:         '#e8e0cc',
+  bgDeep:     '#ddd3bd',
+  panel:      '#f0e8d4',
+  panelAlt:   '#e2d8c0',
+  panelHi:    '#d4caaf',
+  panelSoft:  '#ece3ce',
+  border:     'rgba(60, 50, 30, 0.12)',
+  borderSoft: 'rgba(60, 50, 30, 0.06)',
+  text:       '#2a2418',
+  textSoft:   '#5e5440',
+  textMute:   '#8a7e64',
+  accent:     '#5d6f4c',
+  accentDeep: '#43533a',
+  accentSoft: '#b8c2a0',
+  accentBg:   'rgba(93, 111, 76, 0.12)',
+  warm:       '#c87a3a',
+  warmDeep:   '#a55e26',
+  warmSoft:   '#e8c9a0',
+  warmBg:     'rgba(200, 122, 58, 0.12)',
+  online:     '#5d6f4c',
+  idle:       '#d4a14a',
+  dnd:        '#c0432f',
+  danger:     '#c0432f',
+  stage:      '#1a1610',
+  stageText:  '#e8ddc4',
+} as const
+
+export const KD_DARK = {
+  bg:         '#1a1610',
+  bgDeep:     '#13100c',
+  panel:      '#221d15',
+  panelAlt:   '#2a241b',
+  panelHi:    '#332b21',
+  panelSoft:  '#2d271e',
+  border:     'rgba(232, 195, 140, 0.10)',
+  borderSoft: 'rgba(232, 195, 140, 0.05)',
+  text:       '#e8ddc4',
+  textSoft:   '#b8a98a',
+  textMute:   '#7d6e54',
+  accent:     '#9bb083',
+  accentDeep: '#7a9162',
+  accentSoft: '#3d4a32',
+  accentBg:   'rgba(155, 176, 131, 0.14)',
+  warm:       '#e8a05c',
+  warmDeep:   '#c87a3a',
+  warmSoft:   '#5a4128',
+  warmBg:     'rgba(232, 160, 92, 0.12)',
+  online:     '#9bb083',
+  idle:       '#e0b860',
+  dnd:        '#e07060',
+  danger:     '#c87060',
+  stage:      '#0d0a07',
+  stageText:  '#e8ddc4',
+} as const
+
+export type KdTheme = typeof KD_LIGHT
+
+export const KD_FONT   = '"Inter", -apple-system, system-ui, sans-serif' as const
+export const KD_MONO   = '"JetBrains Mono", ui-monospace, monospace' as const
+export const KD_RADIUS = 6 as const

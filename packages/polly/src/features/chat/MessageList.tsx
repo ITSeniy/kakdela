@@ -1,0 +1,307 @@
+import { type MouseEvent, useEffect, useMemo, useRef, useState } from 'react'
+import { useLocation } from 'wouter'
+
+import type { Channel, CustomEmoji, MemberPublic, Message as IMessage } from '@kakdela/ginzu/api-types'
+
+import { DayDivider } from '../../components/DayDivider.js'
+import { openExternal } from '../../lib/host/shell.js'
+import { GreetingBanner } from './GreetingBanner.js'
+import { Message } from './Message.js'
+import { useMessages } from './useMessages.js'
+import type { PendingMessage } from './types.js'
+
+interface MessageListProps {
+  serverId: string
+  channelId: string
+  currentUserId: string | null
+  memberMap: Map<string, MemberPublic>
+  channelMap: Map<string, Channel>
+  /** Map name → custom emoji для рендера `:name:` в markdown. */
+  emojiMap?: ReadonlyMap<string, CustomEmoji>
+  pending: PendingMessage[]
+  /** Когда false — пункт «начать тред» в контекстном меню скрывается. */
+  threadsAllowed?: boolean
+  onEdit: (id: string, content: string) => void
+  onDelete: (id: string) => void
+  onRetry: (nonce: string) => void
+  onMention?: (userId: string) => void
+  onReply: (message: IMessage) => void
+  onAddReaction: (messageId: string, emoji: string) => void
+  onRemoveReaction: (messageId: string, emoji: string) => void
+}
+
+function sameDay(a: string, b: string): boolean {
+  const da = new Date(a)
+  const db = new Date(b)
+  return (
+    da.getFullYear() === db.getFullYear()
+    && da.getMonth() === db.getMonth()
+    && da.getDate() === db.getDate()
+  )
+}
+
+function formatDay(iso: string): string {
+  return new Date(iso).toLocaleDateString('ru', {
+    day: '2-digit', month: '2-digit', year: 'numeric', weekday: 'short',
+  })
+}
+
+function UnreadDivider() {
+  return (
+    <div className="px-4 py-1 flex items-center gap-2">
+      <div className="flex-1 h-px bg-kd-warm" />
+      <span className="text-[9px] text-kd-warm font-bold font-mono uppercase tracking-wider">
+        непрочитанное
+      </span>
+      <div className="flex-1 h-px bg-kd-warm" />
+    </div>
+  )
+}
+
+export function MessageList({
+  serverId, channelId, currentUserId, memberMap, channelMap, emojiMap,
+  pending, threadsAllowed = true,
+  onEdit, onDelete, onRetry, onMention, onReply, onAddReaction, onRemoveReaction,
+}: MessageListProps) {
+  const [, navigate] = useLocation()
+  const { data, fetchNextPage, hasNextPage, isFetchingNextPage } = useMessages(channelId)
+
+  function handleContentClick(e: MouseEvent<HTMLDivElement>) {
+    let node = e.target as HTMLElement | null
+    while (node && node !== e.currentTarget) {
+      const mention = node.dataset.mention
+      if (mention === 'user') {
+        e.preventDefault()
+        const id = node.dataset.id
+        if (id && onMention) onMention(id)
+        return
+      }
+      if (mention === 'channel') {
+        e.preventDefault()
+        const id = node.dataset.id
+        if (id) navigate(`/servers/${serverId}/channels/${id}`)
+        return
+      }
+      if (node.tagName === 'A') {
+        const href = (node as HTMLAnchorElement).getAttribute('href')
+        if (href && /^(https?:|mailto:|tel:|ftp:)/i.test(href)) {
+          e.preventDefault()
+          void openExternal(href)
+          return
+        }
+      }
+      node = node.parentElement
+    }
+  }
+
+  const containerRef = useRef<HTMLDivElement>(null)
+  const topRef = useRef<HTMLDivElement>(null)
+  const bottomRef = useRef<HTMLDivElement>(null)
+  const isAtBottomRef = useRef(true)
+  const prevScrollHeightRef = useRef<number | null>(null)
+  const initialScrolledRef = useRef(false)
+
+  const [snapshotReadAt] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null
+    return window.localStorage.getItem(`kd:read:${channelId}`)
+  })
+
+  const messages = useMemo<IMessage[]>(() => {
+    if (!data) return []
+    const result: IMessage[] = []
+    for (let i = data.pages.length - 1; i >= 0; i -= 1) {
+      const page = data.pages[i]
+      if (page) result.push(...page.messages)
+    }
+    return result
+  }, [data])
+
+  // Track at-bottom + update last-read marker
+  useEffect(() => {
+    const node = bottomRef.current
+    const container = containerRef.current
+    if (!node || !container) return
+    const observer = new IntersectionObserver((entries) => {
+      const entry = entries[0]
+      if (!entry) return
+      isAtBottomRef.current = entry.isIntersecting
+      if (entry.isIntersecting) {
+        const latest = messages[messages.length - 1]
+        if (latest) {
+          window.localStorage.setItem(`kd:read:${channelId}`, latest.createdAt)
+        }
+      }
+    }, { root: container, threshold: 0.1 })
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [channelId, messages])
+
+  // Fetch older when top sentinel hits
+  useEffect(() => {
+    const node = topRef.current
+    const container = containerRef.current
+    if (!node || !container) return
+    const observer = new IntersectionObserver((entries) => {
+      const entry = entries[0]
+      if (!entry?.isIntersecting) return
+      if (!hasNextPage || isFetchingNextPage) return
+      prevScrollHeightRef.current = container.scrollHeight
+      void fetchNextPage()
+    }, { root: container, rootMargin: '200px 0px 0px 0px' })
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [channelId, hasNextPage, isFetchingNextPage, fetchNextPage])
+
+  // Preserve visual position after older messages prepend
+  useEffect(() => {
+    if (prevScrollHeightRef.current === null) return
+    const container = containerRef.current
+    if (!container) return
+    const delta = container.scrollHeight - prevScrollHeightRef.current
+    container.scrollTop = delta
+    prevScrollHeightRef.current = null
+  }, [messages.length])
+
+  // Auto-scroll on new content
+  const lastId = messages[messages.length - 1]?.id ?? null
+  const pendingCount = pending.length
+
+  useEffect(() => {
+    if (!initialScrolledRef.current && messages.length > 0) {
+      bottomRef.current?.scrollIntoView({ behavior: 'auto' })
+      initialScrolledRef.current = true
+      return
+    }
+    if (isAtBottomRef.current) {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }
+  }, [lastId, pendingCount, messages.length])
+
+  useEffect(() => {
+    initialScrolledRef.current = false
+    isAtBottomRef.current = true
+  }, [channelId])
+
+  // Deep-link `#msg:<id>` (например, переход из Inbox): когда сообщение
+  // появляется в DOM — скроллим к нему и подсвечиваем kd-flash.
+  useEffect(() => {
+    function jumpToHashTarget() {
+      const hash = window.location.hash
+      const m = /^#msg:([0-9a-f-]+)$/i.exec(hash)
+      if (!m) return false
+      const el = document.querySelector(`[data-message-id="${m[1]}"]`)
+      if (!el) return false
+      el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      setTimeout(() => {
+        el.classList.add('kd-flash')
+        el.addEventListener('animationend', () => el.classList.remove('kd-flash'), { once: true })
+      }, 100)
+      return true
+    }
+    if (messages.length === 0) return undefined
+    // Сначала пробуем сразу, потом подписываемся на hashchange.
+    jumpToHashTarget()
+    const handler = () => { jumpToHashTarget() }
+    window.addEventListener('hashchange', handler)
+    return () => window.removeEventListener('hashchange', handler)
+  }, [channelId, messages.length])
+
+  const firstUnreadIndex = useMemo(() => {
+    if (!snapshotReadAt) return -1
+    return messages.findIndex((m) =>
+      m.createdAt > snapshotReadAt && m.authorId !== currentUserId,
+    )
+  }, [messages, snapshotReadAt, currentUserId])
+
+  type ItemRow =
+    | { type: 'day'; label: string }
+    | { type: 'unread' }
+    | {
+        type: 'msg'
+        msg: IMessage | PendingMessage
+        prev: IMessage | PendingMessage | null
+        isPending: boolean
+      }
+
+  const rows: ItemRow[] = []
+  let prevForMsg: IMessage | PendingMessage | null = null
+  for (let i = 0; i < messages.length; i += 1) {
+    const m = messages[i]!
+    if (prevForMsg === null || !sameDay(prevForMsg.createdAt, m.createdAt)) {
+      rows.push({ type: 'day', label: formatDay(m.createdAt) })
+    }
+    if (i === firstUnreadIndex) rows.push({ type: 'unread' })
+    rows.push({ type: 'msg', msg: m, prev: prevForMsg, isPending: false })
+    prevForMsg = m
+  }
+  for (let i = 0; i < pending.length; i += 1) {
+    const p = pending[i]!
+    rows.push({ type: 'msg', msg: p, prev: prevForMsg, isPending: true })
+    prevForMsg = p
+  }
+
+  // Фокус на composer того же экрана (он — сосед скролл-контейнера
+  // внутри колонки чата; работает и в ChatScreen, и в ThreadPanel, и в DM).
+  function focusComposer() {
+    const ta = containerRef.current?.parentElement?.querySelector('textarea')
+    ta?.focus()
+  }
+
+  const isEmpty = data !== undefined && rows.length === 0
+  const channelName = channelMap.get(channelId)?.name
+  const userName = currentUserId ? memberMap.get(currentUserId)?.displayName : undefined
+
+  return (
+    <div
+      ref={containerRef}
+      className="flex-1 overflow-y-auto min-h-0 py-2"
+      onClick={handleContentClick}
+    >
+      <div ref={topRef} className="h-1" />
+      {isFetchingNextPage && (
+        <div className="text-center py-2 text-[10px] text-kd-text-mute font-mono">
+          загружаем…
+        </div>
+      )}
+      {isEmpty && (
+        <GreetingBanner
+          userName={userName}
+          subtitle={
+            channelName
+              ? `в #${channelName} пока тихо · 0 сообщений · стань первым`
+              : 'здесь пока тихо · 0 сообщений · стань первым'
+          }
+          cta={{ label: 'написать ⏵', onClick: focusComposer }}
+        />
+      )}
+      {rows.map((row, idx) => {
+        if (row.type === 'day') return <DayDivider key={`day-${idx}`} label={row.label} />
+        if (row.type === 'unread') return <UnreadDivider key={`unread-${idx}`} />
+        const m = row.msg
+        const key = row.isPending ? (m as PendingMessage)._nonce : m.id
+        return (
+          <Message
+            key={key}
+            message={m}
+            prev={row.prev}
+            member={memberMap.get(m.authorId)}
+            isOwn={m.authorId === currentUserId}
+            currentUserId={currentUserId}
+            pendingStatus={row.isPending ? (m as PendingMessage)._pending : undefined}
+            memberMap={memberMap}
+            channelMap={channelMap}
+            emojiMap={emojiMap}
+            threadsAllowed={threadsAllowed}
+            onEdit={onEdit}
+            onDelete={onDelete}
+            onRetry={row.isPending ? () => onRetry((m as PendingMessage)._nonce) : undefined}
+            onReply={onReply}
+            onAddReaction={onAddReaction}
+            onRemoveReaction={onRemoveReaction}
+          />
+        )
+      })}
+      <div ref={bottomRef} className="h-1" />
+    </div>
+  )
+}

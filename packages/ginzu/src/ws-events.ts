@@ -1,0 +1,89 @@
+import { z } from 'zod'
+
+import { UserSchema, ServerSchema, MessageSchema, ServerMemberSchema } from './api-types.js'
+import type { User, Server, Message, ServerMember } from './api-types.js'
+
+export type ServerEvent =
+  | { t: 'ready'; user: User; servers: Server[] }
+  | { t: 'ping' }
+  | { t: 'pong' }
+  | { t: 'msg.new'; channelId: string; message: Message }
+  | { t: 'msg.edit'; channelId: string; messageId: string; content: string; editedAt: string }
+  | { t: 'msg.delete'; channelId: string; messageId: string }
+  | { t: 'presence'; userId: string; status: User['status'] }
+  | { t: 'typing'; channelId: string; userId: string }
+  | { t: 'voice.join'; channelId: string; userId: string }
+  | { t: 'voice.leave'; channelId: string; userId: string }
+  | { t: 'voice.state'; channelId: string; userId: string; muted: boolean; screen: boolean }
+  | { t: 'member.join'; member: ServerMember }
+  | { t: 'member.leave'; userId: string }
+  | { t: 'reaction.add'; channelId: string; messageId: string; userId: string; emoji: string }
+  | { t: 'reaction.remove'; channelId: string; messageId: string; userId: string; emoji: string }
+  | { t: 'dm.new'; channelId: string; withUserId: string }
+  | { t: 'mention'; messageId: string; channelId: string; mentionedUserId: string; mentionType: 'user' | 'everyone' | 'here' }
+  | { t: 'user.update'; userId: string; displayName: string; avatarUrl: string | null; customStatus: string | null }
+  | { t: 'thread.new'; parentChannelId: string; parentMessageId: string; threadChannelId: string; name: string }
+  | { t: 'thread.archive'; parentChannelId: string; threadChannelId: string; archivedAt: string }
+
+export type ClientEvent =
+  | { t: 'hello'; token: string }
+  | { t: 'ping' }
+  | { t: 'pong' }
+  | { t: 'typing'; channelId: string }
+  | { t: 'presence'; status: 'online' | 'idle' | 'dnd' }
+
+const uuid = z.string().uuid()
+
+export const ServerEventSchema = z.discriminatedUnion('t', [
+  z.object({ t: z.literal('ready'), user: UserSchema, servers: z.array(ServerSchema) }),
+  z.object({ t: z.literal('ping') }),
+  z.object({ t: z.literal('pong') }),
+  z.object({ t: z.literal('msg.new'), channelId: uuid, message: MessageSchema }),
+  z.object({ t: z.literal('msg.edit'), channelId: uuid, messageId: uuid, content: z.string(), editedAt: z.string() }),
+  z.object({ t: z.literal('msg.delete'), channelId: uuid, messageId: uuid }),
+  z.object({ t: z.literal('presence'), userId: uuid, status: UserSchema.shape.status }),
+  z.object({ t: z.literal('typing'), channelId: uuid, userId: uuid }),
+  z.object({ t: z.literal('voice.join'), channelId: uuid, userId: uuid }),
+  z.object({ t: z.literal('voice.leave'), channelId: uuid, userId: uuid }),
+  z.object({ t: z.literal('voice.state'), channelId: uuid, userId: uuid, muted: z.boolean(), screen: z.boolean() }),
+  z.object({ t: z.literal('member.join'), member: ServerMemberSchema }),
+  z.object({ t: z.literal('member.leave'), userId: uuid }),
+  z.object({ t: z.literal('reaction.add'), channelId: uuid, messageId: uuid, userId: uuid, emoji: z.string() }),
+  z.object({ t: z.literal('reaction.remove'), channelId: uuid, messageId: uuid, userId: uuid, emoji: z.string() }),
+  z.object({ t: z.literal('dm.new'), channelId: uuid, withUserId: uuid }),
+  z.object({
+    t: z.literal('mention'),
+    messageId: uuid,
+    channelId: uuid,
+    mentionedUserId: uuid,
+    mentionType: z.enum(['user', 'everyone', 'here']),
+  }),
+  z.object({
+    t: z.literal('user.update'),
+    userId: uuid,
+    displayName: z.string(),
+    avatarUrl: z.string().nullable(),
+    customStatus: z.string().nullable(),
+  }),
+  z.object({
+    t: z.literal('thread.new'),
+    parentChannelId: uuid,
+    parentMessageId: uuid,
+    threadChannelId: uuid,
+    name: z.string(),
+  }),
+  z.object({
+    t: z.literal('thread.archive'),
+    parentChannelId: uuid,
+    threadChannelId: uuid,
+    archivedAt: z.string(),
+  }),
+])
+
+export const ClientEventSchema = z.discriminatedUnion('t', [
+  z.object({ t: z.literal('hello'), token: z.string().min(1).max(2048) }),
+  z.object({ t: z.literal('ping') }),
+  z.object({ t: z.literal('pong') }),
+  z.object({ t: z.literal('typing'), channelId: uuid }),
+  z.object({ t: z.literal('presence'), status: z.enum(['online', 'idle', 'dnd']) }),
+])

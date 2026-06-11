@@ -1,0 +1,312 @@
+import { Buffer } from 'node:buffer'
+
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3'
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
+import { and, eq, inArray } from 'drizzle-orm'
+import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod'
+import probe from 'probe-image-size'
+import { z } from 'zod'
+
+import {
+  ErrorBodySchema,
+  FinalizeResponseSchema,
+  PresignRequestSchema,
+  PresignResponseSchema,
+  type Attachment,
+  type AttachmentKind,
+} from '@kakdela/ginzu/api-types'
+
+import { files } from '../db/schema.js'
+import { db } from '../lib/db.js'
+import {
+  EXTENSION_FOR_TYPE,
+  type AllowedMimeType,
+  checkMagicBytes,
+  isAllowedMime,
+} from '../lib/file-validation.js'
+import { S3_BUCKET, S3_ENDPOINT, s3 } from '../lib/s3.js'
+import { uuidv7 } from '../lib/uuidv7.js'
+
+const PRESIGN_TTL_SECONDS = 300
+
+// 64 KB is plenty: file-type needs <100 bytes for every format we accept,
+// and probe-image-size for non-streamed buffers also reads headers only.
+const MAGIC_PREFIX_BYTES = 64 * 1024
+
+function kindFromMime(mime: string): AttachmentKind {
+  if (mime.startsWith('image/')) return 'image'
+  if (mime.startsWith('video/')) return 'video'
+  if (mime.startsWith('audio/')) return 'audio'
+  if (mime === 'application/pdf') return 'pdf'
+  if (mime === 'text/plain') return 'text'
+  if (mime === 'application/zip') return 'archive'
+  return 'other'
+}
+
+function publicUrlFor(key: string): string {
+  return `${S3_ENDPOINT}/${S3_BUCKET}/${key}`
+}
+
+export function toAttachment(row: {
+  id: string
+  key: string
+  originalName: string
+  contentType: string
+  sizeBytes: number
+  width: number | null
+  height: number | null
+}): Attachment {
+  return {
+    id:           row.id,
+    url:          publicUrlFor(row.key),
+    kind:         kindFromMime(row.contentType),
+    contentType:  row.contentType,
+    originalName: row.originalName,
+    sizeBytes:    row.sizeBytes,
+    width:        row.width,
+    height:       row.height,
+  }
+}
+
+async function readPrefix(key: string, bytes: number): Promise<Uint8Array> {
+  const res = await s3.send(new GetObjectCommand({
+    Bucket: S3_BUCKET,
+    Key: key,
+    Range: `bytes=0-${bytes - 1}`,
+  }))
+  const body = res.Body
+  if (!body) throw new Error('no body in GetObject response')
+  // AWS SDK v3 Body is a Readable stream in Node.
+  const chunks: Buffer[] = []
+  for await (const chunk of body as AsyncIterable<Buffer | Uint8Array>) {
+    chunks.push(chunk instanceof Buffer ? chunk : Buffer.from(chunk))
+  }
+  return Uint8Array.from(Buffer.concat(chunks))
+}
+
+async function deleteObject(key: string): Promise<void> {
+  try {
+    await s3.send(new DeleteObjectCommand({ Bucket: S3_BUCKET, Key: key }))
+  } catch (err) {
+    // Best-effort cleanup; log but don't fail the finalize response.
+    console.warn('[files] failed to delete orphaned object', key, err)
+  }
+}
+
+export const filesRoutes: FastifyPluginAsyncZod = async (app) => {
+  // ───── POST /api/files/presign ─────
+  //
+  // Шаг 1 двухфазного upload'а. Создаёт запись в `files` со статусом
+  // `pending` и возвращает presigned PUT URL для прямого upload'а в MinIO.
+  //
+  // Кладём всё под `public/<userId>/<fileId>.<ext>` — этот префикс настроен
+  // на анонимный download (см. docker-compose.dev.yml → `mc anonymous set
+  // download local/kakdela/public`). На каждый файл выдаём новый uuidv7 —
+  // нет коллизий, можно отслеживать историю по timestamp'у в id.
+  app.post(
+    '/files/presign',
+    {
+      preHandler: app.authenticate,
+      schema: {
+        body: PresignRequestSchema,
+        response: {
+          200: PresignResponseSchema,
+          401: ErrorBodySchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const { contentType, size, originalName } = req.body
+      const userId = req.authUser!.id
+
+      const ext = EXTENSION_FOR_TYPE[contentType as AllowedMimeType] ?? 'bin'
+      const fileId = uuidv7()
+      const key = `public/${userId}/${fileId}.${ext}`
+
+      await db.insert(files).values({
+        id:           fileId,
+        ownerId:      userId,
+        key,
+        originalName: originalName ?? `file.${ext}`,
+        contentType,
+        sizeBytes:    size,
+        status:       'pending',
+      })
+
+      const command = new PutObjectCommand({
+        Bucket: S3_BUCKET,
+        Key: key,
+        ContentType: contentType,
+        ContentLength: size,
+      })
+
+      const uploadUrl = await getSignedUrl(s3, command, {
+        expiresIn: PRESIGN_TTL_SECONDS,
+        // Иначе SDK подписывает host-заголовок, который браузер вычисляет
+        // отдельно, и MinIO бьёт SignatureMismatch.
+        unhoistableHeaders: new Set(['host']),
+      })
+
+      return reply.code(200).send({ fileId, uploadUrl, publicUrl: publicUrlFor(key) })
+    },
+  )
+
+  // ───── POST /api/files/:id/finalize ─────
+  //
+  // Шаг 2. Клиент дёрнул PUT в MinIO; теперь сервер должен:
+  //   1. Скачать первые ~64 KB
+  //   2. Сравнить magic bytes с заявленным contentType (без доверия клиенту)
+  //   3. Для картинок — прочитать dimensions через probe-image-size
+  //   4. Обновить status='ready'. Иначе — удалить объект и пометить 'failed'.
+  app.post(
+    '/files/:id/finalize',
+    {
+      preHandler: app.authenticate,
+      schema: {
+        params: z.object({ id: z.string().uuid() }),
+        response: {
+          200: FinalizeResponseSchema,
+          401: ErrorBodySchema,
+          403: ErrorBodySchema,
+          404: ErrorBodySchema,
+          422: ErrorBodySchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const { id } = req.params
+      const userId = req.authUser!.id
+
+      const rows = await db.select().from(files).where(eq(files.id, id)).limit(1)
+      const file = rows[0]
+      if (!file) return reply.code(404).send({ error: { code: 'file-not-found', message: 'file not found' } })
+      if (file.ownerId !== userId) {
+        return reply.code(403).send({ error: { code: 'forbidden', message: 'not the owner of this file' } })
+      }
+      if (file.status === 'ready') {
+        // Idempotent — повторный finalize по тому же id вернёт уже готовый объект.
+        return reply.code(200).send({ attachment: toAttachment(file) })
+      }
+
+      if (!isAllowedMime(file.contentType)) {
+        await deleteObject(file.key)
+        await db.update(files).set({ status: 'failed' }).where(eq(files.id, id))
+        return reply.code(422).send({ error: { code: 'unsupported-type', message: 'content type not allowed' } })
+      }
+
+      let prefix: Uint8Array
+      try {
+        prefix = await readPrefix(file.key, MAGIC_PREFIX_BYTES)
+      } catch (err) {
+        req.log.warn({ err, fileId: id }, '[files] readPrefix failed during finalize')
+        return reply.code(422).send({ error: { code: 'upload-incomplete', message: 'could not read uploaded object' } })
+      }
+
+      const magic = await checkMagicBytes(file.contentType, prefix)
+      if (!magic.ok) {
+        await deleteObject(file.key)
+        await db.update(files).set({ status: 'failed' }).where(eq(files.id, id))
+        req.log.warn({
+          fileId: id,
+          declared: file.contentType,
+          detected: 'detectedMime' in magic ? magic.detectedMime : undefined,
+          reason: magic.reason,
+        }, '[files] magic-bytes mismatch — refusing upload')
+        return reply.code(422).send({
+          error: {
+            code: 'magic-bytes-mismatch',
+            message: `file content does not match declared type ${file.contentType}`,
+          },
+        })
+      }
+
+      let width: number | null = null
+      let height: number | null = null
+      if (file.contentType.startsWith('image/')) {
+        try {
+          const dims = probe.sync(Buffer.from(prefix))
+          if (dims && dims.width > 0 && dims.height > 0) {
+            width = dims.width
+            height = dims.height
+          }
+        } catch (err) {
+          req.log.debug({ err, fileId: id }, '[files] probe-image-size failed (non-fatal)')
+        }
+      }
+
+      const updated = await db
+        .update(files)
+        .set({ status: 'ready', width, height })
+        .where(eq(files.id, id))
+        .returning()
+      const fresh = updated[0]
+      if (!fresh) throw new Error('update files returned no rows')
+
+      return reply.code(200).send({ attachment: toAttachment(fresh) })
+    },
+  )
+}
+
+// ───── Helpers exported for other routes ─────
+
+export async function attachFilesToMessage(opts: {
+  fileIds: string[]
+  ownerId: string
+  messageId: string
+}): Promise<Attachment[]> {
+  const { fileIds, ownerId, messageId } = opts
+  if (fileIds.length === 0) return []
+
+  const rows = await db
+    .select()
+    .from(files)
+    .where(and(
+      inArray(files.id, fileIds),
+      eq(files.ownerId, ownerId),
+      eq(files.status, 'ready'),
+    ))
+
+  // Order by original input — keep client-supplied order so previews and
+  // messages render in the same sequence.
+  const byId = new Map(rows.map((r) => [r.id, r]))
+  const ordered = fileIds
+    .map((id) => byId.get(id))
+    .filter((r): r is (typeof rows)[number] => r !== undefined)
+
+  // Reject if some files weren't found / aren't owned / aren't ready.
+  if (ordered.length !== fileIds.length) {
+    const reason = new Error('one or more attachments are unknown or not yet ready')
+    Object.assign(reason, { statusCode: 422, code: 'invalid-attachments' })
+    throw reason
+  }
+
+  // Reject if any of these files are already attached to another message.
+  const reused = ordered.find((r) => r.messageId !== null && r.messageId !== messageId)
+  if (reused) {
+    const reason = new Error('attachment is already linked to another message')
+    Object.assign(reason, { statusCode: 422, code: 'attachment-reused' })
+    throw reason
+  }
+
+  await db.update(files).set({ messageId }).where(inArray(files.id, fileIds))
+
+  return ordered.map(toAttachment)
+}
+
+export async function loadAttachmentsForMessages(messageIds: string[]): Promise<Map<string, Attachment[]>> {
+  const out = new Map<string, Attachment[]>()
+  if (messageIds.length === 0) return out
+  const rows = await db
+    .select()
+    .from(files)
+    .where(and(inArray(files.messageId, messageIds), eq(files.status, 'ready')))
+  for (const r of rows) {
+    if (!r.messageId) continue
+    const list = out.get(r.messageId) ?? []
+    list.push(toAttachment(r))
+    out.set(r.messageId, list)
+  }
+  // Stable order — by file id (uuidv7, time-ordered).
+  for (const list of out.values()) list.sort((a, b) => a.id.localeCompare(b.id))
+  return out
+}

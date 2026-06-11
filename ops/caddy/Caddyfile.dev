@@ -1,0 +1,28 @@
+# Dev Caddyfile. В разработке клиент Tauri ходит напрямую на localhost:3001,
+# поэтому Caddy в dev необязателен. Этот файл — образец для прод-деплоя.
+#
+# Использование (опционально):
+#   caddy run --config Caddyfile.dev
+
+:8080 {
+	# REST API
+	handle /api/* {
+		reverse_proxy localhost:3001
+	}
+
+	# WebSocket
+	handle /ws {
+		reverse_proxy localhost:3001
+	}
+
+	# Файлы (через speedy → MinIO presigned)
+	handle /files/* {
+		reverse_proxy localhost:3001
+	}
+
+	# LiveKit signaling (только WSS; UDP-медиа идёт напрямую)
+	handle /livekit/* {
+		uri strip_prefix /livekit
+		reverse_proxy localhost:7880
+	}
+}

@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"/>
+<title>Как дела? · варианты дизайна</title>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet"/>
+<style>
+  html, body { margin: 0; padding: 0; background: #f0eee9; font-family: 'Inter', -apple-system, system-ui, sans-serif; }
+  #root { min-height: 100vh; }
+</style>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="common.jsx"></script>
+<script type="text/babel" src="variant-a.jsx"></script>
+<script type="text/babel" src="variant-b.jsx"></script>
+<script type="text/babel" src="variant-c.jsx"></script>
+<script type="text/babel" src="variant-d.jsx"></script>
+
+<script type="text/babel" data-presets="react">
+const W = 1360, H = 820;
+
+function Note({ children }) {
+  return (
+    <DCPostIt width={260}>{children}</DCPostIt>
+  );
+}
+
+function App() {
+  return (
+    <DesignCanvas
+      title="«Как дела?» · уютный self-hosted мессенджер"
+      subtitle="4 направления визуального и структурного дизайна · 2 экрана каждое (чат + голос с демонстрацией)"
+    >
+      <DCSection
+        id="kuhnya"
+        title="A · Кухня"
+        subtitle="Тёплый крем + терракота · 3-панельная классика · мягкие тени, скругления 16px"
+      >
+        <DCArtboard id="a-chat" label="чат · #болталка" width={W} height={H}>
+          <VariantA_Chat/>
+        </DCArtboard>
+        <DCArtboard id="a-voice" label="голосовой · у камина" width={W} height={H}>
+          <VariantA_Voice/>
+        </DCArtboard>
+        <Note>
+          <b>Идея:</b> утренняя кухня. Баннер-приветствие сверху чата, голос-канал зовётся «у камина», статусы — «варит кофе» / «пьёт какао».
+          <br/><br/>
+          <b>Палитра:</b> #f4ebde фон, #c96442 терракотовый акцент, оливковый «онлайн» #7d9268.
+        </Note>
+      </DCSection>
+
+      <DCSection
+        id="kamin"
+        title="B · Камин"
+        subtitle="Глубокий тёплый dark · top-bar с серверами вверху · охровый акцент"
+      >
+        <DCArtboard id="b-chat" label="чат · вечерний" width={W} height={H}>
+          <VariantB_Chat/>
+        </DCArtboard>
+        <DCArtboard id="b-voice" label="голосовой · мозаика" width={W} height={H}>
+          <VariantB_Voice/>
+        </DCArtboard>
+        <Note>
+          <b>Идея:</b> вечер у огня. Серверы переехали наверх горизонтальной полосой — освобождает левый край для каналов. Дарк не агрессивный, основан на тёмно-коричневом.
+          <br/><br/>
+          <b>Палитра:</b> #1f1812 фон, #e8a05c охра, текст кремовый #f4ebde.
+        </Note>
+      </DCSection>
+
+      <DCSection
+        id="chayhana"
+        title="C · Чайхана"
+        subtitle="Светлый молочный · плавающие карточки · крупные скругления 22px · тише и просторнее"
+      >
+        <DCArtboard id="c-chat" label="чат · пузыри" width={W} height={H}>
+          <VariantC_Chat/>
+        </DCArtboard>
+        <DCArtboard id="c-voice" label="голосовой · с чатом" width={W} height={H}>
+          <VariantC_Voice/>
+        </DCArtboard>
+        <Note>
+          <b>Идея:</b> чайная. Каждая панель — отдельная карточка с тенью на молочном фоне. Сообщения пузырями (мои справа), уйти из звонка — «уйти тихо». Сервер-дочка слева не как «рельса», а как мини-карточка.
+          <br/><br/>
+          <b>Палитра:</b> #fbf5ec фон, #d68b6c роза-терракота, ивовый «онлайн» #8aa472.
+        </Note>
+      </DCSection>
+
+      <DCSection
+        id="sherst"
+        title="D · Шерсть"
+        subtitle="Овсяный фон, мшистый зелёный, моноширинные акценты · плотная информация"
+      >
+        <DCArtboard id="d-chat" label="чат · компактный" width={W} height={H}>
+          <VariantD_Chat/>
+        </DCArtboard>
+        <DCArtboard id="d-voice" label="голосовой · 5-в-ряд" width={W} height={H}>
+          <VariantD_Voice/>
+        </DCArtboard>
+        <Note>
+          <b>Идея:</b> вязаный домашний свитер: тёплый овёс + мох. Самая плотная вёрстка — короткие сообщения «слитные» (без аватара), участники в группах «хозяева / свои / друзья», моноширинные метки и таймкоды.
+          <br/><br/>
+          <b>Палитра:</b> #e8e0cc овёс, #5d6f4c мох, тёплый рыжик #c87a3a для предупреждений.
+        </Note>
+      </DCSection>
+
+      <DCSection
+        id="meta"
+        title="Заметки и наблюдения"
+        subtitle="Общие приёмы и куда двигаться дальше"
+      >
+        <Note>
+          <b>Общая ДНК всех 4х:</b><br/>
+          • тёплая палитра без саркастической мульти-цветности<br/>
+          • дружелюбные подписи и каналы («у камина», «как-дела», «настроение»)<br/>
+          • никакого «server status», админ-вкладок и тех-байков — выглядит как мессенджер для своих<br/>
+          • демонстрация экрана — главный экран в звонке, не модалка
+        </Note>
+        <Note>
+          <b>Что варьируется между вариантами:</b><br/>
+          1. Расположение серверов (рельса слева / топ-бар / док-карточка / тонкая рельса)<br/>
+          2. Подача сообщений (классика / классика-дарк / пузыри / компактные строки)<br/>
+          3. Стиль шеринга (тайлы вокруг шеринга / 2-в-ряд+низ / сетка с боковым чатом / 2-в-ряд+5-снизу)<br/>
+          4. Плотность (свободно → плотно от A к D)
+        </Note>
+        <Note>
+          <b>Следующие шаги (на выбор):</b><br/>
+          • смешать любимые приёмы из 2-3 вариантов в финальный<br/>
+          • показать тёмную версию для «Кухни» / светлую для «Камина»<br/>
+          • добавить экраны: настройки сервера, профиль, личка, onboarding<br/>
+          • перенести в кликабельный прототип с переключением каналов
+        </Note>
+      </DCSection>
+    </DesignCanvas>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>

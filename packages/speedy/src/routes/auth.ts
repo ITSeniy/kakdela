@@ -1,0 +1,285 @@
+import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod'
+import { and, eq, gt, isNull, lt, or, sql } from 'drizzle-orm'
+import { z } from 'zod'
+
+import {
+  AuthResponseSchema,
+  ErrorBodySchema,
+  LoginRequestSchema,
+  RefreshRequestSchema,
+  RegisterRequestSchema,
+  UserSchema,
+} from '@kakdela/ginzu/api-types'
+
+import { hashPassword, verifyAgainstFakeHash, verifyPassword } from '../auth/passwords.js'
+import {
+  hashRefreshToken,
+  issueAccessToken,
+  issueRefreshToken,
+  verifyRefreshToken,
+} from '../auth/tokens.js'
+import { db } from '../lib/db.js'
+import { invites, serverMembers, sessions, users } from '../db/schema.js'
+import { env } from '../env.js'
+
+const REFRESH_COOKIE = 'kd_refresh'
+
+type DbUser = typeof users.$inferSelect
+
+function publicUser(row: DbUser) {
+  return {
+    id: row.id,
+    username: row.username,
+    displayName: row.displayName,
+    avatarUrl: row.avatarUrl,
+    status: row.status,
+    customStatus: row.customStatus,
+  }
+}
+
+function refreshCookieOptions(expiresAt: Date) {
+  return {
+    path: '/api/auth',
+    httpOnly: true,
+    sameSite: 'strict' as const,
+    secure: env.NODE_ENV === 'production',
+    expires: expiresAt,
+  }
+}
+
+function clientMeta(req: { ip: string; headers: Record<string, string | string[] | undefined> }) {
+  const ua = req.headers['user-agent']
+  return {
+    ipAddress: req.ip,
+    userAgent: typeof ua === 'string' ? ua.slice(0, 512) : null,
+  }
+}
+
+async function issueSession(userId: string, ipAddress: string, userAgent: string | null) {
+  const accessToken = await issueAccessToken(userId)
+  const refresh = await issueRefreshToken(userId)
+  await db.insert(sessions).values({
+    userId,
+    refreshTokenHash: refresh.hash,
+    expiresAt: refresh.expiresAt,
+    ipAddress,
+    userAgent,
+  })
+  return { accessToken, refresh }
+}
+
+export const authRoutes: FastifyPluginAsyncZod = async (app) => {
+  // ───── POST /api/auth/register ─────
+  app.post(
+    '/auth/register',
+    {
+      config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
+      schema: {
+        body: RegisterRequestSchema,
+        response: {
+          200: AuthResponseSchema,
+          400: ErrorBodySchema,
+          409: ErrorBodySchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const { inviteCode: rawCode, username, displayName, email, password } = req.body
+      const inviteCode = rawCode.toLowerCase().replace(/[^a-z0-9]/g, '')
+
+      // Atomically claim the invite — same guard as POST /api/invites/:code/accept.
+      // Registration and invite claim happen together: if the user insert fails we
+      // roll back nothing (invite use_count was already incremented).  For a
+      // friends-only app with 15-20 users this is an acceptable trade-off; a full
+      // transactional approach would require wrapping everything in a DB transaction.
+      const claimedInvite = await db
+        .update(invites)
+        .set({ useCount: sql`${invites.useCount} + 1` })
+        .where(
+          and(
+            eq(invites.code, inviteCode),
+            eq(invites.revoked, false),
+            or(isNull(invites.expiresAt), gt(invites.expiresAt, sql`NOW()`)),
+            or(isNull(invites.maxUses), lt(invites.useCount, invites.maxUses)),
+          ),
+        )
+        .returning({ serverId: invites.serverId })
+
+      const inviteRow = claimedInvite[0]
+      if (!inviteRow) {
+        const exists = await db
+          .select({ code: invites.code })
+          .from(invites)
+          .where(eq(invites.code, inviteCode))
+          .limit(1)
+        if (!exists[0]) {
+          return reply.code(400).send({ error: { code: 'invite-not-found', message: 'invite code not found' } })
+        }
+        return reply.code(400).send({ error: { code: 'invite-expired', message: 'invite is expired, revoked, or exhausted' } })
+      }
+
+      const passwordHash = await hashPassword(password)
+
+      let inserted: DbUser
+      try {
+        const rows = await db
+          .insert(users)
+          .values({ username, displayName, email, passwordHash })
+          .returning()
+        const row = rows[0]
+        if (!row) throw new Error('insert into users returned no rows')
+        inserted = row
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        if (msg.includes('users_username_unique')) {
+          return reply.code(409).send({ error: { code: 'username-taken', message: 'username already in use' } })
+        }
+        if (msg.includes('users_email_unique')) {
+          return reply.code(409).send({ error: { code: 'email-taken', message: 'email already in use' } })
+        }
+        throw err
+      }
+
+      await db.insert(serverMembers).values({ serverId: inviteRow.serverId, userId: inserted.id }).onConflictDoNothing()
+
+      const { ipAddress, userAgent } = clientMeta(req)
+      const { accessToken, refresh } = await issueSession(inserted.id, ipAddress, userAgent)
+
+      void reply.setCookie(REFRESH_COOKIE, refresh.token, refreshCookieOptions(refresh.expiresAt))
+      return reply.code(200).send({ accessToken, user: publicUser(inserted) })
+    },
+  )
+
+  // ───── POST /api/auth/login ─────
+  app.post(
+    '/auth/login',
+    {
+      config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
+      schema: {
+        body: LoginRequestSchema,
+        response: {
+          200: AuthResponseSchema,
+          401: ErrorBodySchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const { email, password } = req.body
+      const rows = await db.select().from(users).where(eq(users.email, email)).limit(1)
+      const user = rows[0]
+
+      if (!user) {
+        // Чтобы тайминг был тот же, что и для неверного пароля,
+        // всегда выполняем argon2.verify хотя бы один раз.
+        await verifyAgainstFakeHash(password)
+        return reply.code(401).send({ error: { code: 'invalid-credentials', message: 'invalid email or password' } })
+      }
+
+      const ok = await verifyPassword(user.passwordHash, password)
+      if (!ok) {
+        return reply.code(401).send({ error: { code: 'invalid-credentials', message: 'invalid email or password' } })
+      }
+
+      const { ipAddress, userAgent } = clientMeta(req)
+      const { accessToken, refresh } = await issueSession(user.id, ipAddress, userAgent)
+
+      void reply.setCookie(REFRESH_COOKIE, refresh.token, refreshCookieOptions(refresh.expiresAt))
+      return reply.code(200).send({ accessToken, user: publicUser(user) })
+    },
+  )
+
+  // ───── POST /api/auth/refresh ─────
+  app.post(
+    '/auth/refresh',
+    {
+      schema: {
+        body: RefreshRequestSchema.nullish(),
+        response: {
+          200: AuthResponseSchema,
+          401: ErrorBodySchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const cookieToken = req.cookies[REFRESH_COOKIE]
+      const bodyToken = req.body?.refreshToken
+      const token = cookieToken ?? bodyToken
+      if (!token) {
+        return reply.code(401).send({ error: { code: 'unauthorized', message: 'no refresh token' } })
+      }
+
+      const verified = await verifyRefreshToken(token)
+      if (!verified.ok) {
+        return reply.code(401).send({ error: { code: verified.reason, message: verified.reason } })
+      }
+
+      const tokenHash = hashRefreshToken(token)
+      // Атомарно удаляем старую сессию — если её нет, значит токен уже
+      // ротирован/отозван и принимать его нельзя.
+      const deleted = await db
+        .delete(sessions)
+        .where(eq(sessions.refreshTokenHash, tokenHash))
+        .returning({ id: sessions.id, userId: sessions.userId })
+      if (deleted.length === 0) {
+        return reply.code(401).send({ error: { code: 'session-revoked', message: 'session no longer valid' } })
+      }
+
+      const userRows = await db.select().from(users).where(eq(users.id, verified.payload.sub)).limit(1)
+      const user = userRows[0]
+      if (!user) {
+        return reply.code(401).send({ error: { code: 'unauthorized', message: 'user gone' } })
+      }
+
+      const { ipAddress, userAgent } = clientMeta(req)
+      const { accessToken, refresh } = await issueSession(user.id, ipAddress, userAgent)
+
+      void reply.setCookie(REFRESH_COOKIE, refresh.token, refreshCookieOptions(refresh.expiresAt))
+      return reply.code(200).send({ accessToken, user: publicUser(user) })
+    },
+  )
+
+  // ───── POST /api/auth/logout ─────
+  app.post(
+    '/auth/logout',
+    {
+      schema: {
+        response: { 204: z.null() },
+      },
+    },
+    async (req, reply) => {
+      const token = req.cookies[REFRESH_COOKIE]
+      if (token) {
+        const tokenHash = hashRefreshToken(token)
+        await db.delete(sessions).where(eq(sessions.refreshTokenHash, tokenHash))
+      }
+      void reply.clearCookie(REFRESH_COOKIE, { path: '/api/auth' })
+      return reply.code(204).send(null)
+    },
+  )
+
+  // ───── GET /api/auth/me ─────
+  app.get(
+    '/auth/me',
+    {
+      preHandler: app.authenticate,
+      schema: {
+        response: {
+          200: UserSchema,
+          401: ErrorBodySchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const userId = req.authUser?.id
+      if (!userId) {
+        return reply.code(401).send({ error: { code: 'unauthorized', message: 'not authenticated' } })
+      }
+      const rows = await db.select().from(users).where(eq(users.id, userId)).limit(1)
+      const user = rows[0]
+      if (!user) {
+        return reply.code(401).send({ error: { code: 'unauthorized', message: 'user gone' } })
+      }
+      return reply.code(200).send(publicUser(user))
+    },
+  )
+}

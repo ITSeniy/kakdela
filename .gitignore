@@ -1,0 +1,22 @@
+# Зависимости
+node_modules/
+
+# Секреты — только .env.example идёт в репозиторий
+.env
+.env.local
+.env.*.local
+
+# Сборка
+dist/
+packages/polly/src-tauri/target/
+*.tsbuildinfo
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Логи
+*.log
+npm-debug.log*

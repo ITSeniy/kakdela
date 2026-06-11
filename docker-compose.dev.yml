@@ -1,0 +1,91 @@
+# Локальное dev-окружение: postgres, redis, minio, livekit.
+# Speedy (backend) и Polly (desktop) запускаются хост-машиной (не в контейнере),
+# чтобы быстрый hot reload работал нормально.
+#
+# Запуск:   pnpm docker:dev
+# Стоп:     pnpm docker:down
+# Сброс:    pnpm docker:reset  (стирает данные!)
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: kd-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: kakdela
+      POSTGRES_PASSWORD: kakdela_dev
+      POSTGRES_DB: kakdela
+    ports:
+      - "5433:5432"
+    volumes:
+      - kd-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kakdela"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: kd-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - kd-redis:/data
+
+  minio:
+    image: minio/minio:latest
+    container_name: kd-minio
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: kakdela
+      MINIO_ROOT_PASSWORD: kakdela_dev_secret
+    ports:
+      - "9000:9000"  # S3 API
+      - "9001:9001"  # web UI: http://localhost:9001
+    command: server /data --console-address ":9001"
+    volumes:
+      - kd-minio:/data
+
+  # Создаём bucket автоматически при первом старте
+  minio-init:
+    image: minio/mc:latest
+    container_name: kd-minio-init
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      sleep 3 &&
+      mc alias set local http://minio:9000 kakdela kakdela_dev_secret &&
+      mc mb -p local/kakdela || true &&
+      mc anonymous set download local/kakdela/public || true &&
+      mc mb -p local/kakdela-emoji || true &&
+      mc anonymous set download local/kakdela-emoji || true &&
+      echo 'MinIO bucket ready'
+      "
+
+  livekit:
+    image: livekit/livekit-server:latest
+    container_name: kd-livekit
+    restart: unless-stopped
+    command: ["--config", "/etc/livekit.yaml", "--dev"]
+    volumes:
+      - ./ops/livekit/livekit.yaml:/etc/livekit.yaml:ro
+    # На Linux Docker host.docker.internal не резолвится без этого хака.
+    # Нужно, чтобы LiveKit достучался до speedy с webhook'ами (T-032).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # ВАЖНО: для прод-деплоя нужен host network или явный проброс UDP-диапазона.
+    # В dev — на localhost UDP работает нативно.
+    ports:
+      - "7880:7880"   # signaling (WSS)
+      - "7881:7881"   # TURN (TCP)
+      - "7882:7882/udp"  # TURN (UDP)
+      - "50000-50100:50000-50100/udp"  # media (RTP)
+
+volumes:
+  kd-pg:
+  kd-redis:
+  kd-minio:

@@ -1,0 +1,237 @@
+import { useEffect } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { useLocation, useRoute } from 'wouter'
+
+import { useCommandPalette } from '../components/CommandPalette.js'
+
+import { ChatScreen } from '../features/chat/ChatScreen.js'
+import { ChannelList } from '../features/channels/ChannelList.js'
+import { DmHome } from '../features/dm/DmHome.js'
+import { DmList } from '../features/dm/DmList.js'
+import { DmOpener } from '../features/dm/DmOpener.js'
+import { DmScreen } from '../features/dm/DmScreen.js'
+import { InboxScreen } from '../features/inbox/InboxScreen.js'
+import { MemberList } from '../features/members/MemberList.js'
+import { WelcomeScreen } from '../features/onboarding/WelcomeScreen.js'
+import { SearchScreen } from '../features/search/SearchScreen.js'
+import { ServerRail } from '../features/servers/ServerRail.js'
+import { getServerDetail, listServers } from '../features/servers/api.js'
+import { ThreadPanel } from '../features/threads/ThreadPanel.js'
+import { useThreadUi } from '../features/threads/store.js'
+import { useNotifyTriggers } from '../features/notify/triggers.js'
+import { VoiceScreen } from '../features/voice/VoiceScreen.js'
+import { useNoiseSuppressionSync } from '../features/voice/noiseSettings.js'
+import { usePushToTalk } from '../features/voice/usePushToTalk.js'
+
+const LAST_CHANNEL_KEY = 'kd:last-channel'
+
+export function Shell() {
+  usePushToTalk()
+  useNoiseSuppressionSync()
+  useNotifyTriggers()
+  const [location, navigate] = useLocation()
+  const [, channelParams] = useRoute<{ serverId: string; channelId: string }>(
+    '/servers/:serverId/channels/:channelId',
+  )
+  const [, serverParams] = useRoute<{ serverId: string }>('/servers/:serverId')
+  const [, dmChannelParams] = useRoute<{ channelId: string }>('/dm/:channelId')
+  const [, dmWithParams] = useRoute<{ userId: string }>('/dm/with/:userId')
+  const [, dmHome] = useRoute('/dm')
+  const [, inboxRoute] = useRoute('/inbox')
+  const [, searchRoute] = useRoute('/search')
+  const [, welcomeRoute] = useRoute('/welcome')
+
+  const inDmMode = Boolean(dmChannelParams || dmWithParams || dmHome)
+  const inInboxMode = Boolean(inboxRoute)
+  const inSearchMode = Boolean(searchRoute)
+  const inWelcomeMode = Boolean(welcomeRoute)
+  const inSidebarMode = inDmMode || inInboxMode || inSearchMode || inWelcomeMode
+  const serverId = inSidebarMode ? null : (channelParams?.serverId ?? serverParams?.serverId ?? null)
+  const channelId = inSidebarMode ? null : (channelParams?.channelId ?? null)
+
+  // Глобальный Ctrl+K / Cmd+K → командная палитра (designs/final-extras.jsx,
+  // FinalPalette). Полноэкранный поиск остаётся доступен с рельсы и из палитры.
+  const togglePalette = useCommandPalette((s) => s.toggle)
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault()
+        togglePalette()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [togglePalette])
+
+  const { data: servers } = useQuery({
+    queryKey: ['servers'],
+    queryFn: listServers,
+    staleTime: 30_000,
+  })
+
+  const { data: serverDetail } = useQuery({
+    queryKey: ['server', serverId],
+    queryFn: () => getServerDetail(serverId!),
+    enabled: serverId !== null,
+    staleTime: 30_000,
+  })
+
+  // Root → last channel from localStorage, else first server, else welcome.
+  useEffect(() => {
+    if (location !== '/' && location !== '') return
+    if (!servers) return
+    const last = localStorage.getItem(LAST_CHANNEL_KEY)
+    if (last && (last.startsWith('/servers/') || last.startsWith('/dm'))) {
+      navigate(last, { replace: true })
+      return
+    }
+    const first = servers[0]
+    if (first) {
+      navigate(`/servers/${first.id}`, { replace: true })
+      return
+    }
+    // Нет серверов вообще (kick'нули отовсюду или fresh-инстанс без инвайта) —
+    // показываем welcome с тремя картами выбора (T-083 п.7).
+    navigate('/welcome', { replace: true })
+  }, [location, servers, navigate])
+
+  // /servers/:id (no channel) → first text channel.
+  useEffect(() => {
+    if (!serverParams || channelParams) return
+    if (!serverDetail) return
+    const firstText = serverDetail.channels.find((c) => c.kind === 'text')
+    if (firstText) {
+      navigate(`/servers/${serverDetail.server.id}/channels/${firstText.id}`, { replace: true })
+    }
+  }, [serverParams, channelParams, serverDetail, navigate])
+
+  // Remember last open channel (both server and DM routes).
+  useEffect(() => {
+    if (channelParams || dmChannelParams) localStorage.setItem(LAST_CHANNEL_KEY, location)
+  }, [location, channelParams, dmChannelParams])
+
+  const openThreadId = useThreadUi((s) => s.openThreadId)
+  const threadParentId = useThreadUi((s) => s.parentChannelId)
+  const closeThread = useThreadUi((s) => s.close)
+
+  // Тред-панель имеет смысл только когда мы в server-канале и parent совпадает.
+  const showThreadPanel = !inSidebarMode && openThreadId !== null
+    && threadParentId !== null && channelId !== null
+    && threadParentId === channelId
+
+  // Если тред был открыт но мы ушли с его parent-канала — закрыть.
+  useEffect(() => {
+    if (openThreadId === null) return
+    if (channelId === null || (threadParentId !== null && threadParentId !== channelId)) {
+      closeThread()
+    }
+  }, [channelId, openThreadId, threadParentId, closeThread])
+
+  const showMemberList = !inSidebarMode && !showThreadPanel
+
+  // На больших экранах мы держим колонку справа постоянно — она показывает
+  // либо MemberList, либо ThreadPanel. На малых экранах MemberList скрыт,
+  // а ThreadPanel — overlay (см. ниже отдельный layout).
+  // Ширины колонок — из designs/final-chrome.jsx: рельса 56, каналы 216,
+  // участники 220. DM-список — 256 (final-dm.jsx). Тред-панель остаётся 360.
+  const gridClass = inSidebarMode
+    ? inDmMode
+      ? 'h-full grid grid-cols-[56px_256px_1fr] bg-kd-bg text-kd-text font-sans overflow-hidden'
+      : 'h-full grid grid-cols-[56px_216px_1fr] bg-kd-bg text-kd-text font-sans overflow-hidden'
+    : showThreadPanel
+      ? 'h-full grid grid-cols-[56px_216px_1fr_360px] bg-kd-bg text-kd-text font-sans overflow-hidden'
+      : 'h-full grid grid-cols-[56px_216px_1fr] lg:grid-cols-[56px_216px_1fr_220px] bg-kd-bg text-kd-text font-sans overflow-hidden'
+
+  return (
+    <div className={gridClass}>
+      <ServerRail
+        activeServerId={serverId}
+        inDmMode={inDmMode}
+        inInboxMode={inInboxMode}
+        inSearchMode={inSearchMode}
+      />
+      {inWelcomeMode
+        ? <WelcomeScreen />
+        : inSearchMode
+          ? <SearchScreen />
+          : inInboxMode
+            ? <InboxScreen />
+            : inDmMode
+              ? <>
+                  <DmList activeChannelId={dmChannelParams?.channelId ?? null} />
+                  <DmArea
+                    dmChannelId={dmChannelParams?.channelId ?? null}
+                    dmWithUserId={dmWithParams?.userId ?? null}
+                    isHome={Boolean(dmHome)}
+                  />
+                </>
+              : <>
+                  <ChannelList serverId={serverId} activeChannelId={channelId} />
+                  <ChannelArea serverId={serverId} channelId={channelId} />
+                </>
+      }
+      {showMemberList && <MemberList serverId={serverId} className="hidden lg:block" />}
+      {showThreadPanel && openThreadId && threadParentId && (
+        <ThreadPanel
+          threadId={openThreadId}
+          parentChannelId={threadParentId}
+          serverId={serverId}
+        />
+      )}
+    </div>
+  )
+}
+
+function DmArea({
+  dmChannelId,
+  dmWithUserId,
+  isHome,
+}: {
+  dmChannelId: string | null
+  dmWithUserId: string | null
+  isHome: boolean
+}) {
+  if (dmWithUserId) return <DmOpener userId={dmWithUserId} />
+  if (dmChannelId) return <DmScreen channelId={dmChannelId} />
+  if (isHome) return <DmHome />
+  return <DmHome />
+}
+
+function ChannelArea({
+  serverId,
+  channelId,
+}: {
+  serverId: string | null
+  channelId: string | null
+}) {
+  // ChannelArea отдельным компонентом — `useQuery` принимает `enabled`, но мы
+  // ещё хотим избегать сборки JSX без нужды; так оба условия в одном месте.
+  const { data: detail } = useQuery({
+    queryKey: ['server', serverId],
+    queryFn: () => getServerDetail(serverId!),
+    enabled: serverId !== null,
+    staleTime: 30_000,
+  })
+
+  if (!serverId || !channelId) {
+    return (
+      <div className="flex items-center justify-center text-kd-text-mute font-mono text-xs">
+        {serverId ? 'загружаем канал…' : 'выбери сервер'}
+      </div>
+    )
+  }
+
+  const channel = detail?.channels.find((c) => c.id === channelId)
+  if (!channel) {
+    return (
+      <div className="flex items-center justify-center text-kd-text-mute font-mono text-xs">
+        загружаем канал…
+      </div>
+    )
+  }
+
+  if (channel.kind === 'voice') {
+    return <VoiceScreen serverId={serverId} channel={channel} />
+  }
+  return <ChatScreen serverId={serverId} channelId={channelId} />
+}

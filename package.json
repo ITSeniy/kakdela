@@ -1,0 +1,33 @@
+{
+  "name": "pizza-parlor",
+  "version": "0.0.1",
+  "private": true,
+  "description": "КакДела — самохостящийся уютный чат на 15-20 друзей. Кодовая тема: Samurai Pizza Cats.",
+  "packageManager": "pnpm@9.12.0",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "echo 'Запусти подсистемы в отдельных терминалах: pnpm dev:speedy / dev:polly / docker:dev'",
+    "dev:speedy": "pnpm --filter @kakdela/speedy dev",
+    "dev:polly": "pnpm --filter @kakdela/polly tauri:dev",
+    "dev:web": "pnpm --filter @kakdela/polly dev",
+    "docker:dev": "docker compose -f docker-compose.dev.yml up",
+    "docker:down": "docker compose -f docker-compose.dev.yml down",
+    "docker:reset": "docker compose -f docker-compose.dev.yml down -v",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck",
+    "francine": "pnpm --filter @kakdela/francine start",
+    "big-cheese": "pnpm --filter @kakdela/big-cheese start"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "prettier": "^3.4.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  }
+}

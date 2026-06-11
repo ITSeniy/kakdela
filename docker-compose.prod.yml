@@ -1,0 +1,138 @@
+# Продовская инфра-плоскость КакДела (postgres / redis / minio / livekit
+# + backup-cron). Сам speedy (backend) и caddy reverse-proxy запускаются
+# отдельно — этим compose'ом мы НЕ управляем приложением, только данными.
+# По сравнению с dev-compose'ом:
+#   • Сервисы СЛУШАЮТ только на внутренней docker-сети (кроме livekit —
+#     ему нужен UDP-доступ снаружи).
+#   • Добавлен сервис `backup`: cron-контейнер с pg_dump + mc + rsync
+#     (см. ops/backup/Dockerfile).
+#   • Все credentials берутся из .env, дефолтов нет — иначе слишком легко
+#     поднять «прод» с паролем kakdela_dev.
+#
+# Запуск (один раз):
+#   cp .env.example .env && отредактируй секреты
+#   docker compose -f docker-compose.prod.yml up -d
+#
+# Бэкап вручную:
+#   docker compose -f docker-compose.prod.yml exec backup kd-backup
+#
+# Восстановление:
+#   docker compose -f docker-compose.prod.yml exec backup kd-restore pg-XXXX.sql.gz
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: kd-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-kakdela}
+    volumes:
+      - kd-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # ВНЕШНИЕ ПОРТЫ НЕ ПУБЛИКУЕМ: postgres доступен только сервисам
+    # внутри compose-сети.
+
+  redis:
+    image: redis:7-alpine
+    container_name: kd-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - kd-redis:/data
+
+  minio:
+    image: minio/minio:latest
+    container_name: kd-minio
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:?set S3_ACCESS_KEY in .env}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:?set S3_SECRET_KEY in .env}
+    command: server /data --console-address ":9001"
+    volumes:
+      - kd-minio:/data
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: kd-minio-init
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      sleep 3 &&
+      mc alias set local http://minio:9000 ${S3_ACCESS_KEY} ${S3_SECRET_KEY} &&
+      mc mb -p local/${S3_BUCKET:-kakdela} || true &&
+      mc anonymous set download local/${S3_BUCKET:-kakdela}/public || true &&
+      mc mb -p local/${S3_EMOJI_BUCKET:-kakdela-emoji} || true &&
+      mc anonymous set download local/${S3_EMOJI_BUCKET:-kakdela-emoji} || true &&
+      echo 'MinIO bucket ready'
+      "
+    restart: "no"
+
+  livekit:
+    image: livekit/livekit-server:latest
+    container_name: kd-livekit
+    restart: unless-stopped
+    command: ["--config", "/etc/livekit.yaml"]
+    volumes:
+      - ./ops/livekit/livekit.yaml:/etc/livekit.yaml:ro
+    ports:
+      - "7880:7880"
+      - "7881:7881"
+      - "7882:7882/udp"
+      - "50000-50100:50000-50100/udp"
+
+  # ─── Backups: cron + pg_dump + mc + rsync ─────────────────────────────
+  #
+  # Хранит локальные снимки в volume kd-backups. Off-site опционально:
+  # задай OFFSITE_RSYNC_TARGET в .env (например, `user@nas:/data/kakdela/`)
+  # и подложи приватный ssh-ключ через bind-mount, если нужно.
+  backup:
+    build:
+      context: ./ops/backup
+      dockerfile: Dockerfile
+    image: kakdela/backup:latest
+    container_name: kd-backup
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    environment:
+      # PG
+      PGHOST: postgres
+      PGPORT: 5432
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB:-kakdela}
+      # S3 / MinIO
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      S3_BUCKET: ${S3_BUCKET:-kakdela}
+      S3_EMOJI_BUCKET: ${S3_EMOJI_BUCKET:-kakdela-emoji}
+      # Хранение
+      BACKUP_DIR: /backups
+      RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      # Off-site (опционально)
+      OFFSITE_RSYNC_TARGET: ${OFFSITE_RSYNC_TARGET:-}
+    volumes:
+      # `:ro` гарантирует, что скрипты не будут случайно переписаны изнутри
+      # контейнера; их редактируют только в репозитории.
+      - ./ops/backup/backup.sh:/usr/local/bin/kd-backup:ro
+      - ./ops/backup/restore.sh:/usr/local/bin/kd-restore:ro
+      - kd-backups:/backups
+      # Если используешь rsync off-site — пробрось ssh-ключ:
+      # - ${OFFSITE_SSH_KEY:-./ops/backup/.empty}:/root/.ssh/id_ed25519:ro
+
+volumes:
+  kd-pg:
+  kd-redis:
+  kd-minio:
+  kd-backups:

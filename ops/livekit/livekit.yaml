@@ -1,0 +1,36 @@
+# LiveKit dev config. На прод — отдельный livekit.prod.yaml с настоящими keys/secrets,
+# TURN-сервером и TLS-сертами.
+
+port: 7880
+bind_addresses:
+  - ""
+
+rtc:
+  tcp_port: 7881
+  port_range_start: 50000
+  port_range_end: 50100
+  use_external_ip: false  # на VPS — true
+
+# Dev-ключи. Те же значения нужно положить в .env (LIVEKIT_API_KEY/SECRET).
+# Для прода — сгенерировать новые: livekit-server generate-keys
+keys:
+  devkey: devsecret_replace_in_prod_replace_in_prod
+
+# Логирование
+log_level: info
+
+# Webhook'и от LiveKit прилетают на speedy и обновляют presence.
+webhook:
+  api_key: devkey
+  urls:
+    - http://host.docker.internal:3001/api/internal/livekit-webhook
+
+# Room defaults
+room:
+  auto_create: true
+  empty_timeout: 300  # секунд — комната живёт 5 мин после ухода всех
+  max_participants: 25
+
+# TURN — для прохода через NAT. В dev обычно не нужен.
+turn:
+  enabled: false

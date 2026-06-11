@@ -1,0 +1,77 @@
+/* Дизайн-токены КакДела. Источник: designs/final-chrome.jsx (KD_LIGHT / KD_DARK).
+   T-005 / T-004: убедиться что список полный.
+*/
+
+:root,
+:root[data-theme="light"] {
+  --kd-bg:         #e8e0cc;
+  --kd-bg-deep:    #ddd3bd;
+  --kd-panel:      #f0e8d4;
+  --kd-panel-alt:  #e2d8c0;
+  --kd-panel-hi:   #d4caaf;
+  --kd-panel-soft: #ece3ce;
+  --kd-border:     rgba(60, 50, 30, 0.12);
+  --kd-border-soft:rgba(60, 50, 30, 0.06);
+  --kd-text:       #2a2418;
+  --kd-text-soft:  #5e5440;
+  --kd-text-mute:  #8a7e64;
+  --kd-accent:     #5d6f4c;
+  --kd-accent-deep:#43533a;
+  --kd-accent-soft:#b8c2a0;
+  --kd-accent-bg:  rgba(93, 111, 76, 0.12);
+  --kd-warm:       #c87a3a;
+  --kd-warm-deep:  #a55e26;
+  --kd-warm-soft:  #e8c9a0;
+  --kd-warm-bg:    rgba(200, 122, 58, 0.12);
+  --kd-online:     #5d6f4c;
+  --kd-idle:       #d4a14a;
+  --kd-dnd:        #c0432f;
+  --kd-danger:     #c0432f;
+  --kd-stage:      #1a1610;
+  --kd-stage-text: #e8ddc4;
+}
+
+:root[data-theme="dark"] {
+  --kd-bg:         #1a1610;
+  --kd-bg-deep:    #13100c;
+  --kd-panel:      #221d15;
+  --kd-panel-alt:  #2a241b;
+  --kd-panel-hi:   #332b21;
+  --kd-panel-soft: #2d271e;
+  --kd-border:     rgba(232, 195, 140, 0.10);
+  --kd-border-soft:rgba(232, 195, 140, 0.05);
+  --kd-text:       #e8ddc4;
+  --kd-text-soft:  #b8a98a;
+  --kd-text-mute:  #7d6e54;
+  --kd-accent:     #9bb083;
+  --kd-accent-deep:#7a9162;
+  --kd-accent-soft:#3d4a32;
+  --kd-accent-bg:  rgba(155, 176, 131, 0.14);
+  --kd-warm:       #e8a05c;
+  --kd-warm-deep:  #c87a3a;
+  --kd-warm-soft:  #5a4128;
+  --kd-warm-bg:    rgba(232, 160, 92, 0.12);
+  --kd-online:     #9bb083;
+  --kd-idle:       #e0b860;
+  --kd-dnd:        #e07060;
+  --kd-danger:     #c87060;
+  --kd-stage:      #0d0a07;
+  --kd-stage-text: #e8ddc4;
+}
+
+:root {
+  --kd-font-sans: 'Inter', -apple-system, system-ui, sans-serif;
+  --kd-font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  --kd-radius: 6px;
+  /* Overlay над видео-tile'ами и модалками — всегда тёмный, не меняется по теме */
+  --kd-overlay-strong: rgba(10, 8, 4, 0.85);
+  --kd-overlay-soft:   rgba(10, 8, 4, 0.55);
+  /* Тень модалок/поповеров (designs/final-profile.jsx, final-extras.jsx) */
+  --kd-shadow-modal: 0 30px 60px rgba(0, 0, 0, 0.35);
+  --kd-shadow-tile:  0 2px 8px rgba(10, 8, 4, 0.2);
+  /* Декоративный градиент шапки профиля (designs/final-profile.jsx:32) —
+     светлее warm-палитры, специально для profile header. Не меняется по теме. */
+  --kd-profile-grad-from: #d68b6c;
+  --kd-profile-grad-to:   #a87b56;
+  color-scheme: light dark;
+}
