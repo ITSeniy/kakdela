@@ -12,13 +12,14 @@ export const internalRoutes: FastifyPluginAsync = async (app) => {
   // лежит хэш ровно того body, что прилетел. Чтобы валидация сработала,
   // нам нужен оригинальный текст тела — не parsed JSON. Парсер
   // переопределён только для этого плагина (encapsulation Fastify).
-  app.addContentTypeParser(
-    'application/json',
-    { parseAs: 'string' },
-    (_req, body, done) => {
-      done(null, body)
-    },
-  )
+  // Актуальный livekit-server шлёт `application/webhook+json`, старые
+  // версии — `application/json`; без парсера на оба Fastify отвечает 415
+  // (FST_ERR_CTP_INVALID_MEDIA_TYPE) ещё до нашего хендлера.
+  const rawString = (_req: unknown, body: string, done: (err: null, body: string) => void) => {
+    done(null, body)
+  }
+  app.addContentTypeParser('application/json', { parseAs: 'string' }, rawString)
+  app.addContentTypeParser('application/webhook+json', { parseAs: 'string' }, rawString)
 
   const receiver = new WebhookReceiver(env.LIVEKIT_API_KEY, env.LIVEKIT_API_SECRET)
 
