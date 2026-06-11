@@ -10,6 +10,13 @@ rtc:
   port_range_start: 50000
   port_range_end: 50100
   use_external_ip: false  # на VPS — true
+  # Dev в Docker: без node_ip LiveKit рекламирует ICE-кандидаты с внутренним
+  # IP контейнера (172.x), недостижимым с хоста — media-соединение падает,
+  # хотя signaling (порт 7880) работает. Указываем loopback: UDP-диапазон
+  # проброшен в docker-compose, трафик дойдёт. На VPS убрать вместе с
+  # use_external_ip: true.
+  node_ip: 127.0.0.1
+  enable_loopback_candidate: true
 
 # Dev-ключи. Те же значения нужно положить в .env (LIVEKIT_API_KEY/SECRET).
 # Для прода — сгенерировать новые: livekit-server generate-keys
