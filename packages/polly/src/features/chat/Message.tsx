@@ -8,6 +8,7 @@ import { Icon } from '../../components/Icon.js'
 import { useProfileUi } from '../profile/store.js'
 import { useThreadUi } from '../threads/store.js'
 import { AttachmentList } from './AttachmentView.js'
+import { useChatDisplaySettings } from './displaySettings.js'
 import { ContextMenu } from './ContextMenu.js'
 import { Reactions } from './Reactions.js'
 import { renderMarkdown } from './markdown.js'
@@ -143,9 +144,14 @@ export function Message({
   const canDelete = isOwn || currentUserRole === 'admin' || currentUserRole === 'owner'
   const editDisabled = Date.now() - new Date(message.createdAt).getTime() > EDIT_WINDOW_MS
 
+  // Плотность как в Discord: cozy — компактно только продолжение группы
+  // (тот же автор, < 5 минут); compact — всё в одну строку. Реплаи всегда
+  // полные: им нужна цитата над сообщением.
+  const density = useChatDisplaySettings((s) => s.density)
   const sameAuthor = prev !== null && prev.authorId === message.authorId
   const closeInTime = prev !== null && minutesBetween(message.createdAt, prev.createdAt) < 5
-  const compact = sameAuthor && closeInTime && !message.replyToId
+  const grouped = sameAuthor && closeInTime
+  const compact = !message.replyToId && (density === 'compact' || grouped)
 
   const name = member?.displayName ?? 'неизвестно'
   const role = member ? ROLE_TAG[member.role] ?? null : null

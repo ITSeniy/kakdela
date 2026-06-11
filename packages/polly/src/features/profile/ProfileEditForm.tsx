@@ -6,6 +6,7 @@ import type { User, UserProfile } from '@kakdela/ginzu/api-types'
 import { ApiError } from '../../lib/api.js'
 import { useAuthStore } from '../auth/store.js'
 import { uploadAttachment } from '../files/upload.js'
+import { DensityPicker } from '../settings/DensityPicker.js'
 import { ThemePicker } from '../settings/ThemePicker.js'
 import { VoiceSettings } from '../settings/VoiceSettings.js'
 import { Avatar } from '../../components/Avatar.js'
@@ -164,6 +165,10 @@ export function ProfileEditForm({ profile, onSaved, onCancel }: ProfileEditFormP
 
       <Field label="тема" hint="следуем системе или фиксируем вручную">
         <ThemePicker />
+      </Field>
+
+      <Field label="плотность сообщений" hint="как группировать сообщения в чате">
+        <DensityPicker />
       </Field>
 
       <VoiceSettings />
