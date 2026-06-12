@@ -37,22 +37,44 @@ export { MAX_ATTACHMENT_SIZE }
 const MIME_ALIASES: Record<string, string> = {
   'application/x-zip-compressed': 'application/zip',
   'application/x-zip':            'application/zip',
+  'application/vnd.rar':          'application/x-rar-compressed',
+  'application/x-gzip':           'application/gzip',
   'audio/mp3':                    'audio/mpeg',
   'audio/x-mpeg':                 'audio/mpeg',
   'audio/x-mpg':                  'audio/mpeg',
   'audio/x-mp3':                  'audio/mpeg',
+  'audio/x-wav':                  'audio/wav',
+  'audio/wave':                   'audio/wav',
+  'audio/vnd.wave':               'audio/wav',
+  'audio/x-flac':                 'audio/flac',
+  'audio/x-m4a':                  'audio/mp4',
+  'video/x-m4v':                  'video/mp4',
+}
+
+// Браузер часто отдаёт пустой file.type для «незнакомых» расширений
+// (rar/7z/flac на Windows) — добиваем по расширению.
+const MIME_BY_EXT: Record<string, string> = {
+  txt:  'text/plain',
+  zip:  'application/zip',
+  '7z': 'application/x-7z-compressed',
+  rar:  'application/x-rar-compressed',
+  gz:   'application/gzip',
+  pdf:  'application/pdf',
+  mp3:  'audio/mpeg',
+  ogg:  'audio/ogg',
+  wav:  'audio/wav',
+  flac: 'audio/flac',
+  m4a:  'audio/mp4',
+  mp4:  'video/mp4',
+  webm: 'video/webm',
+  mov:  'video/quicktime',
 }
 
 function detectMime(file: File): string {
   const raw = file.type ? (MIME_ALIASES[file.type] ?? file.type) : ''
   if (raw) return raw
   const ext = file.name.toLowerCase().split('.').pop() ?? ''
-  if (ext === 'txt') return 'text/plain'
-  if (ext === 'zip') return 'application/zip'
-  if (ext === 'pdf') return 'application/pdf'
-  if (ext === 'mp3') return 'audio/mpeg'
-  if (ext === 'ogg') return 'audio/ogg'
-  return ''
+  return MIME_BY_EXT[ext] ?? ''
 }
 
 export interface UploadOptions {

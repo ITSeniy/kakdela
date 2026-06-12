@@ -15,6 +15,21 @@ const LazyEmojiPicker = React.lazy(() => import('./EmojiPicker.js'))
 
 const MAX_ATTACHMENTS = 10
 
+// Кнопки всплывашки форматирования (Discord-style). wrap — маркеры по краям
+// выделения, block — префикс каждой выделенной строки.
+const FORMAT_ACTIONS: Array<
+  | { id: string; label: React.ReactNode; title: string; kind: 'wrap'; marker: string }
+  | { id: string; label: React.ReactNode; title: string; kind: 'block'; prefix: string }
+> = [
+  { id: 'bold',    label: <b>B</b>,            title: 'жирный · **',        kind: 'wrap', marker: '**' },
+  { id: 'italic',  label: <i>I</i>,            title: 'курсив · _',         kind: 'wrap', marker: '_' },
+  { id: 'under',   label: <u>U</u>,            title: 'подчёркнутый · __',  kind: 'wrap', marker: '__' },
+  { id: 'strike',  label: <s>S</s>,            title: 'зачёркнутый · ~~',   kind: 'wrap', marker: '~~' },
+  { id: 'quote',   label: <span>“</span>,      title: 'цитата · >',         kind: 'block', prefix: '> ' },
+  { id: 'code',    label: <span>&lt;&gt;</span>, title: 'код · `',          kind: 'wrap', marker: '`' },
+  { id: 'spoiler', label: <span>◉</span>,      title: 'спойлер · ||',       kind: 'wrap', marker: '||' },
+]
+
 interface ComposerProps {
   channelName: string
   customEmoji?: ReadonlyArray<CustomEmoji>
@@ -34,6 +49,8 @@ export function Composer({ channelName, customEmoji, replyTo, replyAuthor, onCan
   const [isDragOver, setIsDragOver] = useState(false)
   const [warning, setWarning] = useState<string | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
+  // Всплывашка форматирования — пока в textarea есть выделение.
+  const [hasSelection, setHasSelection] = useState(false)
 
   const taRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -79,6 +96,74 @@ export function Composer({ channelName, customEmoji, replyTo, replyAuthor, onCan
     el.style.height = 'auto'
     el.style.height = Math.min(el.scrollHeight, 200) + 'px'
   }, [text])
+
+  function syncSelection() {
+    const ta = taRef.current
+    if (!ta) return
+    setHasSelection(ta.selectionStart !== ta.selectionEnd)
+  }
+
+  /** Обернуть выделение маркерами; повторное применение снимает их. */
+  function applyWrap(marker: string) {
+    const ta = taRef.current
+    if (!ta) return
+    const start = ta.selectionStart
+    const end = ta.selectionEnd
+    if (start === end) return
+    const selected = text.slice(start, end)
+    const before = text.slice(0, start)
+    const after = text.slice(end)
+
+    const alreadyWrapped =
+      before.endsWith(marker) && after.startsWith(marker)
+    let next: string
+    let selStart: number
+    let selEnd: number
+    if (alreadyWrapped) {
+      next = before.slice(0, -marker.length) + selected + after.slice(marker.length)
+      selStart = start - marker.length
+      selEnd = end - marker.length
+    } else if (selected.startsWith(marker) && selected.endsWith(marker) && selected.length >= marker.length * 2) {
+      const inner = selected.slice(marker.length, -marker.length)
+      next = before + inner + after
+      selStart = start
+      selEnd = start + inner.length
+    } else {
+      next = before + marker + selected + marker + after
+      selStart = start + marker.length
+      selEnd = end + marker.length
+    }
+    setText(next)
+    requestAnimationFrame(() => {
+      ta.focus()
+      ta.setSelectionRange(selStart, selEnd)
+    })
+  }
+
+  /** Префикс каждой выделенной строки (цитата). */
+  function applyBlock(prefix: string) {
+    const ta = taRef.current
+    if (!ta) return
+    const start = ta.selectionStart
+    const end = ta.selectionEnd
+    if (start === end) return
+    // Расширяем до границ строк, чтобы префикс встал в начале каждой.
+    const lineStart = text.lastIndexOf('\n', start - 1) + 1
+    const lineEndRaw = text.indexOf('\n', end)
+    const lineEnd = lineEndRaw === -1 ? text.length : lineEndRaw
+    const block = text.slice(lineStart, lineEnd)
+    const lines = block.split('\n')
+    const allPrefixed = lines.every((l) => l.startsWith(prefix))
+    const nextBlock = lines
+      .map((l) => (allPrefixed ? l.slice(prefix.length) : prefix + l))
+      .join('\n')
+    const next = text.slice(0, lineStart) + nextBlock + text.slice(lineEnd)
+    setText(next)
+    requestAnimationFrame(() => {
+      ta.focus()
+      ta.setSelectionRange(lineStart, lineStart + nextBlock.length)
+    })
+  }
 
   useEffect(() => {
     if (!warning) return
@@ -271,7 +356,27 @@ export function Composer({ channelName, customEmoji, replyTo, replyAuthor, onCan
       {warning && (
         <div className="mb-1.5 text-[10px] text-kd-danger font-mono">{warning}</div>
       )}
-      <div className="bg-kd-panel rounded-kd border border-kd-border flex items-center gap-2.5 px-3 py-2">
+      <div className="bg-kd-panel rounded-kd border border-kd-border flex items-center gap-2.5 px-3 py-2 relative">
+        {/* Всплывашка форматирования над полем — пока есть выделение.
+            onMouseDown+preventDefault: клик не должен снимать выделение. */}
+        {hasSelection && (
+          <div
+            className="absolute bottom-full left-2 mb-1.5 z-40 flex items-center gap-px bg-kd-panel border border-kd-border rounded-kd shadow-kd-modal px-1 py-0.5 select-none"
+            onMouseDown={(e) => e.preventDefault()}
+          >
+            {FORMAT_ACTIONS.map((a) => (
+              <button
+                key={a.id}
+                type="button"
+                title={a.title}
+                onClick={() => (a.kind === 'wrap' ? applyWrap(a.marker) : applyBlock(a.prefix))}
+                className="w-7 h-7 rounded flex items-center justify-center text-[13px] text-kd-text-soft hover:text-kd-text hover:bg-kd-panel-hi transition-colors"
+              >
+                {a.label}
+              </button>
+            ))}
+          </div>
+        )}
         <button
           type="button"
           onClick={pickFiles}
@@ -285,7 +390,16 @@ export function Composer({ channelName, customEmoji, replyTo, replyAuthor, onCan
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={handleKeyDown}
+          onKeyUp={syncSelection}
           onPaste={handlePaste}
+          onSelect={syncSelection}
+          onMouseUp={syncSelection}
+          onBlur={() => {
+            // Микро-задержка: клик по кнопке всплывашки не должен убить её
+            // раньше, чем сработает onClick (mousedown уже preventDefault'ится,
+            // но blur по другим причинам — гасим выделение).
+            setTimeout(syncSelection, 0)
+          }}
           placeholder={placeholder}
           rows={1}
           className="flex-1 bg-transparent resize-none text-[12px] text-kd-text outline-none placeholder:text-kd-text-mute leading-relaxed font-sans"
@@ -331,7 +445,7 @@ export function Composer({ channelName, customEmoji, replyTo, replyAuthor, onCan
         {/* Слева — место typing-индикатора; пока подсказка про перенос строки. */}
         <span>shift+⏎ — новая строка</span>
         <div className="flex-1" />
-        <span className="font-mono">**жирный**  _курсив_  `код`</span>
+        <span className="font-mono">**жирный** _курсив_ ~~зачёркнутый~~ `код` ||спойлер||</span>
       </div>
     </div>
   )

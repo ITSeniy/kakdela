@@ -132,6 +132,24 @@ body {
   object-fit: contain;
 }
 
+/* ||спойлер|| — скрытый текст: заливка panel-hi, текст прозрачный до клика
+   (kd-spoiler-open ставит MessageList.handleContentClick). */
+.kd-md .kd-spoiler {
+  background: var(--kd-panel-hi);
+  color: transparent;
+  border-radius: 3px;
+  padding: 0 3px;
+  cursor: pointer;
+  user-select: none;
+  transition: color 120ms ease-out, background 120ms ease-out;
+}
+.kd-md .kd-spoiler.kd-spoiler-open {
+  background: var(--kd-panel-alt);
+  color: inherit;
+  user-select: text;
+  cursor: text;
+}
+
 /* DM-пузырь «своего» сообщения лежит на --kd-accent (designs/final-dm.jsx,
    KD_DMBubble side="right"): текст там белый, поэтому markdown-элементы
    внутри переводим на белый/полупрозрачно-белый, иначе accent-on-accent. */

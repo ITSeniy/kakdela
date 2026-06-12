@@ -68,7 +68,8 @@ export function Lightbox({ images, startIndex, onClose, context }: LightboxProps
         // Лайтбокс — верхний слой: Esc не должен долетать до модалок/настроек.
         e.stopPropagation()
         onClose()
-      } else if (e.key === 'ArrowRight' || e.key === ' ') {
+      } else if (e.key === 'ArrowRight' || (e.key === ' ' && (e.target as HTMLElement)?.tagName !== 'VIDEO')) {
+        // space листает, но не когда фокус на видео — там он пауза/плей.
         e.preventDefault()
         setIdx((i) => (i + 1) % images.length)
       } else if (e.key === 'ArrowLeft') {
@@ -179,7 +180,9 @@ export function Lightbox({ images, startIndex, onClose, context }: LightboxProps
           <div className="flex-1 min-w-0 text-[10px] font-mono opacity-60 truncate">{meta}</div>
         )}
         <BarButton title="скачать оригинал" onClick={() => { void openExternal(current.url) }}>⤓</BarButton>
-        <BarButton title="скопировать картинку" onClick={() => { void copyImage() }}>⧉</BarButton>
+        {current.kind === 'image' && (
+          <BarButton title="скопировать картинку" onClick={() => { void copyImage() }}>⧉</BarButton>
+        )}
         {context?.messageId && (
           <BarButton title="к сообщению" onClick={jumpToMessage}>↗</BarButton>
         )}
@@ -212,11 +215,22 @@ export function Lightbox({ images, startIndex, onClose, context }: LightboxProps
             </button>
           </>
         )}
-        <img
-          src={current.url}
-          alt={current.originalName}
-          className="max-w-full max-h-full object-contain rounded-lg shadow-kd-modal"
-        />
+        {current.kind === 'video' ? (
+          <video
+            key={current.id}
+            src={current.url}
+            controls
+            autoPlay
+            playsInline
+            className="max-w-full max-h-full rounded-lg shadow-kd-modal"
+          />
+        ) : (
+          <img
+            src={current.url}
+            alt={current.originalName}
+            className="max-w-full max-h-full object-contain rounded-lg shadow-kd-modal"
+          />
+        )}
       </div>
 
       {/* нижняя панель: позиция + миниатюры + подсказки */}
@@ -235,18 +249,27 @@ export function Lightbox({ images, startIndex, onClose, context }: LightboxProps
               onClick={() => setIdx(i)}
               title={img.originalName}
               className={[
-                'w-14 h-10 rounded-[3px] overflow-hidden shrink-0 transition-opacity',
+                'relative w-14 h-10 rounded-[3px] overflow-hidden shrink-0 transition-opacity',
                 i === idx ? 'opacity-100' : 'opacity-50 hover:opacity-80',
               ].join(' ')}
               style={i === idx ? { boxShadow: '0 0 0 2px var(--kd-accent)' } : undefined}
             >
-              <img
-                src={img.thumbUrl ?? img.url}
-                alt=""
-                className="w-full h-full object-cover"
-                loading="lazy"
-                draggable={false}
-              />
+              {img.kind === 'video' ? (
+                <>
+                  <video src={img.url} preload="metadata" muted playsInline className="w-full h-full object-cover pointer-events-none" />
+                  <span className="absolute inset-0 flex items-center justify-center bg-black/40 text-[11px] font-mono font-bold">
+                    ▶
+                  </span>
+                </>
+              ) : (
+                <img
+                  src={img.thumbUrl ?? img.url}
+                  alt=""
+                  className="w-full h-full object-cover"
+                  loading="lazy"
+                  draggable={false}
+                />
+              )}
             </button>
           ))}
           <div className="flex-1" />

@@ -54,15 +54,39 @@ function ImageThumb({
   )
 }
 
-function VideoView({ attachment }: { attachment: Attachment }) {
+/** Превью видео в стиле фото: первый кадр + ▶, клик открывает лайтбокс. */
+function VideoThumb({
+  attachment,
+  onOpen,
+}: {
+  attachment: Attachment
+  onOpen: () => void
+}) {
   return (
-    <video
-      controls
-      preload="metadata"
-      src={attachment.url}
-      className="rounded-kd border border-kd-border bg-kd-stage"
-      style={{ maxWidth: 600, maxHeight: 400 }}
-    />
+    <button
+      type="button"
+      onClick={onOpen}
+      className="relative block rounded-kd overflow-hidden border border-kd-border bg-kd-stage"
+      style={{ width: 400, maxWidth: '100%', aspectRatio: '16 / 9' }}
+      title={attachment.originalName}
+    >
+      {/* preload=metadata рисует первый кадр без скачивания всего файла */}
+      <video
+        src={attachment.url}
+        preload="metadata"
+        muted
+        playsInline
+        className="w-full h-full object-cover pointer-events-none"
+      />
+      <span className="absolute inset-0 flex items-center justify-center">
+        <span className="w-11 h-11 rounded-full bg-kd-overlay-strong text-kd-stage-text flex items-center justify-center text-[16px] pl-0.5">
+          ▶
+        </span>
+      </span>
+      <span className="absolute left-1.5 bottom-1.5 px-1.5 py-0.5 rounded bg-kd-overlay-strong text-kd-stage-text text-[9px] font-mono">
+        видео · {formatBytes(attachment.sizeBytes)}
+      </span>
+    </button>
   )
 }
 
@@ -108,10 +132,11 @@ export function AttachmentList({ attachments, lightboxContext }: AttachmentListP
   const [lightboxIdx, setLightboxIdx] = useState<number | null>(null)
   if (attachments.length === 0) return null
 
-  const images = attachments.filter((a) => a.kind === 'image')
+  // В лайтбокс идут и фото, и видео — единая лента просмотра.
+  const media = attachments.filter((a) => a.kind === 'image' || a.kind === 'video')
 
-  function openImage(att: Attachment) {
-    const idx = images.findIndex((a) => a.id === att.id)
+  function openMedia(att: Attachment) {
+    const idx = media.findIndex((a) => a.id === att.id)
     if (idx >= 0) setLightboxIdx(idx)
   }
 
@@ -120,9 +145,9 @@ export function AttachmentList({ attachments, lightboxContext }: AttachmentListP
       {attachments.map((att) => {
         switch (att.kind) {
           case 'image':
-            return <ImageThumb key={att.id} attachment={att} onOpen={() => openImage(att)} />
+            return <ImageThumb key={att.id} attachment={att} onOpen={() => openMedia(att)} />
           case 'video':
-            return <VideoView key={att.id} attachment={att} />
+            return <VideoThumb key={att.id} attachment={att} onOpen={() => openMedia(att)} />
           case 'audio':
             return <AudioView key={att.id} attachment={att} />
           default:
@@ -131,7 +156,7 @@ export function AttachmentList({ attachments, lightboxContext }: AttachmentListP
       })}
       {lightboxIdx !== null && (
         <Lightbox
-          images={images}
+          images={media}
           startIndex={lightboxIdx}
           onClose={() => setLightboxIdx(null)}
           context={lightboxContext}

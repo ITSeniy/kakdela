@@ -48,13 +48,20 @@ const ORIGINAL_MAX_SIDE = 2560
 const ORIGINAL_JPEG_QUALITY = 85
 const ORIGINAL_WEBP_QUALITY = 90
 
+const ARCHIVE_MIMES = new Set([
+  'application/zip',
+  'application/x-7z-compressed',
+  'application/x-rar-compressed',
+  'application/gzip',
+])
+
 function kindFromMime(mime: string): AttachmentKind {
   if (mime.startsWith('image/')) return 'image'
   if (mime.startsWith('video/')) return 'video'
   if (mime.startsWith('audio/')) return 'audio'
   if (mime === 'application/pdf') return 'pdf'
   if (mime === 'text/plain') return 'text'
-  if (mime === 'application/zip') return 'archive'
+  if (ARCHIVE_MIMES.has(mime)) return 'archive'
   return 'other'
 }
 

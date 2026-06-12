@@ -467,11 +467,18 @@ export const PRESIGN_ALLOWED_CONTENT_TYPES = [
   'image/gif',
   'video/mp4',
   'video/webm',
+  'video/quicktime',
   'audio/mpeg',
   'audio/ogg',
+  'audio/wav',
+  'audio/flac',
+  'audio/mp4',
   'application/pdf',
   'text/plain',
   'application/zip',
+  'application/x-7z-compressed',
+  'application/x-rar-compressed',
+  'application/gzip',
 ] as const
 
 export const MAX_ATTACHMENT_SIZE = 25 * 1024 * 1024

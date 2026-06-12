@@ -7,11 +7,18 @@ export const ALLOWED_MIME_TYPES = [
   'image/gif',
   'video/mp4',
   'video/webm',
+  'video/quicktime',
   'audio/mpeg',
   'audio/ogg',
+  'audio/wav',
+  'audio/flac',
+  'audio/mp4',
   'application/pdf',
   'text/plain',
   'application/zip',
+  'application/x-7z-compressed',
+  'application/x-rar-compressed',
+  'application/gzip',
 ] as const
 
 export type AllowedMimeType = (typeof ALLOWED_MIME_TYPES)[number]
@@ -31,22 +38,43 @@ export const EXTENSION_FOR_TYPE: Record<AllowedMimeType, string> = {
   'image/gif':        'gif',
   'video/mp4':        'mp4',
   'video/webm':       'webm',
+  'video/quicktime':  'mov',
   'audio/mpeg':       'mp3',
   'audio/ogg':        'ogg',
+  'audio/wav':        'wav',
+  'audio/flac':       'flac',
+  'audio/mp4':        'm4a',
   'application/pdf':  'pdf',
   'text/plain':       'txt',
   'application/zip':  'zip',
+  'application/x-7z-compressed':  '7z',
+  'application/x-rar-compressed': 'rar',
+  'application/gzip':             'gz',
 }
 
 // MIME types whose real bytes file-type can identify. text/plain has no
 // magic bytes and must be checked separately (heuristic: ASCII/UTF-8 only).
 const MAGIC_DETECTABLE: ReadonlySet<AllowedMimeType> = new Set<AllowedMimeType>([
   'image/jpeg', 'image/png', 'image/webp', 'image/gif',
-  'video/mp4', 'video/webm',
-  'audio/mpeg', 'audio/ogg',
+  'video/mp4', 'video/webm', 'video/quicktime',
+  'audio/mpeg', 'audio/ogg', 'audio/wav', 'audio/flac', 'audio/mp4',
   'application/pdf',
-  'application/zip',
+  'application/zip', 'application/x-7z-compressed',
+  'application/x-rar-compressed', 'application/gzip',
 ])
+
+// file-type в разных версиях отдаёт разные синонимы — нормализуем к нашему
+// каноничному списку перед сравнением.
+const DETECTED_MIME_ALIASES: Record<string, string> = {
+  'audio/mp3':            'audio/mpeg',
+  'audio/x-wav':          'audio/wav',
+  'audio/vnd.wave':       'audio/wav',
+  'audio/wave':           'audio/wav',
+  'audio/x-flac':         'audio/flac',
+  'audio/x-m4a':          'audio/mp4',
+  'video/x-m4v':          'video/mp4',
+  'application/vnd.rar':  'application/x-rar-compressed',
+}
 
 export type MagicCheck =
   | { ok: true; detectedMime: AllowedMimeType }
@@ -80,9 +108,7 @@ export async function checkMagicBytes(
       : { ok: true, detectedMime: declared }
   }
 
-  // file-type returns `audio/mpeg` for mp3, but some versions return `audio/mp3`.
-  // Normalize before comparing.
-  const detectedMime = detected.mime === 'audio/mp3' ? 'audio/mpeg' : detected.mime
+  const detectedMime = DETECTED_MIME_ALIASES[detected.mime] ?? detected.mime
 
   if (detectedMime !== declared) {
     return { ok: false, reason: 'mismatch', detectedMime }

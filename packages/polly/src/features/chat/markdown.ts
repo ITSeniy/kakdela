@@ -126,11 +126,34 @@ md.inline.ruler.before('emphasis', 'custom_emoji', (state, silent) => {
   return true
 })
 
+// `||спойлер||` — скрытый текст в духе Discord. Раскрытие — кликом
+// (MessageList.handleContentClick тогглит класс kd-spoiler-open).
+// Вложенный markdown внутри спойлера не парсим — текст как есть.
+md.inline.ruler.before('emphasis', 'spoiler', (state, silent) => {
+  const start = state.pos
+  if (state.src.charCodeAt(start) !== 0x7c /* | */) return false
+  if (state.src.charCodeAt(start + 1) !== 0x7c) return false
+  const end = state.src.indexOf('||', start + 2)
+  if (end < 0) return false
+  const content = state.src.slice(start + 2, end)
+  if (!content.trim()) return false
+  if (!silent) {
+    const open = state.push('spoiler_open', 'span', 1)
+    open.attrSet('class', 'kd-spoiler')
+    open.attrSet('data-spoiler', '1')
+    const text = state.push('text', '', 0)
+    text.content = content
+    state.push('spoiler_close', 'span', -1)
+  }
+  state.pos = end + 2
+  return true
+})
+
 export function renderMarkdown(text: string, env?: RenderEnv): string {
   const html = md.render(text, env ?? {})
   if (typeof window === 'undefined') return html
   return DOMPurify.sanitize(html, {
-    ADD_ATTR: ['data-mention', 'data-id', 'target', 'rel', 'draggable'],
+    ADD_ATTR: ['data-mention', 'data-id', 'data-spoiler', 'target', 'rel', 'draggable'],
     ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|tel|ftp):|[^a-z]|[a-z+.-]+(?:[^a-z+.\-:]|$))/i,
   })
 }

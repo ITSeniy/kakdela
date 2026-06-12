@@ -69,6 +69,12 @@ export function MessageList({
   function handleContentClick(e: MouseEvent<HTMLDivElement>) {
     let node = e.target as HTMLElement | null
     while (node && node !== e.currentTarget) {
+      // Спойлер: первый клик раскрывает, повторный — прячет обратно.
+      if (node.dataset.spoiler) {
+        e.preventDefault()
+        node.classList.toggle('kd-spoiler-open')
+        return
+      }
       const mention = node.dataset.mention
       if (mention === 'user') {
         e.preventDefault()
