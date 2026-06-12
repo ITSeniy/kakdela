@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 
 import type { Channel, CustomEmoji, MemberPublic, Message as IMessage } from '@kakdela/ginzu/api-types'
 
@@ -13,6 +13,8 @@ import { ContextMenu } from './ContextMenu.js'
 import { Reactions } from './Reactions.js'
 import { renderMarkdown } from './markdown.js'
 import type { PendingMessage } from './types.js'
+
+const LazyEmojiPicker = lazy(() => import('./EmojiPicker.js'))
 
 interface MessageProps {
   message: IMessage | PendingMessage
@@ -59,7 +61,7 @@ function CopyIcon() {
 }
 
 function Actions({
-  isOwn, canDelete, editDisabled, pendingStatus, onReply, onCopy, onEdit, onDelete,
+  isOwn, canDelete, editDisabled, pendingStatus, onReply, onCopy, onEdit, onDelete, onPickReaction,
 }: {
   isOwn: boolean
   canDelete: boolean
@@ -69,10 +71,42 @@ function Actions({
   onCopy: () => void
   onEdit: () => void
   onDelete: () => void
+  onPickReaction: (emoji: string) => void
 }) {
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const pickerContainerRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!pickerOpen) return
+    function handleMouseDown(e: MouseEvent) {
+      if (pickerContainerRef.current && !pickerContainerRef.current.contains(e.target as Node)) {
+        setPickerOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleMouseDown)
+    return () => document.removeEventListener('mousedown', handleMouseDown)
+  }, [pickerOpen])
+
   if (pendingStatus) return null
   return (
-    <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 text-kd-text-mute self-start mt-0.5 shrink-0">
+    <div className={`${pickerOpen ? 'opacity-100' : 'opacity-0'} group-hover:opacity-100 transition-opacity flex items-center gap-1 text-kd-text-mute self-start mt-0.5 shrink-0`}>
+      <div className="relative" ref={pickerContainerRef}>
+        <button type="button" onClick={() => setPickerOpen((o) => !o)} title="добавить реакцию" className="hover:text-kd-text p-1 block">
+          <Icon.Smile size={13} />
+        </button>
+        {pickerOpen && (
+          <div className="absolute bottom-full right-0 mb-1 z-50 shadow-lg">
+            <Suspense fallback={<div className="p-3 text-[11px] text-kd-text-mute bg-kd-panel rounded-kd border border-kd-border">…</div>}>
+              <LazyEmojiPicker
+                onSelect={(emoji) => {
+                  onPickReaction(emoji)
+                  setPickerOpen(false)
+                }}
+              />
+            </Suspense>
+          </div>
+        )}
+      </div>
       <button type="button" onClick={onReply} title="ответить" className="hover:text-kd-text p-1">
         <Icon.Reply size={13} />
       </button>
@@ -144,14 +178,17 @@ export function Message({
   const canDelete = isOwn || currentUserRole === 'admin' || currentUserRole === 'owner'
   const editDisabled = Date.now() - new Date(message.createdAt).getTime() > EDIT_WINDOW_MS
 
-  // Плотность как в Discord: cozy — компактно только продолжение группы
-  // (тот же автор, < 5 минут); compact — всё в одну строку. Реплаи всегда
-  // полные: им нужна цитата над сообщением.
+  // Плотность как в Discord. compact — всё в одну строку (включая реплаи:
+  // цитата строкой выше). cozy — первое сообщение группы с аватаркой,
+  // продолжения (тот же автор, < 5 минут, не реплай) — без аватарки и имени,
+  // время появляется на ховере в левой колонке.
   const density = useChatDisplaySettings((s) => s.density)
-  const sameAuthor = prev !== null && prev.authorId === message.authorId
-  const closeInTime = prev !== null && minutesBetween(message.createdAt, prev.createdAt) < 5
-  const grouped = sameAuthor && closeInTime
-  const compact = !message.replyToId && (density === 'compact' || grouped)
+  const compact = density === 'compact'
+  const grouped =
+    prev !== null &&
+    prev.authorId === message.authorId &&
+    minutesBetween(message.createdAt, prev.createdAt) < 5 &&
+    !message.replyToId
 
   const name = member?.displayName ?? 'неизвестно'
   const role = member ? ROLE_TAG[member.role] ?? null : null
@@ -216,6 +253,59 @@ export function Message({
     )
   }
 
+  // Цитата реплая. indent выравнивает её с колонкой текста:
+  // cozy — аватар 32px + gap 10px, compact — время 36px + gap 8px.
+  function ReplyQuote({ indent }: { indent: string }) {
+    if (!msgReplyTo) return null
+    return (
+      <button
+        type="button"
+        className={`flex items-center gap-1.5 mb-0.5 ${indent} w-full text-left text-[10px] text-kd-text-mute hover:opacity-80 transition-opacity min-w-0`}
+        onClick={() => scrollToMessage(msgReplyTo.id)}
+      >
+        <span
+          aria-hidden
+          className="shrink-0 w-2.5 h-1.5 border-t border-l border-kd-text-mute rounded-tl-[3px]"
+        />
+        {msgReplyTo.deleted ? (
+          <span className="italic truncate">↳ оригинал удалён</span>
+        ) : (
+          <>
+            <span className="font-mono font-bold text-kd-text-soft shrink-0">
+              ↳ {msgReplyTo.authorName}
+            </span>
+            <span className="opacity-80 truncate min-w-0">{msgReplyTo.content}</span>
+          </>
+        )}
+      </button>
+    )
+  }
+
+  const reactionsEl = !pendingStatus && messageReactions.length > 0 ? (
+    <Reactions
+      messageId={message.id}
+      reactions={messageReactions}
+      currentUserId={currentUserId}
+      memberMap={memberMap}
+      onAdd={onAddReaction}
+      onRemove={onRemoveReaction}
+    />
+  ) : null
+
+  const actionsEl = (
+    <Actions
+      isOwn={isOwn}
+      canDelete={canDelete}
+      editDisabled={editDisabled}
+      pendingStatus={pendingStatus}
+      onReply={() => onReply(message as IMessage)}
+      onCopy={copyContent}
+      onEdit={() => setEditing(true)}
+      onDelete={() => onDelete(message.id)}
+      onPickReaction={(emoji) => onAddReaction(message.id, emoji)}
+    />
+  )
+
   if (editing) {
     return (
       <div className="flex gap-2.5 px-4 py-1.5 items-start" data-message-id={message.id}>
@@ -262,145 +352,136 @@ export function Message({
   if (compact) {
     return (
       <div
-        className={`group flex gap-2 px-4 py-[2px] items-baseline hover:bg-kd-panel-alt/40 ${opacityCls}`}
+        className={`group px-4 py-[2px] hover:bg-kd-panel-alt/40 ${opacityCls}`}
         data-message-id={message.id}
         onContextMenu={openContextMenu}
       >
         {contextMenuEl}
-        <span className="text-[10px] text-kd-text-mute font-mono w-9 shrink-0 text-right">
-          {time}
-        </span>
-        <button
-          type="button"
-          onClick={() => openProfile(message.authorId)}
-          className="text-[13px] font-bold text-kd-text hover:underline shrink-0"
-        >
-          {name}
-        </button>
-        <div className="flex-1 min-w-0">
-          {message.content && (
-            <span className="text-[13px] text-kd-text leading-snug break-words">
-              <span className="kd-md inline" dangerouslySetInnerHTML={{ __html: html }} />
-              {message.editedAt && (
-                <span className="text-[9px] text-kd-text-mute font-mono ml-1">(изм.)</span>
-              )}
-            </span>
-          )}
-          {msgAttachments.length > 0 && <AttachmentList attachments={msgAttachments} />}
-          <ThreadBadge />
-          {!pendingStatus && messageReactions.length > 0 && (
-            <Reactions
-              messageId={message.id}
-              reactions={messageReactions}
-              currentUserId={currentUserId}
-              memberMap={memberMap}
-              onAdd={onAddReaction}
-              onRemove={onRemoveReaction}
-            />
-          )}
+        <ReplyQuote indent="pl-11" />
+        <div className="flex gap-2 items-baseline">
+          <span className="text-[10px] text-kd-text-mute font-mono w-9 shrink-0 text-right">
+            {time}
+          </span>
+          <button
+            type="button"
+            onClick={() => openProfile(message.authorId)}
+            className="text-[13px] font-bold text-kd-text hover:underline shrink-0"
+          >
+            {name}
+          </button>
+          <div className="flex-1 min-w-0">
+            {message.content && (
+              <span className="text-[13px] text-kd-text leading-snug break-words">
+                <span className="kd-md inline" dangerouslySetInnerHTML={{ __html: html }} />
+                {message.editedAt && (
+                  <span className="text-[9px] text-kd-text-mute font-mono ml-1">(изм.)</span>
+                )}
+              </span>
+            )}
+            {pendingStatus === 'error' && onRetry && (
+              <button type="button" onClick={onRetry} className="text-[9px] text-kd-danger font-mono hover:underline ml-1">
+                ошибка · повторить?
+              </button>
+            )}
+          </div>
+          {actionsEl}
         </div>
-        <Actions
-          isOwn={isOwn}
-          canDelete={canDelete}
-          editDisabled={editDisabled}
-          pendingStatus={pendingStatus}
-          onReply={() => onReply(message as IMessage)}
-          onCopy={copyContent}
-          onEdit={() => setEditing(true)}
-          onDelete={() => onDelete(message.id)}
-        />
+        {(msgAttachments.length > 0 || msgThread !== null || reactionsEl !== null) && (
+          <div className="pl-11">
+            {msgAttachments.length > 0 && <AttachmentList attachments={msgAttachments} />}
+            <ThreadBadge />
+            {reactionsEl}
+          </div>
+        )}
       </div>
     )
   }
 
-  return (
-    <div
-      className={`group flex gap-2.5 px-4 py-1 items-start hover:bg-kd-panel-alt/40 ${opacityCls}`}
-      data-message-id={message.id}
-      onContextMenu={openContextMenu}
-    >
-      {contextMenuEl}
-      <button
-        type="button"
-        onClick={() => openProfile(message.authorId)}
-        title="открыть профиль"
-        className="shrink-0"
+  if (grouped) {
+    return (
+      <div
+        className={`group flex gap-2.5 px-4 py-[2px] items-start hover:bg-kd-panel-alt/40 ${opacityCls}`}
+        data-message-id={message.id}
+        onContextMenu={openContextMenu}
       >
-        <Avatar name={name} avatarUrl={member?.avatarUrl ?? null} size={32} />
-      </button>
-      <div className="flex-1 min-w-0">
-        {msgReplyTo && (
-          <button
-            type="button"
-            className="flex items-center gap-1.5 mb-0.5 pl-1 w-full text-left text-[10px] text-kd-text-mute hover:opacity-80 transition-opacity min-w-0"
-            onClick={() => scrollToMessage(msgReplyTo.id)}
-          >
-            <span
-              aria-hidden
-              className="shrink-0 w-2.5 h-1.5 border-t border-l border-kd-text-mute rounded-tl-[3px]"
-            />
-            {msgReplyTo.deleted ? (
-              <span className="italic truncate">↳ оригинал удалён</span>
-            ) : (
-              <>
-                <span className="font-mono font-bold text-kd-text-soft shrink-0">
-                  ↳ {msgReplyTo.authorName}
-                </span>
-                <span className="opacity-80 truncate min-w-0">{msgReplyTo.content}</span>
-              </>
-            )}
-          </button>
-        )}
-        <div className="flex items-baseline gap-1.5 flex-wrap">
-          <button
-            type="button"
-            onClick={() => openProfile(message.authorId)}
-            className="text-[13px] font-bold text-kd-text hover:underline"
-          >
-            {name}
-          </button>
-          {role && <Badge variant="role">{role}</Badge>}
-          <span className="text-[10px] text-kd-text-mute font-mono">{time}</span>
-          {pendingStatus === 'sending' && (
-            <span className="text-[9px] text-kd-text-mute font-mono">отправляется…</span>
+        {contextMenuEl}
+        <span className="w-8 shrink-0 text-right text-[9px] text-kd-text-mute font-mono opacity-0 group-hover:opacity-100 transition-opacity pt-1 select-none">
+          {time}
+        </span>
+        <div className="flex-1 min-w-0">
+          {message.content && (
+            <div className="text-[13px] text-kd-text leading-relaxed break-words min-w-0">
+              <div className="kd-md" dangerouslySetInnerHTML={{ __html: html }} />
+              {message.editedAt && (
+                <span className="text-[9px] text-kd-text-mute font-mono ml-1">(изм.)</span>
+              )}
+            </div>
           )}
           {pendingStatus === 'error' && onRetry && (
             <button type="button" onClick={onRetry} className="text-[9px] text-kd-danger font-mono hover:underline">
               ошибка · повторить?
             </button>
           )}
+          {msgAttachments.length > 0 && <AttachmentList attachments={msgAttachments} />}
+          <ThreadBadge />
+          {reactionsEl}
         </div>
-        {message.content && (
-          <div className="text-[13px] text-kd-text leading-relaxed mt-0.5 break-words min-w-0">
-            <div className="kd-md" dangerouslySetInnerHTML={{ __html: html }} />
-            {message.editedAt && (
-              <span className="text-[9px] text-kd-text-mute font-mono ml-1">(изм.)</span>
+        {actionsEl}
+      </div>
+    )
+  }
+
+  return (
+    <div
+      className={`group px-4 py-1 hover:bg-kd-panel-alt/40 ${opacityCls}`}
+      data-message-id={message.id}
+      onContextMenu={openContextMenu}
+    >
+      {contextMenuEl}
+      <ReplyQuote indent="pl-[42px]" />
+      <div className="flex gap-2.5 items-start">
+        <button
+          type="button"
+          onClick={() => openProfile(message.authorId)}
+          title="открыть профиль"
+          className="shrink-0"
+        >
+          <Avatar name={name} avatarUrl={member?.avatarUrl ?? null} size={32} />
+        </button>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-baseline gap-1.5 flex-wrap">
+            <button
+              type="button"
+              onClick={() => openProfile(message.authorId)}
+              className="text-[13px] font-bold text-kd-text hover:underline"
+            >
+              {name}
+            </button>
+            {role && <Badge variant="role">{role}</Badge>}
+            <span className="text-[10px] text-kd-text-mute font-mono">{time}</span>
+            {pendingStatus === 'sending' && (
+              <span className="text-[9px] text-kd-text-mute font-mono">отправляется…</span>
+            )}
+            {pendingStatus === 'error' && onRetry && (
+              <button type="button" onClick={onRetry} className="text-[9px] text-kd-danger font-mono hover:underline">
+                ошибка · повторить?
+              </button>
             )}
           </div>
-        )}
-        {msgAttachments.length > 0 && <AttachmentList attachments={msgAttachments} />}
-        <ThreadBadge />
-        {!pendingStatus && (
-          <Reactions
-            messageId={message.id}
-            reactions={messageReactions}
-            currentUserId={currentUserId}
-            memberMap={memberMap}
-            onAdd={onAddReaction}
-            onRemove={onRemoveReaction}
-          />
-        )}
+          {message.content && (
+            <div className="text-[13px] text-kd-text leading-relaxed mt-0.5 break-words min-w-0">
+              <div className="kd-md" dangerouslySetInnerHTML={{ __html: html }} />
+              {message.editedAt && (
+                <span className="text-[9px] text-kd-text-mute font-mono ml-1">(изм.)</span>
+              )}
+            </div>
+          )}
+          {msgAttachments.length > 0 && <AttachmentList attachments={msgAttachments} />}
+          <ThreadBadge />
+          {reactionsEl}
+        </div>
+        {actionsEl}
       </div>
-      <Actions
-        isOwn={isOwn}
-        canDelete={canDelete}
-        editDisabled={editDisabled}
-        pendingStatus={pendingStatus}
-        onReply={() => onReply(message as IMessage)}
-        onCopy={copyContent}
-        onEdit={() => setEditing(true)}
-        onDelete={() => onDelete(message.id)}
-      />
     </div>
   )
 }
