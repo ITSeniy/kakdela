@@ -26,10 +26,11 @@ import {
 } from '../servers/api.js'
 import { useServerSettingsUi } from '../settings/store.js'
 import { ThreadList } from '../threads/ThreadList.js'
-import { toggleLocalParticipantMute } from '../../lib/livekit.js'
+import { applyParticipantVolume, toggleLocalParticipantMute } from '../../lib/livekit.js'
 import { moderateVoice } from '../voice/api.js'
 import { useLocalMute } from '../voice/localMute.js'
 import { useVoiceStore } from '../voice/store.js'
+import { useVoiceVolumes, volumesFor } from '../voice/volumeSettings.js'
 import { useVoiceChannelPresence } from '../voice/useVoiceChannelPresence.js'
 import { CreateChannelModal, type CreateChannelMode } from './CreateChannelModal.js'
 import { UserBar } from './UserBar.js'
@@ -259,6 +260,8 @@ export function ChannelList({ serverId, activeChannelId }: ChannelListProps) {
   const selfMuted = useVoiceStore((s) => s.muted)
   const selfDeafened = useVoiceStore((s) => s.deafened)
   const localMutedIds = useLocalMute((s) => s.mutedUserIds)
+  const voiceVolumes = useVoiceVolumes((s) => s.volumes)
+  const setVoiceVolume = useVoiceVolumes((s) => s.setVolume)
 
   useEffect(() => {
     if (!menuOpen) return
@@ -845,6 +848,44 @@ export function ChannelList({ serverId, activeChannelId }: ChannelListProps) {
           <div className="px-3 py-1.5 text-[11px] font-bold text-kd-text truncate border-b border-kd-border mb-1">
             {voiceUserMenu.row.name}
           </div>
+          {/* Персональная громкость: голос всегда, стрим — когда транслирует.
+              Меню при перетаскивании ползунка не закрывается. */}
+          <div className="px-3 py-1.5 flex flex-col gap-0.5">
+            <label className="text-[10px] font-mono text-kd-text-mute flex items-center justify-between">
+              <span>громкость</span>
+              <span>{Math.round(volumesFor(voiceVolumes, voiceUserMenu.row.userId).user * 100)}%</span>
+            </label>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={Math.round(volumesFor(voiceVolumes, voiceUserMenu.row.userId).user * 100)}
+              onChange={(e) => {
+                setVoiceVolume(voiceUserMenu.row.userId, 'user', Number(e.target.value) / 100)
+                applyParticipantVolume(voiceUserMenu.row.userId)
+              }}
+              className="w-full h-1 accent-kd-accent cursor-pointer"
+            />
+          </div>
+          {voiceUserMenu.row.live && (
+            <div className="px-3 py-1.5 flex flex-col gap-0.5">
+              <label className="text-[10px] font-mono text-kd-text-mute flex items-center justify-between">
+                <span>громкость стрима</span>
+                <span>{Math.round(volumesFor(voiceVolumes, voiceUserMenu.row.userId).stream * 100)}%</span>
+              </label>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={Math.round(volumesFor(voiceVolumes, voiceUserMenu.row.userId).stream * 100)}
+                onChange={(e) => {
+                  setVoiceVolume(voiceUserMenu.row.userId, 'stream', Number(e.target.value) / 100)
+                  applyParticipantVolume(voiceUserMenu.row.userId)
+                }}
+                className="w-full h-1 accent-kd-accent cursor-pointer"
+              />
+            </div>
+          )}
           <button
             type="button"
             onClick={() => {

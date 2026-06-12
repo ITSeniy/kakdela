@@ -4,6 +4,7 @@ import type { Channel, CustomEmoji, MemberPublic, Message as IMessage } from '@k
 
 import { Avatar } from '../../components/Avatar.js'
 import { Badge } from '../../components/Badge.js'
+import { confirmDialog } from '../../components/ConfirmDialog.js'
 import { Icon } from '../../components/Icon.js'
 import { useProfileUi } from '../profile/store.js'
 import { useThreadUi } from '../threads/store.js'
@@ -70,7 +71,8 @@ function Actions({
   onReply: () => void
   onCopy: () => void
   onEdit: () => void
-  onDelete: () => void
+  /** skipConfirm = true при shift-клике — удалить без подтверждения. */
+  onDelete: (skipConfirm: boolean) => void
   onPickReaction: (emoji: string) => void
 }) {
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -119,7 +121,12 @@ function Actions({
         </button>
       )}
       {canDelete && (
-        <button type="button" onClick={onDelete} title="удалить" className="hover:text-kd-danger p-1">
+        <button
+          type="button"
+          onClick={(e) => onDelete(e.shiftKey)}
+          title="удалить (shift — без подтверждения)"
+          className="hover:text-kd-danger p-1"
+        >
           <Icon.Trash size={13} />
         </button>
       )}
@@ -178,6 +185,21 @@ export function Message({
   const canDelete = isOwn || currentUserRole === 'admin' || currentUserRole === 'owner'
   const editDisabled = Date.now() - new Date(message.createdAt).getTime() > EDIT_WINDOW_MS
 
+  async function confirmDelete(skipConfirm: boolean) {
+    if (!skipConfirm) {
+      const preview =
+        message.content.length > 120 ? message.content.slice(0, 117) + '…' : message.content
+      const ok = await confirmDialog({
+        title: 'удалить сообщение?',
+        body: preview || 'сообщение без текста — вложения тоже удалятся.',
+        confirmLabel: 'удалить',
+        danger: true,
+      })
+      if (!ok) return
+    }
+    onDelete(message.id)
+  }
+
   // Плотность как в Discord. compact — всё в одну строку (включая реплаи:
   // цитата строкой выше). cozy — первое сообщение группы с аватаркой,
   // продолжения (тот же автор, < 5 минут, не реплай) — без аватарки и имени,
@@ -225,7 +247,7 @@ export function Message({
       onReply={() => onReply(message as IMessage)}
       onStartThread={handleStartThread}
       onEdit={() => setEditing(true)}
-      onDelete={() => onDelete(message.id)}
+      onDelete={() => void confirmDelete(false)}
       onCopyText={copyContent}
       onCopyLink={copyLink}
       onClose={() => setMenuPos(null)}
@@ -301,7 +323,7 @@ export function Message({
       onReply={() => onReply(message as IMessage)}
       onCopy={copyContent}
       onEdit={() => setEditing(true)}
-      onDelete={() => onDelete(message.id)}
+      onDelete={(skipConfirm) => void confirmDelete(skipConfirm)}
       onPickReaction={(emoji) => onAddReaction(message.id, emoji)}
     />
   )

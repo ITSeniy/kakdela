@@ -18,6 +18,7 @@ import type { AudioCaptureOptions } from 'livekit-client'
 
 import { useLocalMute } from '../features/voice/localMute.js'
 import { useVoiceStore } from '../features/voice/store.js'
+import { useVoiceVolumes, volumesFor } from '../features/voice/volumeSettings.js'
 
 // «Активная» комната — на которую подписан UI. Не singleton в строгом смысле:
 // возможны короткоживущие «сироты» во время гонок join/join (свежий join
@@ -201,16 +202,22 @@ export async function restartMicConstraints(opts: AudioCaptureOptions): Promise<
   }
 }
 
-/** Итоговая громкость участника: deafen глушит всех, локальный мьют — точечно. */
-function effectiveVolume(userId: string, deafened: boolean): number {
-  if (deafened) return 0
-  return useLocalMute.getState().isMuted(userId) ? 0 : 1
+/** Итоговая громкость участника: deafen глушит всех, локальный мьют —
+ *  точечно, дальше — персональные регуляторы голоса и стрима. */
+function applyVolumeFor(p: RemoteParticipant, deafened: boolean): void {
+  const silenced = deafened || useLocalMute.getState().isMuted(p.identity)
+  const vols = volumesFor(useVoiceVolumes.getState().volumes, p.identity)
+  p.setVolume(silenced ? 0 : vols.user, Track.Source.Microphone)
+  p.setVolume(silenced ? 0 : vols.stream, Track.Source.ScreenShareAudio)
 }
 
-function applyVolumeFor(p: RemoteParticipant, deafened: boolean): void {
-  const volume = effectiveVolume(p.identity, deafened)
-  p.setVolume(volume, Track.Source.Microphone)
-  p.setVolume(volume, Track.Source.ScreenShareAudio)
+/** Переприменяет громкость одного участника в активной комнате — дёргается
+ *  после изменения персонального регулятора. */
+export function applyParticipantVolume(userId: string): void {
+  const room = currentRoom
+  if (!room) return
+  const p = room.remoteParticipants.get(userId)
+  if (p) applyVolumeFor(p, useVoiceStore.getState().deafened)
 }
 
 /**
