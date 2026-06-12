@@ -17,6 +17,12 @@ const EnvSchema = z.object({
   JWT_REFRESH_TTL: z.string().default('30d'),
 
   LIVEKIT_URL: z.string().default('ws://localhost:7880'),
+  // Admin-API (twirp, RoomServiceClient). LIVEKIT_URL — публичный signaling
+  // для клиентов; speedy же должен ходить в LiveKit напрямую: на VPS это
+  // http://livekit:7880 по docker-сети (через публичный домен изнутри
+  // контейнера hairpin обычно не проходит). Не задан → выводится из
+  // LIVEKIT_URL заменой ws→http (достаточно для dev).
+  LIVEKIT_ADMIN_URL: z.string().optional(),
   LIVEKIT_API_KEY: z.string().default('devkey'),
   LIVEKIT_API_SECRET: z.string(),
 

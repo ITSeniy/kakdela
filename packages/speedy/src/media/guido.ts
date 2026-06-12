@@ -16,11 +16,12 @@ export function voiceRoomName(channelId: string): string {
   return `voice-${channelId}`
 }
 
-// RoomServiceClient работает по HTTP/HTTPS (twirp), LIVEKIT_URL у нас в ws://.
-// В проде клиент будет ходить через Caddy в wss://, а speedy — напрямую в
-// http://livekit:7880; пока что одного URL достаточно, конвертируем схему.
+// RoomServiceClient работает по HTTP/HTTPS (twirp). В проде клиенты ходят
+// через Caddy (wss://<домен>/livekit), а speedy — напрямую по docker-сети:
+// LIVEKIT_ADMIN_URL=http://livekit:7880. В dev переменная не нужна —
+// конвертируем схему LIVEKIT_URL (ws://localhost:7880 → http://...).
 function adminHost(): string {
-  return env.LIVEKIT_URL.replace(/^ws(s?):\/\//, 'http$1://')
+  return env.LIVEKIT_ADMIN_URL ?? env.LIVEKIT_URL.replace(/^ws(s?):\/\//, 'http$1://')
 }
 
 let roomServiceSingleton: RoomServiceClient | null = null

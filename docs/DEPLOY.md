@@ -205,6 +205,7 @@ docker compose -f docker-compose.prod.yml exec backup kd-backup
 | Картинки не грузятся | `s3.<домен>` резолвится? `curl -I https://s3.<домен>` отвечает? `S3_PUBLIC_ENDPOINT` в `.env` без опечаток? |
 | Голос: подключается, но тишина | Почти всегда UDP. `ufw status` — открыт `50000:50100/udp`? В `livekit.prod.yaml` стоит `use_external_ip: true`? После правок: `docker compose -f docker-compose.prod.yml restart livekit`. |
 | Голос не подключается вообще | `docker logs kd-livekit`. `LIVEKIT_API_SECRET` в `.env` и `keys` в `livekit.prod.yaml` совпадают? |
+| `internal-error` при входе в голосовой канал | `docker logs kd-speedy`. Задан ли `LIVEKIT_ADMIN_URL=http://livekit:7880` в `.env`? Без него speedy пытается достучаться до admin-API LiveKit через публичный домен — изнутри docker-сети это hairpin, который обычно не проходит. |
 | Presence в голосовом канале не обновляется | Webhook: в `docker logs kd-livekit` ошибки доставки на `http://speedy:3001/...`? Оба контейнера в сети `kd-net` (`docker network inspect kd-net`)? |
 | Поменял домен — клиент ходит на старый | `VITE_*` запечены в бандл: пересобери `kakdela/caddy` (и `.msi`). |
 
