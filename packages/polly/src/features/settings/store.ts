@@ -12,6 +12,7 @@ export type SettingsPage =
   | 'notifications'
   | 'appearance'
   | 'voice'
+  | 'sounds'
   | 'shortcuts'
 
 interface SettingsUiState {

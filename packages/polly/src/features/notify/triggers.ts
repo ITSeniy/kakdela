@@ -10,6 +10,7 @@ import { notify } from '../../lib/host/notify.js'
 import { wsClient } from '../../lib/ws.js'
 import { listInboxMentions } from '../inbox/api.js'
 import { getServerDetail } from '../servers/api.js'
+import { playSound } from '../sounds/sounds.js'
 import { useNotifyPrefs } from './prefs.js'
 
 // Debounce-окно на канал — не больше одной нотификации в этот интервал. Без
@@ -126,12 +127,14 @@ export function useNotifyTriggers(): void {
           return
         }
         lastNotifyAtRef.current.set(event.channelId, now)
+        playSound('notification')
         void handleMentionNotification(event.channelId, queryClient)
       }
 
       if (event.t === 'dm.new') {
         if (!useNotifyPrefs.getState().dms) return
         if (!shouldNotify(event.channelId, uiRef.current, focusedRef.current)) return
+        playSound('notification')
         void notify({
           title: 'новое личное сообщение',
           body:  'кто-то начал с вами личный диалог',

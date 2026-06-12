@@ -100,6 +100,7 @@ export function DmScreen({ channelId }: DmScreenProps) {
       m.set(user.id, {
         id: user.id,
         displayName: user.displayName,
+        username: user.username,
         avatarUrl: user.avatarUrl,
         status: user.status,
         role: 'member',
@@ -109,6 +110,7 @@ export function DmScreen({ channelId }: DmScreenProps) {
       m.set(summary.otherUser.id, {
         id: summary.otherUser.id,
         displayName: summary.otherUser.displayName,
+        ...(summary.otherUser.username !== undefined ? { username: summary.otherUser.username } : {}),
         avatarUrl: summary.otherUser.avatarUrl,
         status: summary.otherUser.status,
         role: 'member',
@@ -277,6 +279,8 @@ export function DmScreen({ channelId }: DmScreenProps) {
       />
       <Composer
         channelName={summary?.otherUser.displayName ?? ''}
+        channelId={channelId}
+        memberMap={memberMap}
         replyTo={replyTo}
         replyAuthor={replyTo ? memberMap.get(replyTo.authorId)?.displayName : undefined}
         onCancelReply={() => setReplyTo(null)}

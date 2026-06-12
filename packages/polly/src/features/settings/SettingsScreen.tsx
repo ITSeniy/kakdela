@@ -21,6 +21,7 @@ import { MembersSettings } from './MembersSettings.js'
 import { NotificationSettings } from './NotificationSettings.js'
 import { ProfileSettings } from './ProfileSettings.js'
 import { ShortcutsSettings } from './ShortcutsSettings.js'
+import { SoundSettings } from './SoundSettings.js'
 import { VoiceSettings } from './VoiceSettings.js'
 import { useSettingsUi, type SettingsPage } from './store.js'
 
@@ -44,6 +45,7 @@ const ACCOUNT_PAGES: PageDef[] = [
   { id: 'notifications', label: 'уведомления',   desc: 'когда показывать нативные всплывашки' },
   { id: 'appearance',    label: 'внешний вид',   desc: 'как «какдела» будет выглядеть у тебя' },
   { id: 'voice',         label: 'голос и видео', desc: 'микрофон, шумодав и push-to-talk' },
+  { id: 'sounds',        label: 'звуки',         desc: 'звуки интерфейса и пак на вкус' },
   { id: 'shortcuts',     label: 'клавиши',       desc: 'горячие клавиши приложения' },
 ]
 
@@ -202,6 +204,7 @@ export function SettingsScreen() {
             {current.id === 'notifications' && <NotificationSettings />}
             {current.id === 'appearance'    && <AppearanceSettings />}
             {current.id === 'voice'         && <VoiceSettings />}
+            {current.id === 'sounds'        && <SoundSettings />}
             {current.id === 'shortcuts'     && <ShortcutsSettings />}
           </div>
         </div>

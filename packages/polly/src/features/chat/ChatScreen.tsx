@@ -235,6 +235,9 @@ export function ChatScreen({ serverId, channelId }: ChatScreenProps) {
       <Composer
         channelName={channel?.name ?? ''}
         customEmoji={serverEmoji}
+        channelId={channelId}
+        memberMap={memberMap}
+        allowBroadcast
         replyTo={replyTo}
         replyAuthor={replyTo ? memberMap.get(replyTo.authorId)?.displayName : undefined}
         onCancelReply={() => setReplyTo(null)}

@@ -89,7 +89,7 @@ async function buildMentionContext(
     if (!dm) return { candidates: [], allowBroadcast: false, onlineIds: [] }
     const ids = [dm.userAId, dm.userBId]
     const userRows = await db
-      .select({ id: users.id, displayName: users.displayName })
+      .select({ id: users.id, displayName: users.displayName, username: users.username })
       .from(users)
       .where(inArray(users.id, ids))
     return { candidates: userRows, allowBroadcast: false, onlineIds: [] }
@@ -101,6 +101,7 @@ async function buildMentionContext(
     .select({
       id:          users.id,
       displayName: users.displayName,
+      username:    users.username,
       role:        serverMembers.role,
     })
     .from(serverMembers)
@@ -119,7 +120,7 @@ async function buildMentionContext(
     .map((m) => m.id)
 
   return {
-    candidates: memberRows.map((m) => ({ id: m.id, displayName: m.displayName })),
+    candidates: memberRows.map((m) => ({ id: m.id, displayName: m.displayName, username: m.username })),
     allowBroadcast,
     onlineIds,
   }

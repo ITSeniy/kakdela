@@ -1,8 +1,11 @@
-import React, { type ClipboardEvent, type DragEvent, type KeyboardEvent, Suspense, useCallback, useEffect, useRef, useState } from 'react'
+import React, { type ClipboardEvent, type DragEvent, type KeyboardEvent, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import type { Attachment, CustomEmoji, Message } from '@kakdela/ginzu/api-types'
+import type { Attachment, CustomEmoji, MemberPublic, Message } from '@kakdela/ginzu/api-types'
 
+import { Avatar } from '../../components/Avatar.js'
 import { Icon } from '../../components/Icon.js'
+import { wsClient } from '../../lib/ws.js'
+import { useAuthStore } from '../auth/store.js'
 import {
   MAX_ATTACHMENT_SIZE,
   UploadError,
@@ -35,15 +38,88 @@ interface ComposerProps {
   customEmoji?: ReadonlyArray<CustomEmoji>
   replyTo: Message | null
   replyAuthor: string | undefined
+  /** id канала — для индикатора «кто печатает» и отправки typing-событий. */
+  channelId?: string
+  /** Участники — для автокомплита @упоминаний и имён печатающих. */
+  memberMap?: ReadonlyMap<string, MemberPublic>
+  /** Показывать ли @everyone / @here в автокомплите (серверные каналы). */
+  allowBroadcast?: boolean
   onCancelReply: () => void
   onSend: (content: string, attachments: Attachment[]) => void
+}
+
+const TYPING_THROTTLE_MS = 3_000
+const TYPING_TTL_MS = 8_000
+
+/** «Аня печатает…» вместо подсказки про shift+⏎, пока кто-то печатает. */
+function TypingLine({ channelId, memberMap }: {
+  channelId: string
+  memberMap?: ReadonlyMap<string, MemberPublic>
+}) {
+  const meId = useAuthStore((s) => s.user?.id)
+  const [typers, setTypers] = useState<Map<string, number>>(new Map())
+
+  useEffect(() => {
+    setTypers(new Map())
+    const unsub = wsClient.on((event) => {
+      if (event.t !== 'typing' || event.channelId !== channelId) return
+      if (event.userId === meId) return
+      setTypers((m) => {
+        const next = new Map(m)
+        next.set(event.userId, Date.now() + TYPING_TTL_MS)
+        return next
+      })
+    })
+    const prune = setInterval(() => {
+      setTypers((m) => {
+        const now = Date.now()
+        let changed = false
+        const next = new Map(m)
+        for (const [id, exp] of next) {
+          if (exp <= now) { next.delete(id); changed = true }
+        }
+        return changed ? next : m
+      })
+    }, 1000)
+    return () => { unsub(); clearInterval(prune) }
+  }, [channelId, meId])
+
+  const names = [...typers.keys()].map((id) => memberMap?.get(id)?.displayName ?? 'кто-то')
+  if (names.length === 0) return <span>shift+⏎ — новая строка</span>
+  const label = names.length === 1
+    ? `${names[0]} печатает`
+    : names.length === 2
+      ? `${names[0]} и ${names[1]} печатают`
+      : 'несколько человек печатают'
+  return <span className="text-kd-accent font-semibold animate-pulse">{label}…</span>
+}
+
+interface MentionOption {
+  key: string
+  label: string
+  /** Что вставить в текст (без завершающего пробела). */
+  insert: string
+  sub?: string
+  avatarUrl?: string | null
+  broadcast?: boolean
+}
+
+/** Токен для текста: предпочитаем username (`@ник`) — он уникален и без
+    пробелов; fallback — первое слово displayName (его extractor тоже матчит). */
+function mentionToken(m: MemberPublic): string {
+  if (m.username) return '@' + m.username
+  return '@' + (m.displayName.split(/\s+/)[0] ?? m.displayName)
 }
 
 function makeLocalId(): string {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36)
 }
 
-export function Composer({ channelName, customEmoji, replyTo, replyAuthor, onCancelReply, onSend }: ComposerProps) {
+export function Composer({
+  channelName, customEmoji, replyTo, replyAuthor,
+  channelId, memberMap, allowBroadcast,
+  onCancelReply, onSend,
+}: ComposerProps) {
   const [text, setText] = useState('')
   const [attachments, setAttachments] = useState<PendingAttachment[]>([])
   const [isDragOver, setIsDragOver] = useState(false)
@@ -51,6 +127,11 @@ export function Composer({ channelName, customEmoji, replyTo, replyAuthor, onCan
   const [pickerOpen, setPickerOpen] = useState(false)
   // Всплывашка форматирования — пока в textarea есть выделение.
   const [hasSelection, setHasSelection] = useState(false)
+  // @упоминание под курсором: позиция '@' и набранный кусок имени.
+  const [mention, setMention] = useState<{ start: number; query: string } | null>(null)
+  const [mentionIdx, setMentionIdx] = useState(0)
+  const meId = useAuthStore((s) => s.user?.id)
+  const lastTypingSentRef = useRef(0)
 
   const taRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -101,6 +182,77 @@ export function Composer({ channelName, customEmoji, replyTo, replyAuthor, onCan
     const ta = taRef.current
     if (!ta) return
     setHasSelection(ta.selectionStart !== ta.selectionEnd)
+  }
+
+  /** Ищем `@кусок` непосредственно перед кареткой. */
+  function syncMention(nextText: string, caret: number) {
+    if (!memberMap) return
+    const before = nextText.slice(0, caret)
+    const m = /(^|[\s(])@([\p{L}\p{N}_-]*)$/u.exec(before)
+    if (m) {
+      const query = m[2] ?? ''
+      setMention({ start: caret - query.length - 1, query })
+      setMentionIdx(0)
+    } else {
+      setMention(null)
+    }
+  }
+
+  const mentionOptions = useMemo<MentionOption[]>(() => {
+    if (!mention || !memberMap) return []
+    const q = mention.query.toLowerCase()
+    const list: MentionOption[] = []
+    if (allowBroadcast) {
+      if ('everyone'.startsWith(q)) {
+        list.push({ key: 'everyone', label: '@everyone', insert: '@everyone', sub: 'уведомить всех', broadcast: true })
+      }
+      if ('here'.startsWith(q)) {
+        list.push({ key: 'here', label: '@here', insert: '@here', sub: 'уведомить тех, кто в сети', broadcast: true })
+      }
+    }
+    for (const m of memberMap.values()) {
+      if (m.id === meId) continue
+      const byName = m.displayName.toLowerCase().includes(q)
+      const byNick = m.username ? m.username.toLowerCase().includes(q) : false
+      if (q && !byName && !byNick) continue
+      list.push({
+        key: m.id,
+        label: m.displayName,
+        insert: mentionToken(m),
+        ...(m.username ? { sub: '@' + m.username } : {}),
+        avatarUrl: m.avatarUrl,
+      })
+      if (list.length >= 8) break
+    }
+    return list.slice(0, 8)
+  }, [mention, memberMap, allowBroadcast, meId])
+
+  function pickMention(opt: MentionOption) {
+    if (!mention) return
+    const ta = taRef.current
+    const end = mention.start + 1 + mention.query.length
+    const next = text.slice(0, mention.start) + opt.insert + ' ' + text.slice(end)
+    setText(next)
+    setMention(null)
+    const caret = mention.start + opt.insert.length + 1
+    requestAnimationFrame(() => {
+      ta?.focus()
+      ta?.setSelectionRange(caret, caret)
+    })
+  }
+
+  function handleTextChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
+    const next = e.target.value
+    setText(next)
+    syncMention(next, e.target.selectionStart ?? next.length)
+    // Сигнал «печатаю» — не чаще раза в TYPING_THROTTLE_MS.
+    if (channelId && next.trim()) {
+      const now = Date.now()
+      if (now - lastTypingSentRef.current > TYPING_THROTTLE_MS) {
+        lastTypingSentRef.current = now
+        wsClient.send({ t: 'typing', channelId })
+      }
+    }
   }
 
   /** Обернуть выделение маркерами; повторное применение снимает их. */
@@ -299,9 +451,33 @@ export function Composer({ channelName, customEmoji, replyTo, replyAuthor, onCan
     onSend(trimmed, ready)
     setText('')
     setAttachments([])
+    setMention(null)
   }
 
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
+    // Автокомплит упоминаний перехватывает навигацию, пока открыт.
+    if (mention && mentionOptions.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setMentionIdx((i) => (i + 1) % mentionOptions.length)
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setMentionIdx((i) => (i - 1 + mentionOptions.length) % mentionOptions.length)
+        return
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault()
+        const opt = mentionOptions[mentionIdx] ?? mentionOptions[0]
+        if (opt) pickMention(opt)
+        return
+      }
+      if (e.key === 'Escape') {
+        setMention(null)
+        return
+      }
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       send()
@@ -385,10 +561,40 @@ export function Composer({ channelName, customEmoji, replyTo, replyAuthor, onCan
         >
           <Icon.Plus size={15} />
         </button>
+        {/* Автокомплит @упоминаний — над полем, выше панели форматирования. */}
+        {mention && mentionOptions.length > 0 && (
+          <div
+            className="absolute bottom-full left-2 right-2 mb-1.5 z-50 bg-kd-panel border border-kd-border rounded-kd shadow-kd-modal py-1 select-none max-h-[260px] overflow-y-auto"
+            onMouseDown={(e) => e.preventDefault()}
+          >
+            {mentionOptions.map((opt, i) => (
+              <button
+                key={opt.key}
+                type="button"
+                onClick={() => pickMention(opt)}
+                onMouseEnter={() => setMentionIdx(i)}
+                className={[
+                  'w-full text-left px-3 py-1.5 flex items-center gap-2 transition-colors',
+                  i === mentionIdx ? 'bg-kd-panel-hi' : '',
+                ].join(' ')}
+              >
+                {opt.broadcast ? (
+                  <span className="w-5 h-5 rounded-full bg-kd-warm-bg text-kd-warm flex items-center justify-center text-[11px] font-bold shrink-0">@</span>
+                ) : (
+                  <Avatar name={opt.label} avatarUrl={opt.avatarUrl ?? null} size={20} />
+                )}
+                <span className="text-[12px] font-semibold text-kd-text truncate">{opt.label}</span>
+                {opt.sub && (
+                  <span className="ml-auto text-[10px] font-mono text-kd-text-mute shrink-0">{opt.sub}</span>
+                )}
+              </button>
+            ))}
+          </div>
+        )}
         <textarea
           ref={taRef}
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={handleTextChange}
           onKeyDown={handleKeyDown}
           onKeyUp={syncSelection}
           onPaste={handlePaste}
@@ -442,8 +648,9 @@ export function Composer({ channelName, customEmoji, replyTo, replyAuthor, onCan
         </button>
       </div>
       <div className="mt-1.5 px-1 text-[10px] text-kd-text-mute flex items-center gap-2.5">
-        {/* Слева — место typing-индикатора; пока подсказка про перенос строки. */}
-        <span>shift+⏎ — новая строка</span>
+        {channelId
+          ? <TypingLine channelId={channelId} memberMap={memberMap} />
+          : <span>shift+⏎ — новая строка</span>}
         <div className="flex-1" />
         <span className="font-mono">**жирный** _курсив_ ~~зачёркнутый~~ `код` ||спойлер||</span>
       </div>

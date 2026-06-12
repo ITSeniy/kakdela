@@ -273,6 +273,9 @@ export function ThreadPanel({ threadId, parentChannelId, serverId }: ThreadPanel
         <Composer
           channelName={`тред: ${titleName}`}
           customEmoji={serverEmoji}
+          channelId={threadId}
+          memberMap={memberMap}
+          allowBroadcast
           replyTo={replyTo}
           replyAuthor={replyTo ? memberMap.get(replyTo.authorId)?.displayName : undefined}
           onCancelReply={() => setReplyTo(null)}

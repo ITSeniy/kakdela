@@ -11,6 +11,7 @@ import {
   getActiveRoom,
   installVoiceRoom,
 } from '../../lib/livekit.js'
+import { playSound } from '../sounds/sounds.js'
 import { joinVoiceChannel, leaveVoiceChannel } from './api.js'
 import { useVoiceInputSettings } from './inputSettings.js'
 import { audioCaptureOptions } from './noiseSettings.js'
@@ -77,6 +78,7 @@ export function useVoiceRoom(): UseVoiceRoom {
     const { muted, deafened, setMuted, setDeafened } = useVoiceStore.getState()
     const nextMuted = !muted
     setMuted(nextMuted)
+    playSound(nextMuted ? 'mute-on' : 'mute-off')
     if (deafened && !nextMuted) {
       setDeafened(false)
       applyDeafenVolume(room, false)
@@ -102,6 +104,7 @@ export function useVoiceRoom(): UseVoiceRoom {
     } = useVoiceStore.getState()
     const nextDeafened = !deafened
     setDeafened(nextDeafened)
+    playSound(nextDeafened ? 'deafen-on' : 'deafen-off')
     applyDeafenVolume(room, nextDeafened)
     if (nextDeafened) {
       // Запоминаем, был ли мик заглушен ДО deafen: un-deafen вернёт как было.
@@ -267,10 +270,13 @@ async function runJoin(channelId: string, seq: number): Promise<void> {
   }
 
   useVoiceStore.getState().setStatus('connected')
+  playSound('voice-join')
 }
 
 async function runLeave(): Promise<void> {
+  const wasConnected = useVoiceStore.getState().activeChannelId !== null
   await teardownActive()
+  if (wasConnected) playSound('voice-leave')
 }
 
 async function teardownActive(): Promise<void> {

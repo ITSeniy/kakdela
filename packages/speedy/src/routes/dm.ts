@@ -67,6 +67,7 @@ export const dmRoutes: FastifyPluginAsyncZod = async (app) => {
         .select({
           id:          users.id,
           displayName: users.displayName,
+          username:    users.username,
           avatarUrl:   users.avatarUrl,
           status:      users.status,
         })
@@ -137,6 +138,7 @@ export const dmRoutes: FastifyPluginAsyncZod = async (app) => {
           otherUser: {
             id:          other.id,
             displayName: other.displayName,
+            username:    other.username,
             avatarUrl:   other.avatarUrl,
             status:      presenceMap.get(other.id)?.status ?? other.status,
           },
@@ -192,6 +194,7 @@ export const dmRoutes: FastifyPluginAsyncZod = async (app) => {
         .select({
           id:          users.id,
           displayName: users.displayName,
+          username:    users.username,
           avatarUrl:   users.avatarUrl,
           status:      users.status,
         })
@@ -214,6 +217,7 @@ export const dmRoutes: FastifyPluginAsyncZod = async (app) => {
       const otherPublic = {
         id:          otherUser.id,
         displayName: otherUser.displayName,
+        username:    otherUser.username,
         avatarUrl:   otherUser.avatarUrl,
         status:      presenceMap.get(otherUser.id)?.status ?? otherUser.status,
       }

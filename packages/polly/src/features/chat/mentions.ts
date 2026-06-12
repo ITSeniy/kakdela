@@ -2,7 +2,8 @@ import type { Channel, MemberPublic } from '@kakdela/ginzu/api-types'
 
 /** Resolve a token after `@` to a server member. Matches:
  *   1. the full displayName (case-insensitive)
- *   2. the first word of the displayName (so `@anya` finds "Anya Kotova")
+ *   2. the username/ник (so `@anya_k` finds @anya_k)
+ *   3. the first word of the displayName (so `@anya` finds "Anya Kotova")
  */
 export function findMemberByMention(
   members: ReadonlyMap<string, MemberPublic> | undefined,
@@ -10,14 +11,15 @@ export function findMemberByMention(
 ): MemberPublic | null {
   if (!members) return null
   const lower = raw.toLowerCase()
-  let firstWordHit: MemberPublic | null = null
+  let weakHit: MemberPublic | null = null
   for (const m of members.values()) {
     const name = m.displayName.toLowerCase()
     if (name === lower) return m
+    if (m.username && m.username.toLowerCase() === lower) return m
     const first = name.split(/\s+/)[0]
-    if (first === lower && !firstWordHit) firstWordHit = m
+    if (first === lower && !weakHit) weakHit = m
   }
-  return firstWordHit
+  return weakHit
 }
 
 /** Resolve a token after `#` to a channel by exact (case-insensitive) name. */

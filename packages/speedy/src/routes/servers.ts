@@ -203,6 +203,7 @@ export const serversRoutes: FastifyPluginAsyncZod = async (app) => {
         .select({
           id: users.id,
           displayName: users.displayName,
+          username: users.username,
           avatarUrl: users.avatarUrl,
           status: users.status,
           customStatus: users.customStatus,

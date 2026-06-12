@@ -257,6 +257,9 @@ export function VoiceCallChat({ serverId, channelId }: VoiceCallChatProps) {
       <Composer
         channelName={channel?.name ?? ''}
         customEmoji={serverEmoji}
+        channelId={channelId}
+        memberMap={memberMap}
+        allowBroadcast
         replyTo={replyTo}
         replyAuthor={replyTo ? memberMap.get(replyTo.authorId)?.displayName : undefined}
         onCancelReply={() => setReplyTo(null)}

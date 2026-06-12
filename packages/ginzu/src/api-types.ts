@@ -170,6 +170,9 @@ export type MessagesPage = z.infer<typeof MessagesPageSchema>
 export const MemberPublicSchema = z.object({
   id: z.string().uuid(),
   displayName: z.string().max(64),
+  // Логин-ник (@username) — нужен для упоминаний `@ник`. Optional, чтобы
+  // не ломать старые места, где участник собирается без него.
+  username: z.string().optional(),
   avatarUrl: z.string().url().nullable(),
   status: z.enum(['online', 'idle', 'dnd', 'offline']),
   customStatus: z.string().max(128).nullable().optional(),

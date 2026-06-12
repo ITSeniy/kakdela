@@ -16,6 +16,7 @@ import {
 } from 'livekit-client'
 import type { AudioCaptureOptions } from 'livekit-client'
 
+import { playSound } from '../features/sounds/sounds.js'
 import { useAudioDevices } from '../features/voice/deviceSettings.js'
 import { useLocalMute } from '../features/voice/localMute.js'
 import { useVoiceStore } from '../features/voice/store.js'
@@ -503,11 +504,13 @@ function attachListeners(room: Room): void {
     applyVolumeFor(p, useVoiceStore.getState().deafened)
     // Новенький не знает, чьи демки я смотрю — повторяем свой список.
     broadcastWatching(room)
+    playSound('user-join')
   })
 
   room.on(RoomEvent.ParticipantDisconnected, (p: RemoteParticipant) => {
     if (currentRoom !== room) return
     store().removeParticipant(p.identity)
+    playSound('user-leave')
   })
 
   room.on(RoomEvent.ActiveSpeakersChanged, (speakers: Participant[]) => {
@@ -527,8 +530,10 @@ function attachListeners(room: Room): void {
     }
     if (isScreenSource(pub.source)) {
       // Карточка демки появляется сразу, но подписка — только по клику.
+      const wasSharing = useVoiceStore.getState().participants.get(p.identity)?.isScreenSharing
       store().patchParticipant(p.identity, { isScreenSharing: true })
       applyScreenSubscription(p)
+      if (!wasSharing && pub.source === Track.Source.ScreenShare) playSound('stream-start')
     }
   })
 
@@ -542,6 +547,7 @@ function attachListeners(room: Room): void {
       store().patchParticipant(p.identity, { isScreenSharing: false })
       // Следующий стрим этого участника снова начнётся как «не смотрю».
       store().setWatchedScreen(p.identity, false)
+      playSound('stream-end')
     }
   })
 
@@ -552,7 +558,17 @@ function attachListeners(room: Room): void {
     try {
       const msg = JSON.parse(dataDecoder.decode(payload)) as { t?: string; watching?: string[] }
       if (msg.t === 'kd-watch' && Array.isArray(msg.watching)) {
-        store().setWatching(participant.identity, msg.watching.filter((x) => typeof x === 'string'))
+        const watching = msg.watching.filter((x) => typeof x === 'string')
+        // Звук «зритель зашёл/ушёл» — если меняется членство МОЕЙ демки.
+        const myId = room.localParticipant.identity
+        if (useVoiceStore.getState().screenSharing) {
+          const before = useVoiceStore.getState().watchingByUser.get(participant.identity) ?? []
+          const was = before.includes(myId)
+          const now = watching.includes(myId)
+          if (!was && now) playSound('viewer-join')
+          else if (was && !now) playSound('viewer-leave')
+        }
+        store().setWatching(participant.identity, watching)
       }
     } catch { /* чужой формат — игнорируем */ }
   })
@@ -625,6 +641,7 @@ function attachListeners(room: Room): void {
       }
       if (pub.source !== Track.Source.ScreenShare) return
       store().setScreenSharing(true)
+      playSound('stream-start')
     },
   )
 
@@ -639,6 +656,7 @@ function attachListeners(room: Room): void {
       }
       if (pub.source !== Track.Source.ScreenShare) return
       store().setScreenSharing(false)
+      playSound('stream-end')
     },
   )
 }

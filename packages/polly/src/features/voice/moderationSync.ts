@@ -10,6 +10,7 @@ import { useEffect } from 'react'
 
 import { toast } from '../../components/toast/index.js'
 import { applyDeafenVolume, getActiveRoom } from '../../lib/livekit.js'
+import { playSound } from '../sounds/sounds.js'
 import { wsClient } from '../../lib/ws.js'
 import { useAuthStore } from '../auth/store.js'
 import { useVoiceInputSettings } from './inputSettings.js'
@@ -79,6 +80,7 @@ export function useVoiceModerationSync(): void {
         if (event.userId !== me) return
         if (useVoiceStore.getState().activeChannelId !== event.fromChannelId) return
         toast.info('админ перенёс вас в другой канал')
+        playSound('moved')
         void joinVoiceRoom(event.toChannelId)
         return
       }

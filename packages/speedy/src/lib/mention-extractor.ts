@@ -8,6 +8,8 @@ export interface ParsedMention {
 export interface MentionCandidate {
   id: string
   displayName: string
+  /** Логин-ник (lowercase) — `@ник` тоже валидное упоминание. */
+  username?: string
 }
 
 export interface ExtractMentionsOptions {
@@ -38,14 +40,15 @@ const MENTION_RE = /(^|[\s(])@([\p{L}\p{N}_-]+)/gu
 
 function resolveName(token: string, candidates: readonly MentionCandidate[]): MentionCandidate | null {
   const lower = token.toLowerCase()
-  let firstWordHit: MentionCandidate | null = null
+  let weakHit: MentionCandidate | null = null
   for (const m of candidates) {
     const name = m.displayName.toLowerCase()
     if (name === lower) return m
+    if (m.username && m.username.toLowerCase() === lower) return m
     const first = name.split(/\s+/)[0]
-    if (first === lower && !firstWordHit) firstWordHit = m
+    if (first === lower && !weakHit) weakHit = m
   }
-  return firstWordHit
+  return weakHit
 }
 
 /**

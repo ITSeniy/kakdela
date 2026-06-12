@@ -72,6 +72,17 @@ md.inline.ruler.before('emphasis', 'mention', (state, silent) => {
   const env = (state.env ?? {}) as RenderEnv
 
   if (ch === 0x40) {
+    // @everyone / @here — broadcast-чипы (fan-out делает сервер).
+    if (name === 'everyone' || name === 'here') {
+      const open = state.push('mention_user_open', 'span', 1)
+      open.attrSet('data-mention', 'broadcast')
+      open.attrSet('class', 'kd-mention-user')
+      const text = state.push('text', '', 0)
+      text.content = '@' + name
+      state.push('mention_user_close', 'span', -1)
+      state.pos += 1 + name.length
+      return true
+    }
     const member = findMemberByMention(env.members, name)
     if (!member) return false
     const open = state.push('mention_user_open', 'span', 1)
