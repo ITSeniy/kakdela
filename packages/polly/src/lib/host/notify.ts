@@ -87,6 +87,43 @@ export async function notify(opts: NotifyOptions): Promise<void> {
   }
 }
 
+/**
+ * Прогревает permission заранее. Браузеры показывают промпт только в ответ
+ * на user gesture — вызов Notification.requestPermission() из WS-хендлера
+ * молча игнорируется, и notify() навсегда остаётся no-op. Поэтому в web-режиме
+ * вешаем one-shot listener на первый клик; в Tauri спрашиваем сразу
+ * (OS-диалог не требует жеста).
+ */
+let primed = false
+export function primeNotifyPermission(): void {
+  if (primed) return
+  primed = true
+  if (isTauri()) {
+    void ensurePermission()
+    return
+  }
+  if (typeof Notification === 'undefined') return
+  if (Notification.permission !== 'default') {
+    permissionCache = Notification.permission
+    return
+  }
+  window.addEventListener('pointerdown', () => { void ensurePermission() }, { once: true })
+}
+
+/** Текущее состояние permission — для страницы настроек. */
+export async function notifyPermissionState(): Promise<'granted' | 'denied' | 'default'> {
+  if (isTauri()) {
+    try {
+      const mod = await import('@tauri-apps/plugin-notification')
+      return (await mod.isPermissionGranted()) ? 'granted' : 'default'
+    } catch {
+      return 'denied'
+    }
+  }
+  if (typeof Notification === 'undefined') return 'denied'
+  return Notification.permission
+}
+
 /** Возвращает true, если permission уже granted (без запроса). */
 export async function isNotifyAllowed(): Promise<boolean> {
   if (permissionCache === 'granted') return true

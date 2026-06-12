@@ -2,12 +2,13 @@ import { useEffect, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useLocation } from 'wouter'
 
-import type { Channel } from '@kakdela/ginzu/api-types'
+import type { Channel, DmSummary } from '@kakdela/ginzu/api-types'
 
 import { useAuthStore } from '../auth/store.js'
 import { focusMainWindow, setTrayBadge } from '../../lib/host/tray.js'
-import { notify } from '../../lib/host/notify.js'
+import { notify, primeNotifyPermission } from '../../lib/host/notify.js'
 import { wsClient } from '../../lib/ws.js'
+import { listDms } from '../dm/api.js'
 import { listInboxMentions } from '../inbox/api.js'
 import { getServerDetail } from '../servers/api.js'
 import { playSound } from '../sounds/sounds.js'
@@ -16,6 +17,8 @@ import { useNotifyPrefs } from './prefs.js'
 // Debounce-окно на канал — не больше одной нотификации в этот интервал. Без
 // этого активный mention-poll в чатике типа «@here» мгновенно даёт 10 toast'ов.
 const PER_CHANNEL_NOTIFY_COOLDOWN_MS = 60_000
+// Личка — живой диалог, минутный кулдаун выглядел бы как «не работает».
+const PER_DM_NOTIFY_COOLDOWN_MS = 10_000
 
 interface NotifyTriggersUi {
   /** Текущий открытый channelId (server channel) — null если в DM/инбоксе. */
@@ -105,6 +108,12 @@ export function useNotifyTriggers(): void {
     return () => unsub()
   }, [queryClient])
 
+  // Просим permission заранее (в вебе — по первому клику): запрос из
+  // WS-хендлера браузер молча игнорирует, и notify() остаётся вечным no-op.
+  useEffect(() => {
+    if (currentUserId) primeNotifyPermission()
+  }, [currentUserId])
+
   useEffect(() => {
     if (!currentUserId) return undefined
 
@@ -129,6 +138,54 @@ export function useNotifyTriggers(): void {
         lastNotifyAtRef.current.set(event.channelId, now)
         playSound('notification')
         void handleMentionNotification(event.channelId, queryClient)
+      }
+
+      // Обычные сообщения в личке: `dm.new` приходит только при создании
+      // диалога, всё остальное — `msg.new` в dm-канале.
+      if (event.t === 'msg.new') {
+        if (event.message.authorId === currentUserId) return
+        if (!useNotifyPrefs.getState().dms) return
+        if (!shouldNotify(event.channelId, uiRef.current, focusedRef.current)) return
+        void (async () => {
+          // Личка ли это — выясняем по dm-list (кэш, при промахе — один fetch).
+          let dms = queryClient.getQueryData<DmSummary[]>(['dm-list'])
+          if (!dms) {
+            try {
+              dms = await queryClient.fetchQuery({
+                queryKey: ['dm-list'],
+                queryFn:  listDms,
+                staleTime: 30_000,
+              })
+            } catch {
+              return
+            }
+          }
+          if (!dms) return
+          const dm = dms.find((d) => d.channelId === event.channelId)
+          if (!dm) return // серверный канал — туда уведомляет mention-путь
+
+          const now = Date.now()
+          const last = lastNotifyAtRef.current.get(event.channelId) ?? 0
+          if (now - last < PER_DM_NOTIFY_COOLDOWN_MS) return
+          lastNotifyAtRef.current.set(event.channelId, now)
+
+          playSound('notification')
+          const trimmed = event.message.content.replace(/\s+/g, ' ').trim()
+          const body = trimmed
+            ? (trimmed.length > 140 ? trimmed.slice(0, 139) + '…' : trimmed)
+            : 'вложение'
+          void notify({
+            title: `${dm.otherUser.displayName} в личных`,
+            body,
+            tag:   `dm:${event.channelId}`,
+            onClick: () => {
+              void focusMainWindow()
+              history.pushState({}, '', `/dm/${event.channelId}`)
+              window.dispatchEvent(new PopStateEvent('popstate'))
+            },
+          })
+        })()
+        return
       }
 
       if (event.t === 'dm.new') {
