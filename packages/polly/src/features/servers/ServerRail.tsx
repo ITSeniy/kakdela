@@ -27,17 +27,27 @@ export function ServerRail({
   const queryClient = useQueryClient()
   const openCreate = useServerCreateJoinUi((s) => s.openCreate)
   const openJoin = useServerCreateJoinUi((s) => s.openJoin)
-  const [addOpen, setAddOpen] = useState(false)
+  // Позиция fixed-меню «добавить сервер». null = закрыто. Меню нельзя
+  // позиционировать absolute внутри списка: overflow-y-auto контейнера
+  // обрезает всё, что выходит за ширину рельсы, — fixed клипу не подвержен.
+  const [addMenuPos, setAddMenuPos] = useState<{ x: number; y: number } | null>(null)
   const addRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (!addOpen) return
+    if (!addMenuPos) return
     function onDown(e: MouseEvent) {
-      if (addRef.current && !addRef.current.contains(e.target as Node)) setAddOpen(false)
+      if (addRef.current && !addRef.current.contains(e.target as Node)) setAddMenuPos(null)
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setAddMenuPos(null)
     }
     document.addEventListener('mousedown', onDown)
-    return () => document.removeEventListener('mousedown', onDown)
-  }, [addOpen])
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [addMenuPos])
 
   const { data: servers = [] } = useQuery({
     queryKey: ['servers'],
@@ -81,7 +91,9 @@ export function ServerRail({
       </button>
       <div className="w-7 h-px bg-kd-border my-[3px] shrink-0" />
 
-      <div className="flex-1 min-h-0 overflow-y-auto flex flex-col items-center gap-1.5 w-full py-0.5">
+      {/* py-1: ring активного сервера выступает на 3px за иконку — паддинг
+          поменьше его подрезал у первого/последнего элемента. */}
+      <div className="flex-1 min-h-0 overflow-y-auto kd-scrollbar-hide flex flex-col items-center gap-2.5 w-full py-1">
         {servers.map((s) => (
           <ServerIcon
             key={s.id}
@@ -97,16 +109,27 @@ export function ServerRail({
           <button
             type="button"
             title="добавить сервер"
-            onClick={() => setAddOpen((v) => !v)}
+            onClick={(e) => {
+              if (addMenuPos) { setAddMenuPos(null); return }
+              const rect = e.currentTarget.getBoundingClientRect()
+              setAddMenuPos({
+                x: rect.right + 8,
+                // Не даём меню уехать за нижний край окна.
+                y: Math.min(rect.top, window.innerHeight - 92),
+              })
+            }}
             className="w-9 h-9 rounded-kd border-[1.5px] border-dashed border-kd-text-mute text-kd-text-mute flex items-center justify-center hover:text-kd-text-soft hover:border-kd-text-soft transition-colors"
           >
             <Icon.Plus size={14} />
           </button>
-          {addOpen && (
-            <div className="absolute left-12 top-0 z-50 w-44 bg-kd-panel rounded-kd border border-kd-border shadow-kd-modal overflow-hidden">
+          {addMenuPos && (
+            <div
+              className="fixed z-50 w-44 bg-kd-panel rounded-kd border border-kd-border shadow-kd-modal overflow-hidden"
+              style={{ left: addMenuPos.x, top: addMenuPos.y }}
+            >
               <button
                 type="button"
-                onClick={() => { setAddOpen(false); openCreate() }}
+                onClick={() => { setAddMenuPos(null); openCreate() }}
                 className="w-full text-left px-3 py-2 text-[12px] text-kd-text hover:bg-kd-panel-hi flex items-center gap-2"
               >
                 <span className="font-mono text-[11px] text-kd-accent">+</span>
@@ -115,7 +138,7 @@ export function ServerRail({
               <div className="h-px bg-kd-border mx-2" />
               <button
                 type="button"
-                onClick={() => { setAddOpen(false); openJoin() }}
+                onClick={() => { setAddMenuPos(null); openJoin() }}
                 className="w-full text-left px-3 py-2 text-[12px] text-kd-text hover:bg-kd-panel-hi flex items-center gap-2"
               >
                 <span className="font-mono text-[11px] text-kd-warm">↪</span>
