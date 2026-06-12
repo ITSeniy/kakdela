@@ -70,6 +70,83 @@ const MIME_BY_EXT: Record<string, string> = {
   mov:  'video/quicktime',
 }
 
+// Строка для `<input accept>` — системный пикер сразу фильтрует то, что мы
+// умеем принимать. Расширения дублируем к MIME-типам: для части форматов
+// (rar/7z/flac…) Windows не отдаёт тип, и без явного расширения пикер
+// прятал бы их даже при разрешённом MIME.
+export const FILE_PICKER_ACCEPT = [
+  ...PRESIGN_ALLOWED_CONTENT_TYPES,
+  ...Object.keys(MIME_BY_EXT).map((ext) => '.' + ext),
+].join(',')
+
+// Категории для showOpenFilePicker (File System Access API): в выпадашке
+// системного пикера появляется отдельный пункт на каждую запись. `<input
+// accept>` так не умеет — он даёт ровно один смешанный фильтр, поэтому
+// Composer сначала пробует showOpenFilePicker и падает обратно на input.
+export interface FilePickerCategory {
+  description: string
+  accept: Record<string, string[]>
+}
+
+const PICKER_CATEGORIES: FilePickerCategory[] = [
+  {
+    description: 'картинки',
+    accept: {
+      'image/jpeg': ['.jpg', '.jpeg'],
+      'image/png':  ['.png'],
+      'image/webp': ['.webp'],
+      'image/gif':  ['.gif'],
+    },
+  },
+  {
+    description: 'видео',
+    accept: {
+      'video/mp4':       ['.mp4', '.m4v'],
+      'video/webm':      ['.webm'],
+      'video/quicktime': ['.mov'],
+    },
+  },
+  {
+    description: 'аудио',
+    accept: {
+      'audio/mpeg': ['.mp3'],
+      'audio/ogg':  ['.ogg'],
+      'audio/wav':  ['.wav'],
+      'audio/flac': ['.flac'],
+      'audio/mp4':  ['.m4a'],
+    },
+  },
+  {
+    description: 'архивы',
+    accept: {
+      'application/zip':               ['.zip'],
+      'application/x-7z-compressed':   ['.7z'],
+      'application/x-rar-compressed':  ['.rar'],
+      'application/gzip':              ['.gz'],
+    },
+  },
+  {
+    description: 'документы',
+    accept: {
+      'application/pdf': ['.pdf'],
+      'text/plain':      ['.txt'],
+    },
+  },
+]
+
+// Первый пункт — «всё поддерживаемое» (он же выбран по умолчанию),
+// дальше категории по типу.
+export const FILE_PICKER_TYPES: FilePickerCategory[] = [
+  {
+    description: 'все поддерживаемые',
+    accept: PICKER_CATEGORIES.reduce<Record<string, string[]>>(
+      (all, c) => Object.assign(all, c.accept),
+      {},
+    ),
+  },
+  ...PICKER_CATEGORIES,
+]
+
 function detectMime(file: File): string {
   const raw = file.type ? (MIME_ALIASES[file.type] ?? file.type) : ''
   if (raw) return raw

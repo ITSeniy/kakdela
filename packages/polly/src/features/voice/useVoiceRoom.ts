@@ -64,82 +64,87 @@ export function joinVoiceRoom(channelId: string): Promise<void> {
 
 export function useVoiceRoom(): UseVoiceRoom {
   const join = useCallback((channelId: string) => joinVoiceRoom(channelId), [])
-
   const leave = useCallback(() => leaveVoiceRoom(), [])
+  const toggleMute = useCallback(() => toggleMuteVoice(), [])
+  const toggleDeafen = useCallback(() => toggleDeafenVoice(), [])
+  return { join, leave, toggleMute, toggleDeafen }
+}
 
-  const toggleMute = useCallback(async () => {
-    // В PTT режиме mute-кнопка отключена — мик управляется только клавишей,
-    // чтобы поведение было предсказуемым (см. T-035 hint).
-    if (useVoiceInputSettings.getState().inputMode === 'push-to-talk') return
-    // Серверный мьют снимает только админ.
-    if (useVoiceStore.getState().forcedMuted) return
+/**
+ * Тоггл микрофона без React-контекста — кнопки UI и горячие клавиши
+ * (features/voice/hotkeys.ts) дёргают одну и ту же функцию.
+ */
+export async function toggleMuteVoice(): Promise<void> {
+  // В PTT режиме mute-кнопка отключена — мик управляется только клавишей,
+  // чтобы поведение было предсказуемым (см. T-035 hint).
+  if (useVoiceInputSettings.getState().inputMode === 'push-to-talk') return
+  // Серверный мьют снимает только админ.
+  if (useVoiceStore.getState().forcedMuted) return
 
-    const room = getActiveRoom()
-    const { muted, deafened, setMuted, setDeafened } = useVoiceStore.getState()
-    const nextMuted = !muted
-    setMuted(nextMuted)
-    playSound(nextMuted ? 'mute-on' : 'mute-off')
-    if (deafened && !nextMuted) {
-      setDeafened(false)
-      applyDeafenVolume(room, false)
+  const room = getActiveRoom()
+  const { muted, deafened, setMuted, setDeafened } = useVoiceStore.getState()
+  const nextMuted = !muted
+  setMuted(nextMuted)
+  playSound(nextMuted ? 'mute-on' : 'mute-off')
+  if (deafened && !nextMuted) {
+    setDeafened(false)
+    applyDeafenVolume(room, false)
+  }
+  if (room) {
+    try {
+      await room.localParticipant.setMicrophoneEnabled(!nextMuted, audioCaptureOptions())
+    } catch (err) {
+      const name = err instanceof Error ? err.name : ''
+      const code = name === 'NotAllowedError' ? 'no-mic-permission' : 'mic-toggle-failed'
+      useVoiceStore.getState().setError(code)
     }
+  }
+}
+
+/** Тоггл наушников (deafen) без React-контекста — см. toggleMuteVoice. */
+export async function toggleDeafenVoice(): Promise<void> {
+  // Серверный deafen снимает только админ.
+  if (useVoiceStore.getState().forcedDeafened) return
+  const room = getActiveRoom()
+  const {
+    deafened, muted, mutedBeforeDeafen,
+    setDeafened, setMuted, setMutedBeforeDeafen,
+  } = useVoiceStore.getState()
+  const nextDeafened = !deafened
+  setDeafened(nextDeafened)
+  playSound(nextDeafened ? 'deafen-on' : 'deafen-off')
+  applyDeafenVolume(room, nextDeafened)
+  if (nextDeafened) {
+    // Запоминаем, был ли мик заглушен ДО deafen: un-deafen вернёт как было.
+    setMutedBeforeDeafen(muted)
+    if (!muted) {
+      setMuted(true)
+      if (room) {
+        try {
+          await room.localParticipant.setMicrophoneEnabled(false)
+        } catch (err) {
+          console.warn('[voice] mic disable failed on deafen', err)
+        }
+      }
+    }
+  } else if (
+    !mutedBeforeDeafen && muted
+    // В PTT миком управляет только клавиша — un-deafen его не трогает.
+    && useVoiceInputSettings.getState().inputMode !== 'push-to-talk'
+  ) {
+    // Глушили только наушниками — включаем мик обратно. Если мик был
+    // заглушен отдельно до deafen — оставляем заглушенным.
+    setMuted(false)
     if (room) {
       try {
-        await room.localParticipant.setMicrophoneEnabled(!nextMuted, audioCaptureOptions())
+        await room.localParticipant.setMicrophoneEnabled(true, audioCaptureOptions())
       } catch (err) {
         const name = err instanceof Error ? err.name : ''
         const code = name === 'NotAllowedError' ? 'no-mic-permission' : 'mic-toggle-failed'
         useVoiceStore.getState().setError(code)
       }
     }
-  }, [])
-
-  const toggleDeafen = useCallback(async () => {
-    // Серверный deafen снимает только админ.
-    if (useVoiceStore.getState().forcedDeafened) return
-    const room = getActiveRoom()
-    const {
-      deafened, muted, mutedBeforeDeafen,
-      setDeafened, setMuted, setMutedBeforeDeafen,
-    } = useVoiceStore.getState()
-    const nextDeafened = !deafened
-    setDeafened(nextDeafened)
-    playSound(nextDeafened ? 'deafen-on' : 'deafen-off')
-    applyDeafenVolume(room, nextDeafened)
-    if (nextDeafened) {
-      // Запоминаем, был ли мик заглушен ДО deafen: un-deafen вернёт как было.
-      setMutedBeforeDeafen(muted)
-      if (!muted) {
-        setMuted(true)
-        if (room) {
-          try {
-            await room.localParticipant.setMicrophoneEnabled(false)
-          } catch (err) {
-            console.warn('[voice] mic disable failed on deafen', err)
-          }
-        }
-      }
-    } else if (
-      !mutedBeforeDeafen && muted
-      // В PTT миком управляет только клавиша — un-deafen его не трогает.
-      && useVoiceInputSettings.getState().inputMode !== 'push-to-talk'
-    ) {
-      // Глушили только наушниками — включаем мик обратно. Если мик был
-      // заглушен отдельно до deafen — оставляем заглушенным.
-      setMuted(false)
-      if (room) {
-        try {
-          await room.localParticipant.setMicrophoneEnabled(true, audioCaptureOptions())
-        } catch (err) {
-          const name = err instanceof Error ? err.name : ''
-          const code = name === 'NotAllowedError' ? 'no-mic-permission' : 'mic-toggle-failed'
-          useVoiceStore.getState().setError(code)
-        }
-      }
-    }
-  }, [])
-
-  return { join, leave, toggleMute, toggleDeafen }
+  }
 }
 
 /**

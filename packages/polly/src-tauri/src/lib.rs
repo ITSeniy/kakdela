@@ -26,6 +26,12 @@ pub fn run() {
             set_tray_badge,
         ])
         .setup(|app| {
+            // Глобальные хоткеи регистрируются из JS (features/voice/hotkeys.ts);
+            // плагин доступен только на desktop-таргетах.
+            #[cfg(desktop)]
+            app.handle()
+                .plugin(tauri_plugin_global_shortcut::Builder::new().build())?;
+
             let show_i = MenuItem::with_id(app, "show", "Показать", true, None::<&str>)?;
             let quit_i = MenuItem::with_id(app, "quit", "Выход", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show_i, &quit_i])?;

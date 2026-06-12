@@ -22,6 +22,7 @@ import { useNotifyTriggers } from '../features/notify/triggers.js'
 import { VoiceScreen } from '../features/voice/VoiceScreen.js'
 import { useAudioDeviceSync } from '../features/voice/deviceSettings.js'
 import { useNoiseSuppressionSync } from '../features/voice/noiseSettings.js'
+import { useHotkeys } from '../features/voice/hotkeys.js'
 import { useVoicePingSampler } from '../features/voice/pingStats.js'
 import { usePushToTalk } from '../features/voice/usePushToTalk.js'
 
@@ -29,6 +30,7 @@ const LAST_CHANNEL_KEY = 'kd:last-channel'
 
 export function Shell() {
   usePushToTalk()
+  useHotkeys()
   useNoiseSuppressionSync()
   useNotifyTriggers()
   useVoicePingSampler()

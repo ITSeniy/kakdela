@@ -30,14 +30,28 @@ export const ACCENTS: AccentDef[] = [
 export const DEFAULT_ACCENT_ID = 'moss'
 export const DEFAULT_RADIUS = 6
 
+// Масштаб интерфейса — CSS zoom на <html> (Chromium: и WebView2, и браузер).
+// «Маленький» — прежний 100%, дефолт — 125%.
+export type UiScale = 'small' | 'medium' | 'large'
+
+export const UI_SCALES: Array<{ id: UiScale; label: string; pct: number }> = [
+  { id: 'small',  label: 'маленький', pct: 100 },
+  { id: 'medium', label: 'средний',   pct: 125 },
+  { id: 'large',  label: 'большой',   pct: 150 },
+]
+
+export const DEFAULT_UI_SCALE: UiScale = 'medium'
+
 interface AppearanceState {
   accentId: string
   radius: number
   /** Заливка строки под курсором (сообщения, участники голосовых). */
   hoverHighlight: boolean
+  uiScale: UiScale
   setAccent(id: string): void
   setRadius(radius: number): void
   setHoverHighlight(on: boolean): void
+  setUiScale(scale: UiScale): void
 }
 
 export const useAppearance = create<AppearanceState>()(
@@ -46,9 +60,11 @@ export const useAppearance = create<AppearanceState>()(
       accentId: DEFAULT_ACCENT_ID,
       radius: DEFAULT_RADIUS,
       hoverHighlight: true,
+      uiScale: DEFAULT_UI_SCALE,
       setAccent: (accentId) => set({ accentId }),
       setRadius: (radius) => set({ radius: Math.min(12, Math.max(0, Math.round(radius))) }),
       setHoverHighlight: (hoverHighlight) => set({ hoverHighlight }),
+      setUiScale: (uiScale) => set({ uiScale }),
     }),
     { name: 'kd:appearance' },
   ),
@@ -99,10 +115,14 @@ const ACCENT_VARS = ['--kd-accent', '--kd-accent-deep', '--kd-accent-soft', '--k
 export function applyAppearance(): void {
   if (typeof document === 'undefined') return
   const root = document.documentElement
-  const { accentId, radius } = useAppearance.getState()
+  const { accentId, radius, uiScale } = useAppearance.getState()
 
   if (radius === DEFAULT_RADIUS) root.style.removeProperty('--kd-radius')
   else root.style.setProperty('--kd-radius', `${radius}px`)
+
+  const pct = UI_SCALES.find((s) => s.id === uiScale)?.pct ?? 125
+  if (pct === 100) root.style.removeProperty('zoom')
+  else root.style.setProperty('zoom', `${pct}%`)
 
   const accent = ACCENTS.find((a) => a.id === accentId)
   if (!accent || accent.id === DEFAULT_ACCENT_ID) {

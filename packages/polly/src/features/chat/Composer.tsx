@@ -9,8 +9,11 @@ import { useAuthStore } from '../auth/store.js'
 import {
   MAX_ATTACHMENT_SIZE,
   UploadError,
+  FILE_PICKER_ACCEPT,
+  FILE_PICKER_TYPES,
   isSupportedType,
   uploadAttachment,
+  type FilePickerCategory,
 } from '../files/upload.js'
 import { Attachments, type PendingAttachment } from './Attachments.js'
 
@@ -392,7 +395,33 @@ export function Composer({
     setAttachments((arr) => arr.filter((a) => a.localId !== localId))
   }
 
-  function pickFiles() {
+  async function pickFiles() {
+    // showOpenFilePicker (Chromium, есть и в WebView2) умеет именованные
+    // категории в выпадашке фильтров — `<input accept>` даёт лишь один
+    // смешанный фильтр. API вне lib.dom — типизируем структурно.
+    const picker = (window as Window & {
+      showOpenFilePicker?: (opts: {
+        multiple?: boolean
+        excludeAcceptAllOption?: boolean
+        types?: FilePickerCategory[]
+      }) => Promise<Array<{ getFile(): Promise<File> }>>
+    }).showOpenFilePicker
+    if (picker) {
+      try {
+        const handles = await picker({
+          multiple: true,
+          excludeAcceptAllOption: false,
+          types: FILE_PICKER_TYPES,
+        })
+        const files = await Promise.all(handles.map((h) => h.getFile()))
+        if (files.length > 0) addFiles(files)
+        return
+      } catch (err) {
+        // Отмена пользователем — тишина; всё прочее — fallback на input.
+        if (err instanceof DOMException && err.name === 'AbortError') return
+        console.warn('[composer] showOpenFilePicker failed, using input', err)
+      }
+    }
     fileInputRef.current?.click()
   }
 
@@ -510,6 +539,7 @@ export function Composer({
         ref={fileInputRef}
         type="file"
         multiple
+        accept={FILE_PICKER_ACCEPT}
         className="hidden"
         onChange={handleFileInput}
       />

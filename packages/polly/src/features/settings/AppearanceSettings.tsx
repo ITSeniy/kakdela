@@ -5,7 +5,7 @@ import { Field } from '../../components/form/Field.js'
 import { Slider } from '../../components/form/Slider.js'
 import { Swatch } from '../../components/form/Swatch.js'
 import { Toggle } from '../../components/form/Toggle.js'
-import { ACCENTS, DEFAULT_RADIUS, useAppearance } from './appearance.js'
+import { ACCENTS, DEFAULT_RADIUS, UI_SCALES, useAppearance } from './appearance.js'
 import { DensityPicker } from './DensityPicker.js'
 import { ThemePicker } from './ThemePicker.js'
 
@@ -13,9 +13,11 @@ export function AppearanceSettings() {
   const accentId = useAppearance((s) => s.accentId)
   const radius = useAppearance((s) => s.radius)
   const hoverHighlight = useAppearance((s) => s.hoverHighlight)
+  const uiScale = useAppearance((s) => s.uiScale)
   const setAccent = useAppearance((s) => s.setAccent)
   const setRadius = useAppearance((s) => s.setRadius)
   const setHoverHighlight = useAppearance((s) => s.setHoverHighlight)
+  const setUiScale = useAppearance((s) => s.setUiScale)
 
   return (
     <div className="flex flex-col gap-[18px]">
@@ -39,6 +41,32 @@ export function AppearanceSettings() {
 
       <Field label="плотность" hint="как близко друг к другу располагаются сообщения">
         <DensityPicker />
+      </Field>
+
+      <Field label="масштаб" hint="размер всего интерфейса — применяется сразу">
+        <div role="radiogroup" className="flex bg-kd-panel border border-kd-border rounded-kd p-[3px] gap-0.5">
+          {UI_SCALES.map((s) => {
+            const active = s.id === uiScale
+            return (
+              <button
+                key={s.id}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                onClick={() => setUiScale(s.id)}
+                className={[
+                  'flex-1 px-2.5 py-2 rounded text-center transition-colors',
+                  active ? 'bg-kd-panel-hi' : 'hover:bg-kd-panel-soft',
+                ].join(' ')}
+              >
+                <div className={`text-[12px] font-semibold ${active ? 'text-kd-text' : 'text-kd-text-soft'}`}>
+                  {s.label}
+                </div>
+                <div className="text-[10px] font-mono text-kd-text-mute mt-0.5">{s.pct}%</div>
+              </button>
+            )
+          })}
+        </div>
       </Field>
 
       <Field label="скругление углов" hint="0 — резкие, 12 — мягкие">

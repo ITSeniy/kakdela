@@ -47,9 +47,12 @@ const CUSTOM_FILE_URLS: Partial<Record<SoundEvent, string>> = (() => {
     query: '?url',
     import: 'default',
   }) as Record<string, string>
+  // Дружелюбные синонимы имён файлов → каноничное событие.
+  const aliases: Record<string, SoundEvent> = { 'user-moved': 'moved' }
   for (const [path, url] of Object.entries(files)) {
     const base = path.split('/').pop()?.replace(/\.[a-z0-9]+$/i, '') ?? ''
-    if (base in SOUND_EVENT_LABELS) out[base as SoundEvent] = url
+    const event = base in SOUND_EVENT_LABELS ? (base as SoundEvent) : aliases[base]
+    if (event) out[event] = url
   }
   return out
 })()
