@@ -16,6 +16,7 @@ import {
 } from 'livekit-client'
 import type { AudioCaptureOptions } from 'livekit-client'
 
+import { useLocalMute } from '../features/voice/localMute.js'
 import { useVoiceStore } from '../features/voice/store.js'
 
 // «Активная» комната — на которую подписан UI. Не singleton в строгом смысле:
@@ -200,17 +201,43 @@ export async function restartMicConstraints(opts: AudioCaptureOptions): Promise<
   }
 }
 
+/** Итоговая громкость участника: deafen глушит всех, локальный мьют — точечно. */
+function effectiveVolume(userId: string, deafened: boolean): number {
+  if (deafened) return 0
+  return useLocalMute.getState().isMuted(userId) ? 0 : 1
+}
+
+function applyVolumeFor(p: RemoteParticipant, deafened: boolean): void {
+  const volume = effectiveVolume(p.identity, deafened)
+  p.setVolume(volume, Track.Source.Microphone)
+  p.setVolume(volume, Track.Source.ScreenShareAudio)
+}
+
 /**
  * Применяет громкость ко всем уже-подписанным удалённым audio-tracks.
- * Используется при toggleDeafen — устанавливает 0 либо восстанавливает 1.
+ * Используется при toggleDeafen — глушит всех либо восстанавливает,
+ * не задевая локально замьюченных.
  */
 export function applyDeafenVolume(room: Room | null, deafened: boolean): void {
   if (!room) return
-  const volume = deafened ? 0 : 1
   for (const participant of room.remoteParticipants.values()) {
-    participant.setVolume(volume, Track.Source.Microphone)
-    participant.setVolume(volume, Track.Source.ScreenShareAudio)
+    applyVolumeFor(participant, deafened)
   }
+}
+
+/**
+ * Переключает локальный мьют участника (слышимость только у меня) и сразу
+ * применяет к активной комнате. Состояние персистится в useLocalMute.
+ */
+export function toggleLocalParticipantMute(userId: string): boolean {
+  const next = !useLocalMute.getState().isMuted(userId)
+  useLocalMute.getState().setMuted(userId, next)
+  const room = currentRoom
+  if (room) {
+    const p = room.remoteParticipants.get(userId)
+    if (p) applyVolumeFor(p, useVoiceStore.getState().deafened)
+  }
+  return next
 }
 
 function rebuildParticipantsFromRoom(room: Room): void {
@@ -229,7 +256,8 @@ function rebuildParticipantsFromRoom(room: Room): void {
     })
   }
   // Сразу подцепляем уже подписанные audio-tracks — иначе peer'ы немые,
-  // пока кто-то не опубликует/перепубликует трек.
+  // пока кто-то не опубликует/перепубликует трек. Громкость — с учётом
+  // deafen и персистнутых локальных мьютов.
   for (const p of room.remoteParticipants.values()) {
     for (const pub of p.audioTrackPublications.values()) {
       const track = pub.track
@@ -237,6 +265,7 @@ function rebuildParticipantsFromRoom(room: Room): void {
         attachAudio(track as RemoteTrack)
       }
     }
+    applyVolumeFor(p, useVoiceStore.getState().deafened)
   }
 }
 
@@ -273,10 +302,7 @@ function attachListeners(room: Room): void {
       isScreenSharing: hasScreenShare(p),
       isMuted: !hasUnmutedMic(p),
     })
-    if (useVoiceStore.getState().deafened) {
-      p.setVolume(0, Track.Source.Microphone)
-      p.setVolume(0, Track.Source.ScreenShareAudio)
-    }
+    applyVolumeFor(p, useVoiceStore.getState().deafened)
   })
 
   room.on(RoomEvent.ParticipantDisconnected, (p: RemoteParticipant) => {
@@ -322,10 +348,7 @@ function attachListeners(room: Room): void {
       ) {
         store().patchParticipant(p.identity, { isScreenSharing: true })
       }
-      if (useVoiceStore.getState().deafened) {
-        p.setVolume(0, Track.Source.Microphone)
-        p.setVolume(0, Track.Source.ScreenShareAudio)
-      }
+      applyVolumeFor(p, useVoiceStore.getState().deafened)
     },
   )
 

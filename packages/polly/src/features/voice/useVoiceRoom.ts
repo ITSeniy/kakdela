@@ -49,13 +49,20 @@ function enqueueVoiceOp(action: () => Promise<void>): Promise<void> {
  * join(channelId). Авто-джойн на смену URL'а сломал бы UX (пользователь зашёл
  * посмотреть, кто там — и сразу попал в эфир).
  */
+/**
+ * Подключение к голосовому каналу без React-контекста — для voice.moved
+ * (админ перенёс) и прочих программных переходов. Та же очередь, что у
+ * hook-версии join.
+ */
+export function joinVoiceRoom(channelId: string): Promise<void> {
+  // Бампаем seq СИНХРОННО — чтобы любая уже-стоящая в очереди операция
+  // прочитала актуальный «победитель», ещё не дойдя до своей работы.
+  const seq = ++joinSequence
+  return enqueueVoiceOp(() => runJoin(channelId, seq))
+}
+
 export function useVoiceRoom(): UseVoiceRoom {
-  const join = useCallback((channelId: string) => {
-    // Бампаем seq СИНХРОННО — чтобы любая уже-стоящая в очереди операция
-    // прочитала актуальный «победитель», ещё не дойдя до своей работы.
-    const seq = ++joinSequence
-    return enqueueVoiceOp(() => runJoin(channelId, seq))
-  }, [])
+  const join = useCallback((channelId: string) => joinVoiceRoom(channelId), [])
 
   const leave = useCallback(() => leaveVoiceRoom(), [])
 
@@ -63,6 +70,8 @@ export function useVoiceRoom(): UseVoiceRoom {
     // В PTT режиме mute-кнопка отключена — мик управляется только клавишей,
     // чтобы поведение было предсказуемым (см. T-035 hint).
     if (useVoiceInputSettings.getState().inputMode === 'push-to-talk') return
+    // Серверный мьют снимает только админ.
+    if (useVoiceStore.getState().forcedMuted) return
 
     const room = getActiveRoom()
     const { muted, deafened, setMuted, setDeafened } = useVoiceStore.getState()
@@ -84,6 +93,8 @@ export function useVoiceRoom(): UseVoiceRoom {
   }, [])
 
   const toggleDeafen = useCallback(async () => {
+    // Серверный deafen снимает только админ.
+    if (useVoiceStore.getState().forcedDeafened) return
     const room = getActiveRoom()
     const {
       deafened, muted, mutedBeforeDeafen,
@@ -245,7 +256,8 @@ async function runJoin(channelId: string, seq: number): Promise<void> {
     useVoiceStore.getState().setMuted(true)
     useVoiceStore.getState().setPttHolding(false)
   }
-  if (deafened) applyDeafenVolume(room, true)
+  // Всегда: deafen глушит всех, а ещё применяются персистнутые локальные мьюты.
+  applyDeafenVolume(room, deafened)
 
   // Между mic-publish'ом и сюда тоже могли отменить — финальный check.
   if (seq !== joinSequence) {

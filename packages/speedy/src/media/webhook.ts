@@ -20,6 +20,7 @@ const VOICE_ROOM_PREFIX = 'voice-'
 const roomUsersKey = (channelId: string) => `voice:channel:${channelId}:users`
 const participantsCacheKey = (channelId: string) =>
   `voice:channel:${channelId}:participants-cache`
+const modStateKey = (channelId: string) => `voice:channel:${channelId}:mod`
 const dedupKey = (eventId: string) => `livekit:webhook:seen:${eventId}`
 
 // 1 час: LiveKit при ретраях обычно укладывается в минуты, час — с запасом.
@@ -121,6 +122,8 @@ export async function handleWebhookEvent(
       if (!serverId) return
       const userId = event.participant.identity
       await redis.srem(roomUsersKey(channelId), userId)
+      // Серверный mute/deafen не должен пережить выход из канала.
+      await redis.hdel(modStateKey(channelId), userId)
       await invalidateParticipantsCache(channelId)
       await broadcastToServer(serverId, { t: 'voice.leave', channelId, userId })
       return
@@ -154,6 +157,7 @@ export async function handleWebhookEvent(
       await Promise.all([
         redis.del(roomUsersKey(channelId)),
         redis.del(participantsCacheKey(channelId)),
+        redis.del(modStateKey(channelId)),
       ])
       return
     }

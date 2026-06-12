@@ -11,6 +11,9 @@ export interface ParticipantState {
   isSpeaking: boolean
   isScreenSharing: boolean
   isMuted: boolean
+  // Серверная модерация (admin mute/deafen) — приходит по WS voice.mod.
+  serverMuted: boolean
+  serverDeafened: boolean
 }
 
 interface VoiceState {
@@ -22,6 +25,10 @@ interface VoiceState {
   // состояние: глушили только наушниками — мик включится обратно, глушили
   // мик отдельно — останется заглушенным (Discord-семантика).
   mutedBeforeDeafen: boolean
+  // Меня заглушил админ (серверная модерация): свои тумблеры заблокированы,
+  // пока админ не снимет. Не персистится — состояние живёт на сервере.
+  forcedMuted: boolean
+  forcedDeafened: boolean
   screenSharing: boolean
   // PTT — пользователь сейчас удерживает hotkey. Только в memory: при
   // перезапуске сам по себе не «зажат».
@@ -42,6 +49,7 @@ interface VoiceActions {
   setMuted(muted: boolean): void
   setDeafened(deafened: boolean): void
   setMutedBeforeDeafen(m: boolean): void
+  setForced(muted: boolean, deafened: boolean): void
   setScreenSharing(s: boolean): void
   setPinnedScreenUserId(id: string | null): void
   setPttHolding(holding: boolean): void
@@ -58,6 +66,8 @@ const initialState: VoiceState = {
   muted: false,
   deafened: false,
   mutedBeforeDeafen: false,
+  forcedMuted: false,
+  forcedDeafened: false,
   screenSharing: false,
   pttHolding: false,
   participants: new Map(),
@@ -130,6 +140,10 @@ export const useVoiceStore = create<VoiceState & VoiceActions>()(persist((set) =
     set({ mutedBeforeDeafen: m })
   },
 
+  setForced(muted, deafened) {
+    set({ forcedMuted: muted, forcedDeafened: deafened })
+  },
+
   setScreenSharing(s) {
     set({ screenSharing: s })
   },
@@ -182,6 +196,8 @@ export const useVoiceStore = create<VoiceState & VoiceActions>()(persist((set) =
         isSpeaking: p.isSpeaking ?? existing?.isSpeaking ?? false,
         isScreenSharing: p.isScreenSharing ?? existing?.isScreenSharing ?? false,
         isMuted: p.isMuted ?? existing?.isMuted ?? false,
+        serverMuted: p.serverMuted ?? existing?.serverMuted ?? false,
+        serverDeafened: p.serverDeafened ?? existing?.serverDeafened ?? false,
       })
       return { participants: next }
     })
@@ -225,7 +241,9 @@ export const useVoiceStore = create<VoiceState & VoiceActions>()(persist((set) =
         displayName: item.displayName,
         isSpeaking: false,
         isScreenSharing: item.isScreenSharing,
-        isMuted: false,
+        isMuted: item.isMuted,
+        serverMuted: item.serverMuted,
+        serverDeafened: item.serverDeafened,
       })
     }
     set({ participants: next, activeSpeakers: new Set() })

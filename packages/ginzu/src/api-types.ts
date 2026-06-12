@@ -420,8 +420,21 @@ export const VoiceParticipantPublicSchema = z.object({
   userId: z.string(),
   displayName: z.string(),
   isScreenSharing: z.boolean(),
+  // Микрофон замьючен (нет ни одной не-замьюченной mic-дорожки).
+  isMuted: z.boolean().default(true),
+  // Серверная модерация (админ заглушил микрофон/наушники).
+  serverMuted: z.boolean().default(false),
+  serverDeafened: z.boolean().default(false),
 })
 export type VoiceParticipantPublic = z.infer<typeof VoiceParticipantPublicSchema>
+
+export const VoiceModerateRequestSchema = z.object({
+  userId: z.string().uuid(),
+  action: z.enum(['mute', 'unmute', 'deafen', 'undeafen', 'kick', 'move']),
+  // Только для action=move: целевой голосовой канал того же сервера.
+  toChannelId: z.string().uuid().optional(),
+})
+export type VoiceModerateRequest = z.infer<typeof VoiceModerateRequestSchema>
 
 export const VoiceJoinResponseSchema = z.object({
   token: z.string(),

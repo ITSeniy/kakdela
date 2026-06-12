@@ -1,5 +1,6 @@
 import type {
   VoiceJoinResponse,
+  VoiceModerateRequest,
   VoiceParticipantsResponse,
 } from '@kakdela/ginzu/api-types'
 
@@ -17,4 +18,15 @@ export async function listVoiceParticipants(
   channelId: string,
 ): Promise<VoiceParticipantsResponse> {
   return apiFetch<VoiceParticipantsResponse>(`/api/voice/${channelId}/participants`)
+}
+
+/** Админская модерация участника ГС: mute/deafen/kick/move. */
+export async function moderateVoice(
+  channelId: string,
+  body: VoiceModerateRequest,
+): Promise<void> {
+  await apiFetch<void>(`/api/voice/${channelId}/moderate`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
 }

@@ -29,6 +29,11 @@ export type ServerEvent =
   | { t: 'channel.delete'; serverId: string; channelId: string }
   | { t: 'category.create'; serverId: string; name: string }
   | { t: 'category.delete'; serverId: string; name: string }
+  // Серверная модерация голоса: админ заглушил/разглушил участника.
+  | { t: 'voice.mod'; channelId: string; userId: string; muted: boolean; deafened: boolean }
+  // Админ перенёс участника в другой голосовой канал — клиент сам пере-джойнится.
+  | { t: 'voice.moved'; userId: string; fromChannelId: string; toChannelId: string }
+  | { t: 'voice.kicked'; channelId: string; userId: string }
 
 export type ClientEvent =
   | { t: 'hello'; token: string }
@@ -88,6 +93,9 @@ export const ServerEventSchema = z.discriminatedUnion('t', [
   z.object({ t: z.literal('channel.delete'), serverId: uuid, channelId: uuid }),
   z.object({ t: z.literal('category.create'), serverId: uuid, name: z.string() }),
   z.object({ t: z.literal('category.delete'), serverId: uuid, name: z.string() }),
+  z.object({ t: z.literal('voice.mod'), channelId: uuid, userId: uuid, muted: z.boolean(), deafened: z.boolean() }),
+  z.object({ t: z.literal('voice.moved'), userId: uuid, fromChannelId: uuid, toChannelId: uuid }),
+  z.object({ t: z.literal('voice.kicked'), channelId: uuid, userId: uuid }),
 ])
 
 export const ClientEventSchema = z.discriminatedUnion('t', [

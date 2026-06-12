@@ -2,7 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useLocation } from 'wouter'
 
-import type { Channel, ChannelCategory, MemberPublic } from '@kakdela/ginzu/api-types'
+import type {
+  Channel,
+  ChannelCategory,
+  MemberPublic,
+  VoiceParticipantPublic,
+} from '@kakdela/ginzu/api-types'
 
 import { Avatar } from '../../components/Avatar.js'
 import { Badge } from '../../components/Badge.js'
@@ -21,6 +26,10 @@ import {
 } from '../servers/api.js'
 import { useServerSettingsUi } from '../settings/store.js'
 import { ThreadList } from '../threads/ThreadList.js'
+import { toggleLocalParticipantMute } from '../../lib/livekit.js'
+import { moderateVoice } from '../voice/api.js'
+import { useLocalMute } from '../voice/localMute.js'
+import { useVoiceStore } from '../voice/store.js'
 import { useVoiceChannelPresence } from '../voice/useVoiceChannelPresence.js'
 import { CreateChannelModal, type CreateChannelMode } from './CreateChannelModal.js'
 import { UserBar } from './UserBar.js'
@@ -96,28 +105,60 @@ function ChannelRow({
   )
 }
 
+/** Готовая к отрисовке строка участника голосового канала. */
+interface VoiceUserRow {
+  userId: string
+  name: string
+  avatarUrl: string | null
+  speaking: boolean
+  muted: boolean
+  deafened: boolean
+  live: boolean
+  serverMuted: boolean
+  serverDeafened: boolean
+}
+
 /** Участники голосового канала с «ниточками»-линиями (final-chrome.jsx). */
 function VoicePresenceTree({
-  userIds,
-  memberMap,
+  rows,
+  channelId,
+  canManage,
   onJump,
+  onUserMenu,
+  onUserDragStart,
+  onUserDragEnd,
 }: {
-  userIds: string[]
-  memberMap: Map<string, MemberPublic>
+  rows: VoiceUserRow[]
+  channelId: string
+  canManage: boolean
   onJump(): void
+  onUserMenu(e: React.MouseEvent, channelId: string, row: VoiceUserRow): void
+  onUserDragStart(channelId: string, userId: string): void
+  onUserDragEnd(): void
 }) {
-  if (userIds.length === 0) return null
+  if (rows.length === 0) return null
   return (
     <div className="ml-1 mt-px mb-1 flex flex-col gap-px">
-      {userIds.map((uid, i) => {
-        const m = memberMap.get(uid)
-        const name = m?.displayName ?? '?'
-        const isLast = i === userIds.length - 1
+      {rows.map((row, i) => {
+        const isLast = i === rows.length - 1
         return (
           <button
-            key={uid}
+            key={row.userId}
             type="button"
             onClick={onJump}
+            onContextMenu={(e) => onUserMenu(e, channelId, row)}
+            draggable={canManage}
+            onDragStart={(e) => {
+              // stopPropagation: иначе bubbling запустит drag самого канала.
+              e.stopPropagation()
+              e.dataTransfer.setData('text/plain', row.userId)
+              e.dataTransfer.effectAllowed = 'move'
+              onUserDragStart(channelId, row.userId)
+            }}
+            onDragEnd={(e) => {
+              e.stopPropagation()
+              onUserDragEnd()
+            }}
             title="перейти в этот канал"
             className="relative flex items-center gap-[7px] py-[3px] pr-2 pl-[18px] rounded text-left hover:bg-kd-panel-hi/40 transition-colors"
           >
@@ -127,8 +168,19 @@ function VoicePresenceTree({
               style={{ bottom: isLast ? '50%' : 0 }}
             />
             <span className="absolute left-[10px] top-1/2 w-[6px] h-px bg-kd-border" />
-            <Avatar name={name} avatarUrl={m?.avatarUrl ?? null} size={18} />
-            <span className="flex-1 min-w-0 truncate text-[12px] text-kd-text font-medium">{name}</span>
+            <Avatar
+              name={row.name}
+              avatarUrl={row.avatarUrl}
+              size={18}
+              ring={row.speaking ? 'var(--kd-online)' : undefined}
+              ringColor="var(--kd-panel)"
+            />
+            <span className="flex-1 min-w-0 truncate text-[12px] text-kd-text font-medium">
+              {row.name}
+            </span>
+            {row.live && <Badge variant="live">LIVE</Badge>}
+            {row.deafened && <Icon.HeadphonesOff size={11} className="text-kd-dnd shrink-0" />}
+            {row.muted && <Icon.MicOff size={11} className="text-kd-dnd shrink-0" />}
           </button>
         )
       })}
@@ -189,6 +241,25 @@ export function ChannelList({ serverId, activeChannelId }: ChannelListProps) {
     | null
   >(null)
 
+  // Drag & drop участника голосового канала (admin): перенос между ГС.
+  const [dragUser, setDragUser] = useState<{ userId: string; fromChannelId: string } | null>(null)
+  const [dropVoiceChannelId, setDropVoiceChannelId] = useState<string | null>(null)
+
+  // ПКМ по участнику голосового канала.
+  const [voiceUserMenu, setVoiceUserMenu] = useState<
+    { x: number; y: number; channelId: string; row: VoiceUserRow } | null
+  >(null)
+  const voiceUserMenuRef = useRef<HTMLDivElement>(null)
+
+  // Live-состояние своего голосового подключения — для точных индикаторов
+  // в дереве канала, в котором мы сидим (speaking есть только там).
+  const activeVoiceChannelId = useVoiceStore((s) => s.activeChannelId)
+  const activeSpeakers = useVoiceStore((s) => s.activeSpeakers)
+  const liveParticipants = useVoiceStore((s) => s.participants)
+  const selfMuted = useVoiceStore((s) => s.muted)
+  const selfDeafened = useVoiceStore((s) => s.deafened)
+  const localMutedIds = useLocalMute((s) => s.mutedUserIds)
+
   useEffect(() => {
     if (!menuOpen) return
     function onDown(e: MouseEvent) {
@@ -222,6 +293,24 @@ export function ChannelList({ serverId, activeChannelId }: ChannelListProps) {
       document.removeEventListener('keydown', onKey)
     }
   }, [channelMenu])
+
+  useEffect(() => {
+    if (!voiceUserMenu) return
+    function onDown(e: MouseEvent) {
+      if (voiceUserMenuRef.current && !voiceUserMenuRef.current.contains(e.target as Node)) {
+        setVoiceUserMenu(null)
+      }
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setVoiceUserMenu(null)
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [voiceUserMenu])
 
   useEffect(() => {
     if (!catMenu) return
@@ -341,6 +430,83 @@ export function ChannelList({ serverId, activeChannelId }: ChannelListProps) {
       danger: true,
     })
     if (ok) deleteCategoryMutation.mutate(name)
+  }
+
+  const moderateMutation = useMutation({
+    mutationFn: (vars: {
+      channelId: string
+      userId: string
+      action: 'mute' | 'unmute' | 'deafen' | 'undeafen' | 'kick' | 'move'
+      toChannelId?: string
+    }) =>
+      moderateVoice(vars.channelId, {
+        userId: vars.userId,
+        action: vars.action,
+        ...(vars.toChannelId ? { toChannelId: vars.toChannelId } : {}),
+      }),
+    onError: (err) => {
+      toast.error(`не получилось: ${(err as Error).message}`)
+    },
+    onSettled: (_d, _e, vars) => {
+      void queryClient.invalidateQueries({ queryKey: ['voiceParticipants', vars.channelId] })
+      if (vars.toChannelId) {
+        void queryClient.invalidateQueries({ queryKey: ['voiceParticipants', vars.toChannelId] })
+      }
+    },
+  })
+
+  /** Строки дерева участников ГС: для своего канала — live-данные из
+   *  voice store (точные mute/стрим + speaking), для остальных —
+   *  presence-снапшот с WS-патчами. */
+  function buildVoiceRows(channelId: string, entries: VoiceParticipantPublic[]): VoiceUserRow[] {
+    const isActiveChannel = channelId === activeVoiceChannelId
+    return entries.map((e) => {
+      const m = memberMap.get(e.userId)
+      const live = isActiveChannel ? liveParticipants.get(e.userId) : undefined
+      const isSelf = e.userId === userId
+      const serverMuted = e.serverMuted
+      const serverDeafened = e.serverDeafened
+      const muted = serverMuted || (isSelf && isActiveChannel
+        ? selfMuted
+        : live?.isMuted ?? e.isMuted)
+      const deafened = serverDeafened || (isSelf && isActiveChannel && selfDeafened)
+      return {
+        userId: e.userId,
+        name: m?.displayName || e.displayName || '?',
+        avatarUrl: m?.avatarUrl ?? null,
+        speaking: isActiveChannel && activeSpeakers.has(e.userId),
+        muted,
+        deafened,
+        live: live?.isScreenSharing ?? e.isScreenSharing,
+        serverMuted,
+        serverDeafened,
+      }
+    })
+  }
+
+  function openVoiceUserMenu(e: React.MouseEvent, channelId: string, row: VoiceUserRow) {
+    // На себе меню не открываем: локальный мьют самого себя бессмысленен,
+    // а админ-действия над собой доступны обычными тумблерами.
+    if (row.userId === userId) return
+    e.preventDefault()
+    e.stopPropagation()
+    setVoiceUserMenu({ x: e.clientX, y: e.clientY, channelId, row })
+  }
+
+  function performUserDrop(toChannelId: string) {
+    const du = dragUser
+    setDragUser(null)
+    setDropVoiceChannelId(null)
+    if (!du) return
+    if (toChannelId === du.fromChannelId) return
+    const target = channels.find((x) => x.id === toChannelId)
+    if (!target || target.kind !== 'voice') return
+    moderateMutation.mutate({
+      channelId: du.fromChannelId,
+      userId: du.userId,
+      action: 'move',
+      toChannelId,
+    })
   }
 
   const reorderMutation = useMutation({
@@ -565,7 +731,11 @@ export function ChannelList({ serverId, activeChannelId }: ChannelListProps) {
                 return (
                   <div
                     key={c.id}
-                    className={`relative ${dragId === c.id ? 'opacity-40' : ''}`}
+                    className={[
+                      'relative',
+                      dragId === c.id ? 'opacity-40' : '',
+                      dropVoiceChannelId === c.id ? 'bg-kd-accent/10 rounded' : '',
+                    ].join(' ')}
                     draggable={canManage}
                     onDragStart={(e) => {
                       e.dataTransfer.setData('text/plain', c.id)
@@ -574,6 +744,18 @@ export function ChannelList({ serverId, activeChannelId }: ChannelListProps) {
                     }}
                     onDragEnd={() => { setDragId(null); setDropTarget(null) }}
                     onDragOver={(e) => {
+                      // Перетаскивают участника ГС — каналы-приёмники
+                      // только голосовые (и не его текущий).
+                      if (dragUser) {
+                        if (c.kind === 'voice' && c.id !== dragUser.fromChannelId) {
+                          e.preventDefault()
+                          e.dataTransfer.dropEffect = 'move'
+                          setDropVoiceChannelId(c.id)
+                        } else if (dropVoiceChannelId !== null) {
+                          setDropVoiceChannelId(null)
+                        }
+                        return
+                      }
                       if (!dragId || dragId === c.id) return
                       e.preventDefault()
                       e.dataTransfer.dropEffect = 'move'
@@ -581,9 +763,15 @@ export function ChannelList({ serverId, activeChannelId }: ChannelListProps) {
                       const above = e.clientY < rect.top + rect.height / 2
                       setDropTarget({ kind: 'row', channelId: c.id, above })
                     }}
-                    onDrop={(e) => { e.preventDefault(); performDrop() }}
+                    onDrop={(e) => {
+                      e.preventDefault()
+                      if (dragUser) { performUserDrop(c.id); return }
+                      performDrop()
+                    }}
                     onContextMenu={(e) => {
                       if (!canManage) return
+                      // ПКМ по участнику обрабатывается на самой строке.
+                      if (e.defaultPrevented) return
                       e.preventDefault()
                       setChannelMenu({ x: e.clientX, y: e.clientY, channel: c })
                     }}
@@ -605,9 +793,13 @@ export function ChannelList({ serverId, activeChannelId }: ChannelListProps) {
                     />
                     {c.kind === 'voice' && (
                       <VoicePresenceTree
-                        userIds={presence}
-                        memberMap={memberMap}
+                        rows={buildVoiceRows(c.id, presence)}
+                        channelId={c.id}
+                        canManage={canManage}
                         onJump={() => navigate(`/servers/${c.serverId}/channels/${c.id}`)}
+                        onUserMenu={openVoiceUserMenu}
+                        onUserDragStart={(chId, uid) => setDragUser({ userId: uid, fromChannelId: chId })}
+                        onUserDragEnd={() => { setDragUser(null); setDropVoiceChannelId(null) }}
                       />
                     )}
                     {isActive && c.kind === 'text' && <ThreadList channelId={c.id} />}
@@ -638,6 +830,86 @@ export function ChannelList({ serverId, activeChannelId }: ChannelListProps) {
             <Icon.Trash size={12} />
             удалить канал
           </button>
+        </div>
+      )}
+
+      {voiceUserMenu && (
+        <div
+          ref={voiceUserMenuRef}
+          className="fixed z-50 min-w-[190px] bg-kd-panel border border-kd-border rounded-kd shadow-kd-modal py-1 select-none"
+          style={{
+            left: Math.min(voiceUserMenu.x, window.innerWidth - 198),
+            top: Math.min(voiceUserMenu.y, window.innerHeight - 160),
+          }}
+        >
+          <div className="px-3 py-1.5 text-[11px] font-bold text-kd-text truncate border-b border-kd-border mb-1">
+            {voiceUserMenu.row.name}
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              toggleLocalParticipantMute(voiceUserMenu.row.userId)
+              setVoiceUserMenu(null)
+            }}
+            className="w-full text-left px-3 py-1.5 text-[12px] flex items-center gap-2 text-kd-text hover:bg-kd-panel-hi transition-colors"
+          >
+            {localMutedIds.includes(voiceUserMenu.row.userId) ? (
+              <><Icon.Speaker size={12} className="text-kd-text-mute" /> слышать снова</>
+            ) : (
+              <><Icon.MicOff size={12} className="text-kd-text-mute" /> заглушить локально</>
+            )}
+          </button>
+          {canManage && (
+            <>
+              <div className="my-1 h-px bg-kd-border mx-2" />
+              <button
+                type="button"
+                onClick={() => {
+                  moderateMutation.mutate({
+                    channelId: voiceUserMenu.channelId,
+                    userId: voiceUserMenu.row.userId,
+                    action: voiceUserMenu.row.serverMuted ? 'unmute' : 'mute',
+                  })
+                  setVoiceUserMenu(null)
+                }}
+                className="w-full text-left px-3 py-1.5 text-[12px] flex items-center gap-2 text-kd-text hover:bg-kd-panel-hi transition-colors"
+              >
+                <Icon.MicOff size={12} className="text-kd-warm" />
+                {voiceUserMenu.row.serverMuted ? 'вернуть микрофон' : 'заглушить микрофон'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  moderateMutation.mutate({
+                    channelId: voiceUserMenu.channelId,
+                    userId: voiceUserMenu.row.userId,
+                    action: voiceUserMenu.row.serverDeafened ? 'undeafen' : 'deafen',
+                  })
+                  setVoiceUserMenu(null)
+                }}
+                className="w-full text-left px-3 py-1.5 text-[12px] flex items-center gap-2 text-kd-text hover:bg-kd-panel-hi transition-colors"
+              >
+                <Icon.HeadphonesOff size={12} className="text-kd-warm" />
+                {voiceUserMenu.row.serverDeafened ? 'вернуть звук' : 'выключить звук'}
+              </button>
+              <div className="my-1 h-px bg-kd-border mx-2" />
+              <button
+                type="button"
+                onClick={() => {
+                  moderateMutation.mutate({
+                    channelId: voiceUserMenu.channelId,
+                    userId: voiceUserMenu.row.userId,
+                    action: 'kick',
+                  })
+                  setVoiceUserMenu(null)
+                }}
+                className="w-full text-left px-3 py-1.5 text-[12px] flex items-center gap-2 text-kd-danger hover:bg-kd-danger/10 transition-colors"
+              >
+                <Icon.PhoneOff size={12} />
+                отключить от канала
+              </button>
+            </>
+          )}
         </div>
       )}
 

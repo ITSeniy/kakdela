@@ -23,6 +23,7 @@ export interface VoiceParticipant {
   joinedAt: string
   isPublishing: boolean
   isScreenSharing: boolean
+  isMuted: boolean
 }
 
 export interface VoiceRoom {

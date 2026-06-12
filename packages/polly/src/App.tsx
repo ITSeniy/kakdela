@@ -17,6 +17,7 @@ import { CreateServerModal } from './features/servers/CreateServerModal.js'
 import { JoinServerModal } from './features/servers/JoinServerModal.js'
 import { ServerSettingsModal } from './features/settings/ServerSettingsModal.js'
 import { CreateThreadDialog } from './features/threads/CreateThreadDialog.js'
+import { useVoiceModerationSync } from './features/voice/moderationSync.js'
 import { leaveVoiceRoom } from './features/voice/useVoiceRoom.js'
 import { disposeVoiceRoomSync, getActiveRoom } from './lib/livekit.js'
 import { wsClient } from './lib/ws.js'
@@ -33,6 +34,9 @@ export function App() {
   useEffect(() => {
     void initAuth()
   }, [])
+
+  // Серверная модерация голоса: применяем admin mute/deafen/move/kick к себе.
+  useVoiceModerationSync()
 
   useEffect(() => {
     if (status !== 'authed') return undefined

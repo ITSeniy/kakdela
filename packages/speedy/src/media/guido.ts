@@ -91,6 +91,8 @@ export async function listParticipants(channelId: string): Promise<VoiceParticip
         t.source === TrackSource.SCREEN_SHARE ||
         t.source === TrackSource.SCREEN_SHARE_AUDIO,
     )
+    const mics = p.tracks.filter((t) => t.source === TrackSource.MICROPHONE)
+    const isMuted = mics.length === 0 || mics.every((t) => t.muted)
     const joinedMs =
       p.joinedAtMs > 0n ? Number(p.joinedAtMs) : Number(p.joinedAt) * 1000
     return {
@@ -99,8 +101,41 @@ export async function listParticipants(channelId: string): Promise<VoiceParticip
       joinedAt: new Date(joinedMs).toISOString(),
       isPublishing: p.isPublisher,
       isScreenSharing,
+      isMuted,
     }
   })
+}
+
+/**
+ * Серверный mute/unmute микрофонных дорожек участника. Не-страшно, если
+ * дорожек нет (человек ещё не публиковал мик) — состояние всё равно живёт
+ * в Redis, а клиент цели сам не даст включить мик, пока заглушен.
+ */
+export async function muteParticipantMic(args: {
+  channelId: string
+  userId: string
+  muted: boolean
+}): Promise<void> {
+  const room = voiceRoomName(args.channelId)
+  const svc = getRoomService()
+  let info
+  try {
+    info = await svc.getParticipant(room, args.userId)
+  } catch (err) {
+    if (isRoomNotFound(err)) return
+    throw err
+  }
+  for (const t of info.tracks) {
+    if (t.source === TrackSource.MICROPHONE) {
+      try {
+        await svc.mutePublishedTrack(room, args.userId, t.sid, args.muted)
+      } catch (err) {
+        // unmute серверной стороной LiveKit может запрещать — это ок,
+        // клиент цели включит мик сам по voice.mod.
+        if (args.muted) throw err
+      }
+    }
+  }
 }
 
 function isRoomNotFound(err: unknown): boolean {

@@ -142,7 +142,7 @@ export function MemberList({ serverId, className }: MemberListProps) {
   const voicePresence = useVoiceChannelPresence(detail?.channels ?? [])
   const voiceIds = useMemo(() => {
     const s = new Set<string>()
-    for (const ids of voicePresence.values()) for (const id of ids) s.add(id)
+    for (const entries of voicePresence.values()) for (const p of entries) s.add(p.userId)
     return s
   }, [voicePresence])
 
