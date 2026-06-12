@@ -62,12 +62,13 @@ function CopyIcon() {
 }
 
 function Actions({
-  isOwn, canDelete, editDisabled, pendingStatus, onReply, onCopy, onEdit, onDelete, onPickReaction,
+  isOwn, canDelete, editDisabled, pendingStatus, customEmoji, onReply, onCopy, onEdit, onDelete, onPickReaction,
 }: {
   isOwn: boolean
   canDelete: boolean
   editDisabled: boolean
   pendingStatus: 'sending' | 'error' | undefined
+  customEmoji?: ReadonlyArray<CustomEmoji>
   onReply: () => void
   onCopy: () => void
   onEdit: () => void
@@ -100,6 +101,7 @@ function Actions({
           <div className="absolute bottom-full right-0 mb-1 z-50 shadow-lg">
             <Suspense fallback={<div className="p-3 text-[11px] text-kd-text-mute bg-kd-panel rounded-kd border border-kd-border">…</div>}>
               <LazyEmojiPicker
+                customEmoji={customEmoji}
                 onSelect={(emoji) => {
                   onPickReaction(emoji)
                   setPickerOpen(false)
@@ -309,10 +311,16 @@ export function Message({
       reactions={messageReactions}
       currentUserId={currentUserId}
       memberMap={memberMap}
+      emojiMap={emojiMap}
       onAdd={onAddReaction}
       onRemove={onRemoveReaction}
     />
   ) : null
+
+  const customEmojiList = useMemo(
+    () => (emojiMap && emojiMap.size > 0 ? [...emojiMap.values()] : undefined),
+    [emojiMap],
+  )
 
   const actionsEl = (
     <Actions
@@ -320,6 +328,7 @@ export function Message({
       canDelete={canDelete}
       editDisabled={editDisabled}
       pendingStatus={pendingStatus}
+      customEmoji={customEmojiList}
       onReply={() => onReply(message as IMessage)}
       onCopy={copyContent}
       onEdit={() => setEditing(true)}

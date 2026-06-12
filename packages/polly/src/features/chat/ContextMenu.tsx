@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 interface ContextMenuProps {
   x: number
@@ -50,6 +50,22 @@ export function ContextMenu({
   onReply, onStartThread, onEdit, onDelete, onCopyText, onCopyLink, onClose,
 }: ContextMenuProps) {
   const ref = useRef<HTMLDivElement>(null)
+  // Позиция после измерения реального размера меню: пока null — рендерим
+  // невидимо в точке клика, после measure прижимаем к краям окна (а если
+  // снизу не влезает — открываем вверх от курсора, как в Discord).
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null)
+
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    const nx = Math.max(8, Math.min(x, window.innerWidth - rect.width - 8))
+    let ny = y
+    if (y + rect.height > window.innerHeight - 8) {
+      ny = Math.max(8, y - rect.height)
+    }
+    setPos({ x: nx, y: ny })
+  }, [x, y])
 
   useEffect(() => {
     function handleMouseDown(e: MouseEvent) {
@@ -66,14 +82,16 @@ export function ContextMenu({
     }
   }, [onClose])
 
-  const cx = Math.min(x, window.innerWidth - MENU_WIDTH - 8)
-  const cy = y
-
   return (
     <div
       ref={ref}
       className="fixed z-50 bg-kd-panel border border-kd-border rounded-kd shadow-lg py-1 select-none"
-      style={{ left: cx, top: cy, minWidth: MENU_WIDTH }}
+      style={{
+        left: pos?.x ?? x,
+        top: pos?.y ?? y,
+        minWidth: MENU_WIDTH,
+        visibility: pos ? 'visible' : 'hidden',
+      }}
     >
       <Item onClick={() => { onReply(); onClose() }}>↩ Ответить</Item>
       {!hideStartThread && onStartThread && (

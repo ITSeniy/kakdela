@@ -1,6 +1,6 @@
-import React, { Suspense, useEffect, useRef, useState } from 'react'
+import React, { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 
-import type { MemberPublic, ReactionAggregate } from '@kakdela/ginzu/api-types'
+import type { CustomEmoji, MemberPublic, ReactionAggregate } from '@kakdela/ginzu/api-types'
 
 const LazyEmojiPicker = React.lazy(() => import('./EmojiPicker.js'))
 
@@ -9,13 +9,30 @@ interface ReactionsProps {
   reactions: ReactionAggregate[]
   currentUserId: string | null
   memberMap: ReadonlyMap<string, MemberPublic>
+  /** Карта custom emoji сервера — `:name:` в реакции рендерится картинкой. */
+  emojiMap?: ReadonlyMap<string, CustomEmoji>
   onAdd: (messageId: string, emoji: string) => void
   onRemove: (messageId: string, emoji: string) => void
 }
 
-export function Reactions({ messageId, reactions, currentUserId, memberMap, onAdd, onRemove }: ReactionsProps) {
+/** Реакция хранится строкой: unicode (`😀`) либо токен `:name:` custom emoji. */
+export function ReactionEmoji({ emoji, emojiMap }: { emoji: string; emojiMap?: ReadonlyMap<string, CustomEmoji> }) {
+  const match = /^:([a-z0-9_]+):$/.exec(emoji)
+  const custom = match?.[1] ? emojiMap?.get(match[1]) : undefined
+  if (custom) {
+    return <img src={custom.imageUrl} alt={emoji} title={emoji} className="w-4 h-4 object-contain" draggable={false} />
+  }
+  return <span className="text-kd-text">{emoji}</span>
+}
+
+export function Reactions({ messageId, reactions, currentUserId, memberMap, emojiMap, onAdd, onRemove }: ReactionsProps) {
   const [pickerOpen, setPickerOpen] = useState(false)
   const pickerContainerRef = useRef<HTMLDivElement>(null)
+
+  const customList = useMemo(
+    () => (emojiMap && emojiMap.size > 0 ? [...emojiMap.values()] : undefined),
+    [emojiMap],
+  )
 
   useEffect(() => {
     if (!pickerOpen) return
@@ -45,7 +62,7 @@ export function Reactions({ messageId, reactions, currentUserId, memberMap, onAd
                 : 'border-kd-border hover:border-kd-accent-soft'
             }`}
           >
-            <span className="text-kd-text">{r.emoji}</span>
+            <ReactionEmoji emoji={r.emoji} emojiMap={emojiMap} />
             <span className="font-mono text-[10px] text-kd-text-soft">{r.count}</span>
           </button>
         )
@@ -65,6 +82,7 @@ export function Reactions({ messageId, reactions, currentUserId, memberMap, onAd
           <div className="absolute bottom-8 left-0 z-50 shadow-lg">
             <Suspense fallback={<div className="p-3 text-[11px] text-kd-text-mute bg-kd-panel rounded-kd border border-kd-border">…</div>}>
               <LazyEmojiPicker
+                customEmoji={customList}
                 onSelect={(emoji) => {
                   onAdd(messageId, emoji)
                   setPickerOpen(false)

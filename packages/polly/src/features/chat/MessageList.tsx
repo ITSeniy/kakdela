@@ -95,9 +95,13 @@ export function MessageList({
   }
 
   const containerRef = useRef<HTMLDivElement>(null)
+  const contentRef = useRef<HTMLDivElement>(null)
   const topRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
-  const isAtBottomRef = useRef(true)
+  // «Прилипание» к низу считаем по scroll-позиции (запас 80px), а не по
+  // IntersectionObserver сентинела: при плавном скролле или пачке сообщений
+  // сентинел успевает уехать из вьюпорта, и автоскролл срывался.
+  const stickToBottomRef = useRef(true)
   const prevScrollHeightRef = useRef<number | null>(null)
   const initialScrolledRef = useRef(false)
 
@@ -116,25 +120,43 @@ export function MessageList({
     return result
   }, [data])
 
-  // Track at-bottom + update last-read marker
+  // Update last-read marker, когда низ списка реально виден
   useEffect(() => {
     const node = bottomRef.current
     const container = containerRef.current
     if (!node || !container) return
     const observer = new IntersectionObserver((entries) => {
       const entry = entries[0]
-      if (!entry) return
-      isAtBottomRef.current = entry.isIntersecting
-      if (entry.isIntersecting) {
-        const latest = messages[messages.length - 1]
-        if (latest) {
-          window.localStorage.setItem(`kd:read:${channelId}`, latest.createdAt)
-        }
+      if (!entry?.isIntersecting) return
+      const latest = messages[messages.length - 1]
+      if (latest) {
+        window.localStorage.setItem(`kd:read:${channelId}`, latest.createdAt)
       }
     }, { root: container, threshold: 0.1 })
     observer.observe(node)
     return () => observer.disconnect()
   }, [channelId, messages])
+
+  function handleScroll() {
+    const c = containerRef.current
+    if (!c) return
+    stickToBottomRef.current = c.scrollHeight - c.scrollTop - c.clientHeight < 80
+  }
+
+  // Контент дорастает уже после рендера (картинки, custom emoji, превью) —
+  // ResizeObserver дожимает скролл вниз, пока юзер «прилип» к низу.
+  useEffect(() => {
+    const content = contentRef.current
+    const container = containerRef.current
+    if (!content || !container) return
+    const observer = new ResizeObserver(() => {
+      // Во время подгрузки старых страниц позицию восстанавливает другой эффект.
+      if (prevScrollHeightRef.current !== null) return
+      if (stickToBottomRef.current) container.scrollTop = container.scrollHeight
+    })
+    observer.observe(content)
+    return () => observer.disconnect()
+  }, [])
 
   // Fetch older when top sentinel hits
   useEffect(() => {
@@ -167,19 +189,23 @@ export function MessageList({
   const pendingCount = pending.length
 
   useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
     if (!initialScrolledRef.current && messages.length > 0) {
-      bottomRef.current?.scrollIntoView({ behavior: 'auto' })
+      container.scrollTop = container.scrollHeight
       initialScrolledRef.current = true
       return
     }
-    if (isAtBottomRef.current) {
-      bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    // Мгновенный прыжок вместо smooth: за время smooth-анимации позиция
+    // «не у низа» и следующее сообщение ломало прилипание.
+    if (stickToBottomRef.current) {
+      container.scrollTop = container.scrollHeight
     }
   }, [lastId, pendingCount, messages.length])
 
   useEffect(() => {
     initialScrolledRef.current = false
-    isAtBottomRef.current = true
+    stickToBottomRef.current = true
   }, [channelId])
 
   // Deep-link `#msg:<id>` (например, переход из Inbox): когда сообщение
@@ -256,7 +282,9 @@ export function MessageList({
       ref={containerRef}
       className="flex-1 overflow-y-auto min-h-0 py-2"
       onClick={handleContentClick}
+      onScroll={handleScroll}
     >
+      <div ref={contentRef}>
       <div ref={topRef} className="h-1" />
       {isFetchingNextPage && (
         <div className="text-center py-2 text-[10px] text-kd-text-mute font-mono">
@@ -302,6 +330,7 @@ export function MessageList({
         )
       })}
       <div ref={bottomRef} className="h-1" />
+      </div>
     </div>
   )
 }
