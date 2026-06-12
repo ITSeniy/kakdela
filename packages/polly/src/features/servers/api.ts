@@ -1,5 +1,6 @@
 import type {
   Channel,
+  CreateChannelRequest,
   CreateInviteResponse,
   CreateServerRequest,
   InviteSummary,
@@ -49,6 +50,13 @@ export async function patchServer(serverId: string, body: PatchServerRequest): P
 
 export async function deleteServer(serverId: string): Promise<void> {
   await apiFetch<void>(`/api/servers/${serverId}`, { method: 'DELETE' })
+}
+
+export async function createChannel(serverId: string, body: CreateChannelRequest): Promise<Channel> {
+  return apiFetch<Channel>(`/api/servers/${serverId}/channels`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
 }
 
 export async function leaveServer(serverId: string): Promise<void> {

@@ -1,16 +1,20 @@
-import { useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useLocation } from 'wouter'
 
 import type { Channel, MemberPublic } from '@kakdela/ginzu/api-types'
 
 import { Avatar } from '../../components/Avatar.js'
 import { Badge } from '../../components/Badge.js'
+import { confirmDialog } from '../../components/ConfirmDialog.js'
 import { Icon } from '../../components/Icon.js'
-import { getServerDetail, listMembers } from '../servers/api.js'
+import { toast } from '../../components/toast/index.js'
+import { useAuthStore } from '../auth/store.js'
+import { getServerDetail, leaveServer, listMembers } from '../servers/api.js'
 import { useServerSettingsUi } from '../settings/store.js'
 import { ThreadList } from '../threads/ThreadList.js'
 import { useVoiceChannelPresence } from '../voice/useVoiceChannelPresence.js'
+import { CreateChannelModal, type CreateChannelMode } from './CreateChannelModal.js'
 import { UserBar } from './UserBar.js'
 
 interface ChannelListProps {
@@ -109,10 +113,59 @@ function VoicePresenceTree({
   )
 }
 
+/** Пункт меню действий сервера (стиль — как меню «добавить сервер» в рельсе). */
+function ServerMenuItem({
+  glyph, danger, onClick, children,
+}: {
+  glyph: React.ReactNode
+  danger?: boolean
+  onClick: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={[
+        'w-full text-left px-3 py-2 text-[12px] flex items-center gap-2 transition-colors',
+        danger ? 'text-kd-danger hover:bg-kd-danger/10' : 'text-kd-text hover:bg-kd-panel-hi',
+      ].join(' ')}
+    >
+      <span className="w-3.5 shrink-0 flex items-center justify-center font-mono text-[11px]">
+        {glyph}
+      </span>
+      {children}
+    </button>
+  )
+}
+
 export function ChannelList({ serverId, activeChannelId }: ChannelListProps) {
   const [, navigate] = useLocation()
+  const queryClient = useQueryClient()
   const [collapsedCats, setCollapsedCats] = useState<Set<string>>(new Set())
   const openServerSettings = useServerSettingsUi((s) => s.open)
+  const userId = useAuthStore((s) => s.user?.id)
+
+  // Меню действий сервера (шапка) + модалка создания канала/категории.
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [createMode, setCreateMode] = useState<CreateChannelMode | null>(null)
+  const headerRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!menuOpen) return
+    function onDown(e: MouseEvent) {
+      if (headerRef.current && !headerRef.current.contains(e.target as Node)) setMenuOpen(false)
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setMenuOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [menuOpen])
 
   const { data: detail } = useQuery({
     queryKey: ['server', serverId],
@@ -143,6 +196,36 @@ export function ChannelList({ serverId, activeChannelId }: ChannelListProps) {
   const groups = useMemo(() => groupChannels(channels), [channels])
   const voicePresence = useVoiceChannelPresence(channels)
 
+  const myRole = userId ? memberMap.get(userId)?.role : undefined
+  const canManage = myRole === 'owner' || myRole === 'admin'
+  const isOwner = myRole === 'owner'
+  const categoryNames = useMemo(
+    () => groups.map((g) => g.name).filter((n): n is string => n !== null),
+    [groups],
+  )
+
+  const leaveMutation = useMutation({
+    mutationFn: () => leaveServer(serverId!),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['servers'] })
+      navigate('/')
+    },
+    onError: (err) => {
+      toast.error(`не получилось выйти: ${(err as Error).message}`)
+    },
+  })
+
+  async function confirmLeave() {
+    if (!detail) return
+    setMenuOpen(false)
+    const ok = await confirmDialog({
+      title: `выйти из «${detail.server.name}»?`,
+      confirmLabel: 'выйти',
+      danger: true,
+    })
+    if (ok) leaveMutation.mutate()
+  }
+
   function toggleCat(name: string) {
     setCollapsedCats((prev) => {
       const next = new Set(prev)
@@ -154,30 +237,78 @@ export function ChannelList({ serverId, activeChannelId }: ChannelListProps) {
 
   return (
     <aside className="bg-kd-panel border-r border-kd-border flex flex-col min-h-0">
-      <div className="px-3.5 py-2.5 border-b border-kd-border bg-kd-panel-alt flex items-center justify-between shrink-0">
-        <div className="min-w-0">
-          <div className="text-[13px] font-bold text-kd-text truncate">
-            {detail?.server.name ?? '—'}
-          </div>
-          {detail && (
-            <div className="text-[10px] text-kd-text-soft mt-px flex items-center gap-[5px]">
-              <span className="w-1.5 h-1.5 rounded-full bg-kd-online shrink-0" />
-              <span className="text-kd-online font-semibold font-mono">{onlineCount}</span>
-              <span>онлайн / {detail.memberCount} всего</span>
+      {/* Шапка целиком кликабельна и открывает меню действий сервера
+          (как в Discord). Дропдаун absolute — aside не имеет overflow,
+          клипаться нечему. */}
+      <div ref={headerRef} className="relative shrink-0">
+        <button
+          type="button"
+          disabled={!serverId || !detail}
+          onClick={() => setMenuOpen((v) => !v)}
+          title="действия сервера"
+          className="w-full px-3.5 py-2.5 border-b border-kd-border bg-kd-panel-alt hover:bg-kd-panel-hi transition-colors flex items-center justify-between text-left"
+        >
+          <div className="min-w-0">
+            <div className="text-[13px] font-bold text-kd-text truncate">
+              {detail?.server.name ?? '—'}
             </div>
-          )}
-        </div>
-        {serverId ? (
-          <button
-            type="button"
-            onClick={() => openServerSettings(serverId)}
-            title="настройки сервера"
-            className="text-[11px] text-kd-text-mute font-mono hover:text-kd-text-soft transition-colors"
+            {detail && (
+              <div className="text-[10px] text-kd-text-soft mt-px flex items-center gap-[5px]">
+                <span className="w-1.5 h-1.5 rounded-full bg-kd-online shrink-0" />
+                <span className="text-kd-online font-semibold font-mono">{onlineCount}</span>
+                <span>онлайн / {detail.memberCount} всего</span>
+              </div>
+            )}
+          </div>
+          <span
+            className={`text-[11px] text-kd-text-mute font-mono transition-transform ${menuOpen ? 'rotate-180' : ''}`}
           >
             ⌄
-          </button>
-        ) : (
-          <span className="text-[11px] text-kd-text-mute font-mono">⌄</span>
+          </span>
+        </button>
+
+        {menuOpen && serverId && (
+          <div className="absolute left-2 right-2 top-full mt-1.5 z-50 bg-kd-panel border border-kd-border rounded-kd shadow-kd-modal py-1 overflow-hidden">
+            {canManage && (
+              <ServerMenuItem
+                glyph={<span className="text-kd-warm">↪</span>}
+                onClick={() => { setMenuOpen(false); openServerSettings(serverId, 'invites') }}
+              >
+                пригласить на сервер
+              </ServerMenuItem>
+            )}
+            <ServerMenuItem
+              glyph={<Icon.Settings size={12} className="text-kd-text-mute" />}
+              onClick={() => { setMenuOpen(false); openServerSettings(serverId) }}
+            >
+              настройки сервера
+            </ServerMenuItem>
+            {canManage && (
+              <>
+                <div className="my-1 h-px bg-kd-border mx-2" />
+                <ServerMenuItem
+                  glyph={<Icon.Hash size={12} className="text-kd-accent" />}
+                  onClick={() => { setMenuOpen(false); setCreateMode('channel') }}
+                >
+                  создать канал
+                </ServerMenuItem>
+                <ServerMenuItem
+                  glyph={<span className="text-kd-accent">—</span>}
+                  onClick={() => { setMenuOpen(false); setCreateMode('category') }}
+                >
+                  создать категорию
+                </ServerMenuItem>
+              </>
+            )}
+            {!isOwner && (
+              <>
+                <div className="my-1 h-px bg-kd-border mx-2" />
+                <ServerMenuItem glyph="←" danger onClick={() => void confirmLeave()}>
+                  покинуть сервер
+                </ServerMenuItem>
+              </>
+            )}
+          </div>
         )}
       </div>
 
@@ -227,6 +358,15 @@ export function ChannelList({ serverId, activeChannelId }: ChannelListProps) {
       </div>
 
       <UserBar />
+
+      {createMode && serverId && (
+        <CreateChannelModal
+          serverId={serverId}
+          mode={createMode}
+          categories={categoryNames}
+          onClose={() => setCreateMode(null)}
+        />
+      )}
     </aside>
   )
 }
