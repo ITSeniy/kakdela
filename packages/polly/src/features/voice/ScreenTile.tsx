@@ -17,20 +17,14 @@ function formatQuality(track: LocalVideoTrack | RemoteVideoTrack): string | null
 interface ScreenTileProps {
   displayName: string
   isSelf: boolean
-  pinned: boolean
+  /** Карточка сейчас развёрнута на всю область. */
+  focused?: boolean
   busy?: boolean
-  onTogglePin(): void
-  onSnapshot(): void
+  /** Компакт для нижней полосы: только видео + имя, без кнопок и бейджа. */
+  compact?: boolean
+  onClick?(): void
+  onSnapshot?(): void
   screenTrack: LocalVideoTrack | RemoteVideoTrack
-}
-
-function PinIcon({ filled }: { filled: boolean }) {
-  return (
-    <svg viewBox="0 0 24 24" width="11" height="11" fill={filled ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <line x1="12" y1="17" x2="12" y2="22" />
-      <path d="M5 17h14l-2-9V3H7v5z" />
-    </svg>
-  )
 }
 
 function ExpandIcon() {
@@ -54,9 +48,11 @@ function CameraIcon() {
 }
 
 /**
- * Большой 16:9 tile с screen track. Видео attach'ится через LiveKit API —
- * SDK сам управляет `srcObject` и lifecycle. На unmount обязателен detach
- * (тот же track может оказаться в другом tile'е после ре-раскладки).
+ * Карточка демки (отдельная от карточки человека, как в Discord). Клик —
+ * развернуть на всю область / свернуть обратно; двойной клик — нативный
+ * fullscreen. Видео attach'ится через LiveKit API — SDK сам управляет
+ * `srcObject` и lifecycle. На unmount обязателен detach (тот же track может
+ * оказаться в другом tile'е после ре-раскладки).
  *
  * Self-preview MUST быть muted: иначе ScreenShareAudio из своего же source'а
  * вернётся в наушники через спикеры. Для чужих экранов аудио рулится
@@ -65,9 +61,10 @@ function CameraIcon() {
 export function ScreenTile({
   displayName,
   isSelf,
-  pinned,
+  focused,
   busy,
-  onTogglePin,
+  compact,
+  onClick,
   onSnapshot,
   screenTrack,
 }: ScreenTileProps) {
@@ -85,10 +82,9 @@ export function ScreenTile({
   }, [screenTrack])
 
   // Dimensions заполняются не сразу — первые кадры могут прийти через 100-500ms
-  // после attach. Поллим раз в 250ms пока не получим валидный resolution; смена
-  // quality preset в T-052 делает stop+start = unmount+mount, так что новый
-  // tile сам перечитает актуальные размеры.
+  // после attach. Поллим раз в 250ms пока не получим валидный resolution.
   useEffect(() => {
+    if (compact) return
     let cancelled = false
     function read() {
       if (cancelled) return
@@ -98,7 +94,7 @@ export function ScreenTile({
     }
     read()
     return () => { cancelled = true }
-  }, [screenTrack])
+  }, [screenTrack, compact])
 
   const toggleFullscreen = (): void => {
     const container = containerRef.current
@@ -115,12 +111,21 @@ export function ScreenTile({
   return (
     <div
       ref={containerRef}
-      onDoubleClick={toggleFullscreen}
-      className="group relative rounded-kd overflow-hidden bg-kd-stage border border-kd-border shadow-kd-tile"
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onClick={onClick}
+      onKeyDown={onClick ? (e) => { if (e.key === 'Enter') onClick() } : undefined}
+      onDoubleClick={compact ? undefined : toggleFullscreen}
+      title={compact ? displayName : focused ? 'свернуть' : 'развернуть на всю область'}
+      className={[
+        'group relative w-full h-full rounded-lg overflow-hidden bg-kd-stage min-w-0 min-h-0',
+        compact ? 'min-h-[72px]' : '',
+        onClick ? 'cursor-pointer' : '',
+      ].join(' ')}
       style={{
-        aspectRatio: '16 / 9',
-        minHeight: 0,
-        minWidth: 0,
+        boxShadow: focused
+          ? '0 0 0 2px var(--kd-warm), var(--kd-shadow-tile)'
+          : 'var(--kd-shadow-tile)',
       }}
     >
       <video
@@ -131,61 +136,48 @@ export function ScreenTile({
         className="absolute inset-0 w-full h-full object-contain"
       />
 
-      {/* Имя + SHARE-бейдж — внизу-слева, всегда видны (designs/final-voice.jsx
-          KD_StageTile). */}
-      <div className="absolute left-2 bottom-2 flex items-center gap-1 px-1.5 py-0.5 rounded font-mono bg-kd-overlay-strong text-kd-stage-text">
-        <span className="text-[10px] font-semibold">{displayName}</span>
-        <span className="text-[9px] font-bold text-kd-accent">· SHARE</span>
+      {/* Имя + LIVE-бейдж — внизу-слева, всегда видны. */}
+      <div className="absolute left-1.5 bottom-1.5 flex items-center gap-1 px-1.5 py-0.5 rounded font-mono bg-kd-overlay-strong text-kd-stage-text max-w-[85%]">
+        <span className="text-[10px] font-semibold truncate">{displayName}</span>
+        <span className="text-[9px] font-bold text-kd-warm shrink-0">· LIVE</span>
       </div>
+
+      {/* Quality badge — слева вверху, чтобы не пересекаться с hover-кнопками. */}
+      {!compact && quality && (
+        <div className="absolute left-1.5 top-1.5 px-1.5 py-0.5 rounded font-mono bg-kd-overlay-strong text-kd-stage-text opacity-70 text-[9px] pointer-events-none">
+          {quality}
+        </div>
+      )}
 
       {/* Hover-оверлей с кнопками. Прячем opacity'ью, чтобы не дёргать DOM
           на каждое движение мыши. */}
-      <div className="absolute right-2 top-2 flex gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation()
-            if (!busy) onSnapshot()
-          }}
-          disabled={busy}
-          title={busy ? 'отправляется…' : 'снимок в чат'}
-          className="inline-flex items-center justify-center w-6 h-6 rounded bg-kd-overlay-strong text-kd-stage-text disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          <CameraIcon />
-        </button>
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation()
-            onTogglePin()
-          }}
-          title={pinned ? 'открепить демо' : 'закрепить демо на весь фокус'}
-          className={[
-            'inline-flex items-center justify-center w-6 h-6 rounded',
-            pinned ? 'bg-kd-accent text-white' : 'bg-kd-overlay-strong text-kd-stage-text',
-          ].join(' ')}
-        >
-          <PinIcon filled={pinned} />
-        </button>
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation()
-            toggleFullscreen()
-          }}
-          title="на весь экран (двойной клик тоже работает)"
-          className="inline-flex items-center justify-center w-6 h-6 rounded bg-kd-overlay-strong text-kd-stage-text"
-        >
-          <ExpandIcon />
-        </button>
-      </div>
-
-      {/* Quality badge — resolution и fps текущего стрима, вверху-справа
-          (final-voice.jsx:31-37). На hover там же появляются кнопки —
-          бейдж в этот момент прячем, чтобы не пересекались. */}
-      {quality && (
-        <div className="absolute right-2 top-2 px-1.5 py-0.5 rounded font-mono bg-kd-overlay-strong text-kd-stage-text opacity-70 text-[9px] pointer-events-none group-hover:opacity-0 transition-opacity">
-          {quality}
+      {!compact && (
+        <div className="absolute right-1.5 top-1.5 flex gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+          {onSnapshot && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                if (!busy) onSnapshot()
+              }}
+              disabled={busy}
+              title={busy ? 'отправляется…' : 'снимок в чат звонка'}
+              className="inline-flex items-center justify-center w-6 h-6 rounded bg-kd-overlay-strong text-kd-stage-text disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <CameraIcon />
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              toggleFullscreen()
+            }}
+            title="на весь экран (двойной клик тоже работает)"
+            className="inline-flex items-center justify-center w-6 h-6 rounded bg-kd-overlay-strong text-kd-stage-text"
+          >
+            <ExpandIcon />
+          </button>
         </div>
       )}
     </div>

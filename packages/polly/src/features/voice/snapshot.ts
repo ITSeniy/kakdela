@@ -7,24 +7,44 @@ export class SnapshotError extends Error {
   }
 }
 
+/** Ждём первый декодированный кадр: сразу после attach() videoWidth ещё 0 —
+    без ожидания снимок всегда падал в 'no-frame'. */
+function waitForFrame(video: HTMLVideoElement, timeoutMs = 2500): Promise<void> {
+  if (video.videoWidth > 0 && video.readyState >= 2) return Promise.resolve()
+  return new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new SnapshotError('no-frame')), timeoutMs)
+    const done = () => {
+      clearTimeout(timer)
+      resolve()
+    }
+    // rVFC гарантирует «кадр реально нарисован»; fallback — loadeddata.
+    const rvfc = (video as HTMLVideoElement & {
+      requestVideoFrameCallback?: (cb: () => void) => number
+    }).requestVideoFrameCallback
+    if (typeof rvfc === 'function') rvfc.call(video, done)
+    else video.addEventListener('loadeddata', done, { once: true })
+  })
+}
+
 /**
- * Снять текущий кадр screen-share track'а в JPEG Blob. Идея:
+ * Снять текущий кадр screen-share track'а в JPEG Blob:
  *
- *   1. `track.attach()` отдаёт нам <video> с уже подписанным `srcObject` —
- *      руками `new Video()` + `srcObject = ...` сделать сложнее (race с
- *      autoplay, нужно ждать `loadedmetadata`).
- *   2. canvas.drawImage(video, …) рисует именно текущий decoded-кадр.
+ *   1. `track.attach()` отдаёт <video> с подписанным srcObject; кадра в нём
+ *      ещё нет — ждём первый через requestVideoFrameCallback (с таймаутом).
+ *   2. canvas.drawImage(video, …) рисует текущий decoded-кадр.
  *   3. detach обязательно: иначе LiveKit считает video элемент активным
  *      подписчиком трека и будет дольше держать decoding pipeline.
- *
- * Если track ещё не прогрелся (videoWidth = 0) — кидаем 'no-frame',
- * caller решает: показать ошибку или попробовать через 100ms ещё раз.
  */
 export async function snapshotTrack(
   track: LocalVideoTrack | RemoteVideoTrack,
 ): Promise<Blob> {
   const video = track.attach() as HTMLVideoElement
+  video.muted = true
   try {
+    // play() может реджектиться (например, элемент вне DOM в некоторых
+    // браузерах) — не фатально, rVFC всё равно дождётся кадра.
+    try { await video.play() } catch { /* ignore */ }
+    await waitForFrame(video)
     if (video.videoWidth === 0 || video.videoHeight === 0) {
       throw new SnapshotError('no-frame')
     }

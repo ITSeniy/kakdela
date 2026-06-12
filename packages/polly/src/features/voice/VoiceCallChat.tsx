@@ -13,6 +13,7 @@ import type { PendingMessage } from '../chat/types.js'
 import { useServerEmoji } from '../emoji/api.js'
 import { useProfileUi } from '../profile/store.js'
 import { getServerDetail, listMembers } from '../servers/api.js'
+import { useCallChatUi } from './callChatUi.js'
 
 type MsgCache = InfiniteData<MessagesPage, string | undefined>
 
@@ -32,9 +33,33 @@ export function VoiceCallChat({ serverId, channelId }: VoiceCallChatProps) {
   const queryClient = useQueryClient()
   const user = useAuthStore((s) => s.user)
   const openProfile = useProfileUi((s) => s.open)
+  const width = useCallChatUi((s) => s.width)
+  const setOpen = useCallChatUi((s) => s.setOpen)
 
   const [pending, setPending] = useState<PendingMessage[]>([])
   const [replyTo, setReplyTo] = useState<Message | null>(null)
+
+  // Ресайз за левую кромку: глобальные listeners живут только на время drag.
+  function startResize(e: React.MouseEvent) {
+    e.preventDefault()
+    const startX = e.clientX
+    const startW = width
+    const prevCursor = document.body.style.cursor
+    const prevSelect = document.body.style.userSelect
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+    function onMove(ev: MouseEvent) {
+      useCallChatUi.getState().setWidth(startW + (startX - ev.clientX))
+    }
+    function onUp() {
+      document.body.style.cursor = prevCursor
+      document.body.style.userSelect = prevSelect
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }
 
   // Тот же queryKey, что в ChatScreen/Shell — TanStack Query отдаст из кэша.
   const { data: members = [] } = useQuery({
@@ -190,12 +215,28 @@ export function VoiceCallChat({ serverId, channelId }: VoiceCallChatProps) {
   }
 
   return (
-    <div className="w-[260px] shrink-0 min-h-0 flex flex-col bg-kd-panel border-l border-kd-border">
+    <div
+      className="relative shrink-0 min-h-0 flex flex-col bg-kd-panel border-l border-kd-border"
+      style={{ width }}
+    >
+      {/* Ручка ресайза — невидимая полоса по левой кромке. */}
+      <div
+        onMouseDown={startResize}
+        title="потяните, чтобы изменить ширину"
+        className="absolute left-0 inset-y-0 w-1.5 -ml-0.5 cursor-col-resize z-10 hover:bg-kd-accent/40 transition-colors"
+      />
       <div className="px-3 py-2 border-b border-kd-border flex items-center gap-1.5 shrink-0">
         <Icon.Hash size={12} className="text-kd-text-soft shrink-0" />
         <span className="text-[11px] font-bold text-kd-text truncate">чат звонка</span>
         <div className="flex-1" />
-        <span className="text-[9px] font-mono text-kd-text-mute shrink-0">only call</span>
+        <button
+          type="button"
+          onClick={() => setOpen(false)}
+          title="скрыть чат"
+          className="px-1.5 py-0.5 rounded text-[10px] font-mono text-kd-text-mute hover:text-kd-text hover:bg-kd-panel-hi transition-colors"
+        >
+          ✕
+        </button>
       </div>
       <MessageList
         serverId={serverId}

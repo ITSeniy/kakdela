@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 
 import type { Channel, MemberPublic } from '@kakdela/ginzu/api-types'
+import type { LocalVideoTrack, RemoteVideoTrack } from 'livekit-client'
 
 import { Badge } from '../../components/Badge.js'
 import { Icon } from '../../components/Icon.js'
@@ -12,19 +13,13 @@ import {
 import { useAuthStore } from '../auth/store.js'
 import { sendMessage } from '../chat/api.js'
 import { uploadBlob } from '../files/upload.js'
-import { getServerDetail, listMembers } from '../servers/api.js'
+import { listMembers } from '../servers/api.js'
 import { MicPermissionDialog } from './MicPermission.js'
 import { ParticipantTile } from './ParticipantTile.js'
 import { ScreenTile } from './ScreenTile.js'
 import { VoiceCallChat } from './VoiceCallChat.js'
 import { VoiceControls } from './VoiceControls.js'
-import {
-  computeLayout,
-  focusGridClass,
-  focusUsesAutoFit,
-  type FocusItem,
-  type TileData,
-} from './layout.js'
+import { useCallChatUi } from './callChatUi.js'
 import {
   useScreenShareSettings,
   type ScreenQuality,
@@ -39,6 +34,23 @@ interface VoiceScreenProps {
   channel: Channel
 }
 
+/**
+ * Карточка на сцене — либо «лицо» участника, либо его демка (отдельной
+ * карточкой, как в Discord). Клик по любой разворачивает её на всю область,
+ * остальные уезжают в нижнюю полосу.
+ */
+interface CardData {
+  id: string // userId для лица, `screen:<userId>` для демки
+  kind: 'face' | 'screen'
+  userId: string
+  displayName: string
+  avatarUrl: string | null
+  muted: boolean
+  speaking: boolean
+  isSelf: boolean
+  screenTrack: LocalVideoTrack | RemoteVideoTrack | null
+}
+
 // Секундомер звонка — чисто локальный (от момента join на этом клиенте).
 function formatElapsed(totalSeconds: number): string {
   const h = Math.floor(totalSeconds / 3600)
@@ -49,7 +61,7 @@ function formatElapsed(totalSeconds: number): string {
 }
 
 // Шапка по designs/final-voice.jsx: Speaker-иконка + имя + LIVE + таймер,
-// справа — счётчики эфира.
+// справа — счётчики эфира и тоггл чата звонка.
 function Header({
   channel,
   connected,
@@ -63,6 +75,8 @@ function Header({
   peopleCount: number
   screenCount: number
 }) {
+  const chatOpen = useCallChatUi((s) => s.open)
+  const toggleChat = useCallChatUi((s) => s.toggle)
   return (
     <div className="px-4 py-2 border-b border-kd-border bg-kd-panel-alt flex items-center gap-2.5 shrink-0">
       <Icon.Speaker size={14} className="text-kd-accent shrink-0" />
@@ -84,6 +98,22 @@ function Header({
         {peopleCount} в эфире
         {screenCount > 0 && ` · ${screenCount} ${screenCount === 1 ? 'экран' : 'экрана'}`}
       </span>
+      {connected && (
+        <button
+          type="button"
+          onClick={toggleChat}
+          title={chatOpen ? 'скрыть чат звонка' : 'показать чат звонка'}
+          className={[
+            'inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-mono transition-colors border',
+            chatOpen
+              ? 'bg-kd-panel-hi text-kd-text border-transparent'
+              : 'text-kd-text-soft border-kd-border hover:text-kd-text hover:bg-kd-panel-hi',
+          ].join(' ')}
+        >
+          <Icon.Hash size={11} />
+          чат
+        </button>
+      )}
     </div>
   )
 }
@@ -115,107 +145,64 @@ function JoinCta({ channelName, onJoin, status }: {
   )
 }
 
-// 1-4 — явные сетки, 5+ — auto-fit. Минимум 200px на тайл, чтобы аватары
-// не превратились в марки на 9 участников.
-function gridClassFor(count: number): string {
-  if (count <= 1) return 'grid-cols-1 grid-rows-1'
-  if (count === 2) return 'grid-cols-2 grid-rows-1'
-  if (count <= 4) return 'grid-cols-2 grid-rows-2'
-  if (count <= 9) return 'grid-cols-3'
-  return ''
+const TILE_GAP = 10
+const TILE_ASPECT = 16 / 9
+
+/**
+ * Подбор раскладки как в Discord: карточки всегда 16:9, перебираем число
+ * колонок и берём вариант с максимальной шириной карточки, влезающей в
+ * доступную область. Сами карточки центрируются flex-wrap'ом.
+ */
+function bestTileSize(n: number, areaW: number, areaH: number): { w: number; h: number } {
+  let bestW = 0
+  for (let cols = 1; cols <= n; cols++) {
+    const rows = Math.ceil(n / cols)
+    const cellW = (areaW - TILE_GAP * (cols - 1)) / cols
+    const cellH = (areaH - TILE_GAP * (rows - 1)) / rows
+    if (cellW <= 0 || cellH <= 0) continue
+    const w = Math.min(cellW, cellH * TILE_ASPECT)
+    if (w > bestW) bestW = w
+  }
+  if (bestW <= 0) bestW = 160
+  return { w: Math.floor(bestW), h: Math.floor(bestW / TILE_ASPECT) }
 }
 
-function FaceGrid({ tiles }: { tiles: TileData[] }) {
-  const auto = tiles.length > 9
-  return (
-    <div
-      className={[
-        'flex-1 grid gap-2.5 min-h-0',
-        auto ? '' : gridClassFor(tiles.length),
-      ].join(' ')}
-      style={
-        auto
-          ? { gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }
-          : undefined
-      }
-    >
-      {tiles.map((t) => (
-        <ParticipantTile
-          key={t.userId}
-          displayName={t.displayName}
-          avatarUrl={t.avatarUrl}
-          muted={t.muted}
-          speaking={t.speaking}
-          isSelf={t.isSelf}
-          screenTrack={t.screenTrack}
-        />
-      ))}
-    </div>
-  )
-}
-
-function FocusGrid({
-  focus,
-  pinnedScreenUserId,
-  snapshotBusyUserId,
-  onTogglePin,
-  onSnapshot,
+function Card({
+  card, compact, focused, snapshotBusy, avatarSize, onClick, onSnapshot,
 }: {
-  focus: FocusItem[]
-  pinnedScreenUserId: string | null
-  snapshotBusyUserId: string | null
-  onTogglePin(userId: string): void
-  onSnapshot(f: FocusItem): void
+  card: CardData
+  compact?: boolean
+  focused?: boolean
+  snapshotBusy?: boolean
+  avatarSize?: number
+  onClick(): void
+  onSnapshot?(): void
 }) {
-  const auto = focusUsesAutoFit(focus.length)
+  if (card.kind === 'screen' && card.screenTrack) {
+    return (
+      <ScreenTile
+        displayName={card.displayName}
+        isSelf={card.isSelf}
+        focused={focused}
+        compact={compact}
+        busy={snapshotBusy}
+        onClick={onClick}
+        onSnapshot={onSnapshot}
+        screenTrack={card.screenTrack}
+      />
+    )
+  }
   return (
-    <div
-      className={[
-        'flex-1 grid gap-2.5 min-h-0',
-        auto ? '' : focusGridClass(focus.length),
-      ].join(' ')}
-      style={
-        auto
-          ? { gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))' }
-          : undefined
-      }
-    >
-      {focus.map((f) => (
-        <ScreenTile
-          key={f.userId}
-          displayName={f.displayName}
-          isSelf={f.isSelf}
-          pinned={pinnedScreenUserId === f.userId}
-          busy={snapshotBusyUserId === f.userId}
-          onTogglePin={() => onTogglePin(f.userId)}
-          onSnapshot={() => onSnapshot(f)}
-          screenTrack={f.screenTrack}
-        />
-      ))}
-    </div>
-  )
-}
-
-function Dock({ tiles }: { tiles: TileData[] }) {
-  return (
-    <div
-      className="grid gap-2 shrink-0"
-      style={{
-        gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))',
-      }}
-    >
-      {tiles.map((t) => (
-        <ParticipantTile
-          key={t.userId}
-          displayName={t.displayName}
-          avatarUrl={t.avatarUrl}
-          muted={t.muted}
-          speaking={t.speaking}
-          isSelf={t.isSelf}
-          compact
-        />
-      ))}
-    </div>
+    <ParticipantTile
+      displayName={card.displayName}
+      avatarUrl={card.avatarUrl}
+      muted={card.muted}
+      speaking={card.speaking}
+      isSelf={card.isSelf}
+      compact={compact}
+      avatarSize={avatarSize}
+      onClick={onClick}
+    />
   )
 }
 
@@ -231,10 +218,10 @@ export function VoiceScreen({ serverId, channel }: VoiceScreenProps) {
   const screenSharing = useVoiceStore((s) => s.screenSharing)
   const participants = useVoiceStore((s) => s.participants)
   const activeSpeakers = useVoiceStore((s) => s.activeSpeakers)
-  const pinnedScreenUserId = useVoiceStore((s) => s.pinnedScreenUserId)
-  const setPinnedScreenUserId = useVoiceStore((s) => s.setPinnedScreenUserId)
   const error = useVoiceStore((s) => s.error)
   const setError = useVoiceStore((s) => s.setError)
+  const chatOpen = useCallChatUi((s) => s.open)
+  const openChat = useCallChatUi((s) => s.setOpen)
 
   const connectedToThis =
     activeChannelId === channel.id && (status === 'connected' || status === 'reconnecting')
@@ -245,17 +232,27 @@ export function VoiceScreen({ serverId, channel }: VoiceScreenProps) {
     staleTime: 60_000,
   })
 
-  // Список каналов нужен, чтобы найти куда отправить снимок (первый text-канал
-  // того же сервера). Используем тот же queryKey, что Shell — TanStack Query
-  // отдаст из кэша.
-  const { data: serverDetail } = useQuery({
-    queryKey: ['server', serverId],
-    queryFn: () => getServerDetail(serverId),
-    staleTime: 30_000,
-  })
-
-  const [snapshotBusyUserId, setSnapshotBusyUserId] = useState<string | null>(null)
+  const [snapshotBusyId, setSnapshotBusyId] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  // Развёрнутая карточка (id из CardData). null — обычная сетка.
+  const [focusedId, setFocusedId] = useState<string | null>(null)
+
+  // Размер сцены для подбора раскладки 16:9 карточек (см. bestTileSize).
+  const stageRef = useRef<HTMLDivElement | null>(null)
+  const [stageSize, setStageSize] = useState<{ w: number; h: number } | null>(null)
+  useEffect(() => {
+    if (!connectedToThis) return
+    const el = stageRef.current
+    if (!el) return
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0]
+      if (entry) setStageSize({ w: entry.contentRect.width, h: entry.contentRect.height })
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
+    // focusedId в deps: сетка размонтируется в фокус-режиме, при возврате
+    // ref указывает на новый элемент и его надо пере-наблюдать.
+  }, [connectedToThis, focusedId])
 
   // Секундомер звонка: тикаем раз в секунду, пока подключены к этому каналу.
   // connectedToThis покрывает и 'reconnecting' — таймер не сбрасывается на
@@ -286,15 +283,18 @@ export function VoiceScreen({ serverId, channel }: VoiceScreenProps) {
     return m
   }, [members])
 
-  const tiles = useMemo<TileData[]>(() => {
+  const cards = useMemo<CardData[]>(() => {
     if (!connectedToThis || !me) return []
-    const result: TileData[] = []
+    const result: CardData[] = []
+    const pushBoth = (base: Omit<CardData, 'id' | 'kind'>) => {
+      // Лицо — всегда; демка — отдельной карточкой следом (как в Discord).
+      result.push({ ...base, id: base.userId, kind: 'face', screenTrack: null })
+      if (base.screenTrack) {
+        result.push({ ...base, id: `screen:${base.userId}`, kind: 'screen' })
+      }
+    }
     // Self всегда первый — пользователю важно видеть, что он в эфире.
-    // screenSharing — флаг из store, который выставляется в LocalTrackPublished
-    // handler'е; в тот же момент getLocalScreenVideoTrack() уже возвращает
-    // живой track. На повторных рендерах (speaker/mute) ссылка тоже стабильна,
-    // пока публикация не пересоздалась.
-    result.push({
+    pushBoth({
       userId: me.id,
       displayName: me.displayName,
       avatarUrl: me.avatarUrl ?? null,
@@ -306,7 +306,7 @@ export function VoiceScreen({ serverId, channel }: VoiceScreenProps) {
     for (const p of participants.values() as IterableIterator<ParticipantState>) {
       if (p.userId === me.id) continue
       const member = memberMap.get(p.userId)
-      result.push({
+      pushBoth({
         userId: p.userId,
         displayName: p.displayName || member?.displayName || 'участник',
         avatarUrl: member?.avatarUrl ?? null,
@@ -319,30 +319,22 @@ export function VoiceScreen({ serverId, channel }: VoiceScreenProps) {
     return result
   }, [connectedToThis, me, muted, screenSharing, participants, activeSpeakers, memberMap])
 
-  const layout = useMemo(
-    () => computeLayout(tiles, pinnedScreenUserId),
-    [tiles, pinnedScreenUserId],
-  )
+  // Если развёрнутая карточка исчезла (вышел / прекратил демо) — в сетку.
+  useEffect(() => {
+    if (focusedId && !cards.some((c) => c.id === focusedId)) setFocusedId(null)
+  }, [cards, focusedId])
 
-  // Сколько РЕАЛЬНО шарят (для счётчика в шапке) — а не сколько в focus,
-  // потому что pin'нутый focus содержит только одного, а в шапке хочется
-  // видеть «всех шарящих».
-  const totalScreenCount = useMemo(
-    () => tiles.reduce((n, t) => (t.screenTrack ? n + 1 : n), 0),
-    [tiles],
+  const focusedCard = focusedId ? cards.find((c) => c.id === focusedId) ?? null : null
+  const screenCount = useMemo(
+    () => cards.reduce((n, c) => (c.kind === 'screen' ? n + 1 : n), 0),
+    [cards],
   )
-
-  const onTogglePin = (userId: string): void => {
-    setPinnedScreenUserId(pinnedScreenUserId === userId ? null : userId)
-  }
 
   const onToggleScreenShare = (): void => {
     if (screenSharing) {
       void stopShare()
     } else {
-      // `withAudio` берётся внутри startShare из useScreenShareSettings,
-      // если не передали явно. Передавать тут нечего — пользователь сам
-      // тогглит «со звуком» в VoiceControls.
+      // `withAudio` берётся внутри startShare из useScreenShareSettings.
       void startShare()
     }
   }
@@ -354,30 +346,31 @@ export function VoiceScreen({ serverId, channel }: VoiceScreenProps) {
     void restartShare()
   }
 
-  const onSnapshot = async (f: FocusItem): Promise<void> => {
-    // Гонка: пока висит upload — игнорируем повторные клики по этому tile.
-    // По другим tile'ам клик разрешён (busy — per-userId).
-    if (snapshotBusyUserId === f.userId) return
-    const firstText = serverDetail?.channels.find((c) => c.kind === 'text')
-    if (!firstText) {
-      setNotice('нет текстового канала, куда отправить снимок')
-      return
-    }
-    setSnapshotBusyUserId(f.userId)
+  const onSnapshot = async (card: CardData): Promise<void> => {
+    if (!card.screenTrack) return
+    // Гонка: пока висит upload — игнорируем повторные клики по этой карточке.
+    if (snapshotBusyId === card.id) return
+    setSnapshotBusyId(card.id)
     try {
-      const blob = await snapshotTrack(f.screenTrack)
+      const blob = await snapshotTrack(card.screenTrack)
       const { publicUrl } = await uploadBlob(blob)
-      const alt = `снимок демо · ${f.displayName}`
-      await sendMessage(firstText.id, {
+      const alt = `снимок демо · ${card.displayName}`
+      // Снимок уходит в чат этого же звонка — он рядом и виден всем в канале.
+      await sendMessage(channel.id, {
         content: `![${alt}](${publicUrl})`,
       })
-      setNotice(`снимок отправлен в #${firstText.name}`)
+      openChat(true)
+      setNotice('снимок отправлен в чат звонка')
     } catch (err) {
       console.warn('[voice] snapshot failed', err)
       setNotice('не удалось отправить снимок')
     } finally {
-      setSnapshotBusyUserId(null)
+      setSnapshotBusyId(null)
     }
+  }
+
+  const toggleFocus = (id: string): void => {
+    setFocusedId((cur) => (cur === id ? null : id))
   }
 
   return (
@@ -386,29 +379,69 @@ export function VoiceScreen({ serverId, channel }: VoiceScreenProps) {
         channel={channel}
         connected={connectedToThis}
         callSeconds={callSeconds}
-        peopleCount={connectedToThis ? tiles.length : 0}
-        screenCount={connectedToThis ? totalScreenCount : 0}
+        peopleCount={connectedToThis ? cards.filter((c) => c.kind === 'face').length : 0}
+        screenCount={connectedToThis ? screenCount : 0}
       />
       {connectedToThis ? (
         <>
           <div className="flex-1 flex min-h-0">
-            <div className="flex-1 min-w-0 flex flex-col gap-2.5 p-3 min-h-0 bg-kd-stage">
-              {layout.mode === 'grid' ? (
-                <FaceGrid tiles={layout.dock} />
-              ) : (
+            <div className="flex-1 min-w-0 flex flex-col gap-2 p-3 min-h-0 bg-kd-stage">
+              {focusedCard ? (
                 <>
-                  <FocusGrid
-                    focus={layout.focus}
-                    pinnedScreenUserId={pinnedScreenUserId}
-                    snapshotBusyUserId={snapshotBusyUserId}
-                    onTogglePin={onTogglePin}
-                    onSnapshot={(f) => { void onSnapshot(f) }}
-                  />
-                  <Dock tiles={layout.dock} />
+                  {/* Развёрнутая карточка занимает всю область */}
+                  <div className="flex-1 min-h-0 grid grid-cols-1 grid-rows-1">
+                    <Card
+                      card={focusedCard}
+                      focused
+                      snapshotBusy={snapshotBusyId === focusedCard.id}
+                      onClick={() => toggleFocus(focusedCard.id)}
+                      onSnapshot={
+                        focusedCard.kind === 'screen'
+                          ? () => { void onSnapshot(focusedCard) }
+                          : undefined
+                      }
+                    />
+                  </div>
+                  {/* Остальные — в нижней полосе */}
+                  {cards.length > 1 && (
+                    <div className="flex gap-2 shrink-0 overflow-x-auto h-[76px]">
+                      {cards.filter((c) => c.id !== focusedCard.id).map((c) => (
+                        <div key={c.id} className="w-[132px] shrink-0">
+                          <Card card={c} compact onClick={() => toggleFocus(c.id)} />
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </>
+              ) : (
+                <div
+                  ref={stageRef}
+                  className="flex-1 min-h-0 flex flex-wrap content-center justify-center overflow-hidden"
+                  style={{ gap: TILE_GAP }}
+                >
+                  {(() => {
+                    const size = stageSize
+                      ? bestTileSize(cards.length, stageSize.w, stageSize.h)
+                      : { w: 320, h: 180 }
+                    const avatarSize = Math.max(36, Math.min(88, Math.round(size.h * 0.42)))
+                    return cards.map((c) => (
+                      <div key={c.id} style={{ width: size.w, height: size.h }}>
+                        <Card
+                          card={c}
+                          avatarSize={avatarSize}
+                          snapshotBusy={snapshotBusyId === c.id}
+                          onClick={() => toggleFocus(c.id)}
+                          onSnapshot={
+                            c.kind === 'screen' ? () => { void onSnapshot(c) } : undefined
+                          }
+                        />
+                      </div>
+                    ))
+                  })()}
+                </div>
               )}
             </div>
-            <VoiceCallChat serverId={serverId} channelId={channel.id} />
+            {chatOpen && <VoiceCallChat serverId={serverId} channelId={channel.id} />}
           </div>
           <VoiceControls
             onToggleMute={() => { void toggleMute() }}

@@ -25,8 +25,9 @@ function ImageThumb({
   attachment: Attachment
   onOpen: () => void
 }) {
-  // Thumbnails are sized so the longest side ≤ 400 (height ≤ 300). The
-  // browser caches the source so re-renders don't refetch.
+  // Целевой размер: длинная сторона ≤400, высота ≤300. Высоту НЕ фиксируем —
+  // задаём aspect-ratio: когда maxWidth ужимает блок в узком чате, высота
+  // следует за пропорцией и картинка не обрезается object-cover'ом.
   const maxW = 400
   const maxH = 300
   let w = attachment.width ?? maxW
@@ -38,7 +39,7 @@ function ImageThumb({
       type="button"
       onClick={onOpen}
       className="block rounded-kd overflow-hidden border border-kd-border bg-kd-panel-alt"
-      style={{ width: Math.round(w), height: Math.round(h), maxWidth: '100%' }}
+      style={{ width: Math.round(w), maxWidth: '100%', aspectRatio: `${Math.round(w)} / ${Math.round(h)}` }}
       title={attachment.originalName}
     >
       <img

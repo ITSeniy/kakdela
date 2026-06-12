@@ -127,7 +127,13 @@ export function Shell() {
     }
   }, [channelId, openThreadId, threadParentId, closeThread])
 
-  const showMemberList = !inSidebarMode && !showThreadPanel
+  // В голосовом канале правая колонка участников не нужна — у звонка свой
+  // состав в сетке карточек и свой чат (VoiceCallChat).
+  const inVoiceChannel =
+    channelId !== null
+    && serverDetail?.channels.find((c) => c.id === channelId)?.kind === 'voice'
+
+  const showMemberList = !inSidebarMode && !showThreadPanel && !inVoiceChannel
 
   // На больших экранах мы держим колонку справа постоянно — она показывает
   // либо MemberList, либо ThreadPanel. На малых экранах MemberList скрыт,
@@ -145,7 +151,9 @@ export function Shell() {
       : `${gridBase} grid-cols-[56px_216px_1fr]`
     : showThreadPanel
       ? `${gridBase} grid-cols-[56px_216px_1fr_360px]`
-      : `${gridBase} grid-cols-[56px_216px_1fr] lg:grid-cols-[56px_216px_1fr_220px]`
+      : inVoiceChannel
+        ? `${gridBase} grid-cols-[56px_216px_1fr]`
+        : `${gridBase} grid-cols-[56px_216px_1fr] lg:grid-cols-[56px_216px_1fr_220px]`
 
   return (
     <div className={gridClass}>

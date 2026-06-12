@@ -1,7 +1,6 @@
-import type { ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 
 import { Icon } from '../../components/Icon.js'
-import { useRealtimeStore } from '../realtime/store.js'
 import { describeKey, useVoiceInputSettings } from './inputSettings.js'
 import {
   SCREEN_QUALITY_LABELS,
@@ -33,6 +32,20 @@ function NoteIcon() {
 // bg-kd-stage, поэтому «обычный» тон — прозрачная капсула со stage-текстом.
 // Тоны: mute (выключенный микро/звук) — dnd, warn (идёт демо) — warm,
 // hot (вы в эфире) — accent, danger (выйти) — danger.
+function ctrlCls(tone: 'default' | 'mute' | 'warn' | 'hot' | 'danger' | undefined, active?: boolean): string {
+  return tone === 'danger'
+    ? 'bg-kd-danger text-white border border-transparent hover:opacity-90'
+    : tone === 'mute'
+      ? 'bg-kd-dnd text-white border border-transparent hover:opacity-90'
+      : tone === 'warn'
+        ? 'bg-kd-warm text-white border border-transparent hover:opacity-90'
+        : tone === 'hot'
+          ? 'bg-kd-accent text-white border border-transparent hover:opacity-90'
+          : active
+            ? 'bg-kd-panel-hi text-kd-text border border-transparent'
+            : 'bg-transparent text-kd-stage-text border border-kd-border hover:bg-kd-panel-hi/20'
+}
+
 function CtrlButton({
   children, label, onClick, active, disabled, tone, title,
 }: {
@@ -44,31 +57,128 @@ function CtrlButton({
   tone?: 'default' | 'mute' | 'warn' | 'hot' | 'danger'
   title?: string
 }) {
-  const base =
-    'inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-kd text-[11px] font-semibold transition-colors'
-  const color =
-    tone === 'danger'
-      ? 'bg-kd-danger text-white border border-transparent hover:opacity-90'
-      : tone === 'mute'
-        ? 'bg-kd-dnd text-white border border-transparent hover:opacity-90'
-        : tone === 'warn'
-          ? 'bg-kd-warm text-white border border-transparent hover:opacity-90'
-          : tone === 'hot'
-            ? 'bg-kd-accent text-white border border-transparent hover:opacity-90'
-            : active
-              ? 'bg-kd-panel-hi text-kd-text border border-transparent'
-              : 'bg-transparent text-kd-stage-text border border-kd-border hover:bg-kd-panel-hi/20'
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={disabled}
       title={title}
-      className={[base, color, disabled ? 'opacity-50 cursor-not-allowed' : ''].join(' ')}
+      className={[
+        'inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-kd text-[11px] font-semibold transition-colors',
+        ctrlCls(tone, active),
+        disabled ? 'opacity-50 cursor-not-allowed' : '',
+      ].join(' ')}
     >
       {children}
       {label}
     </button>
+  )
+}
+
+/** Сплит-кнопка «демо»: основная — старт/стоп трансляции, ▾ — меню с
+    настройками (системный звук + качество). */
+function ScreenShareButton({
+  onToggleScreenShare,
+  onChangeScreenQuality,
+}: {
+  onToggleScreenShare(): void
+  onChangeScreenQuality(q: ScreenQuality): void
+}) {
+  const screenSharing = useVoiceStore((s) => s.screenSharing)
+  const withAudio = useScreenShareSettings((s) => s.withAudio)
+  const audioCaptureSupported = useScreenShareSettings((s) => s.audioCaptureSupported)
+  const setWithAudio = useScreenShareSettings((s) => s.setWithAudio)
+  const screenQuality = useScreenShareSettings((s) => s.screenQuality)
+
+  const [menuOpen, setMenuOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!menuOpen) return
+    function onDown(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setMenuOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [menuOpen])
+
+  const audioDisabled = screenSharing || audioCaptureSupported === false
+
+  return (
+    <div className="relative" ref={ref}>
+      <div className="inline-flex">
+        <button
+          type="button"
+          onClick={onToggleScreenShare}
+          title={screenSharing ? 'остановить демонстрацию экрана' : 'начать демонстрацию экрана'}
+          className={[
+            'inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-l-[var(--kd-radius)] text-[11px] font-semibold transition-colors',
+            ctrlCls(screenSharing ? 'warn' : 'default'),
+          ].join(' ')}
+        >
+          <Icon.Monitor size={13} />
+          демо
+        </button>
+        <button
+          type="button"
+          onClick={() => setMenuOpen((o) => !o)}
+          title="настройки демо"
+          className={[
+            'inline-flex items-center px-1.5 py-1.5 rounded-r-[var(--kd-radius)] text-[10px] transition-colors border-l-0',
+            ctrlCls(screenSharing ? 'warn' : 'default', menuOpen),
+          ].join(' ')}
+        >
+          ▾
+        </button>
+      </div>
+
+      {menuOpen && (
+        <div className="absolute bottom-full left-0 mb-1.5 z-50 min-w-[190px] bg-kd-panel border border-kd-border rounded-kd shadow-kd-modal py-1 select-none">
+          <div className="px-3 pt-1 pb-1.5 text-[9px] font-mono font-bold uppercase tracking-wider text-kd-text-mute">
+            настройки демо
+          </div>
+          <button
+            type="button"
+            onClick={() => { if (!audioDisabled) setWithAudio(!withAudio) }}
+            disabled={audioDisabled}
+            title={
+              audioCaptureSupported === false
+                ? 'на вашей системе недоступно — браузер не отдаёт системный звук'
+                : screenSharing
+                  ? 'переключите до начала демо'
+                  : undefined
+            }
+            className={[
+              'w-full text-left px-3 py-1.5 text-[12px] flex items-center gap-2 transition-colors',
+              audioDisabled ? 'text-kd-text-mute opacity-60 cursor-not-allowed' : 'text-kd-text hover:bg-kd-panel-alt',
+            ].join(' ')}
+          >
+            <NoteIcon />
+            <span className="flex-1">со звуком</span>
+            {withAudio && <span className="text-[10px] font-mono text-kd-accent">✓</span>}
+          </button>
+          <div className="my-1 h-px bg-kd-border mx-2" />
+          <div className="px-3 pt-0.5 pb-1 text-[9px] font-mono font-bold uppercase tracking-wider text-kd-text-mute">
+            качество
+          </div>
+          {SCREEN_QUALITY_ORDER.map((q) => (
+            <button
+              key={q}
+              type="button"
+              onClick={() => { onChangeScreenQuality(q); setMenuOpen(false) }}
+              title={screenSharing ? 'смена качества перезапустит трансляцию — picker появится снова' : undefined}
+              className={[
+                'w-full text-left px-3 py-1.5 text-[12px] flex items-center gap-2 transition-colors hover:bg-kd-panel-alt',
+                q === screenQuality ? 'text-kd-text font-semibold' : 'text-kd-text-soft',
+              ].join(' ')}
+            >
+              <span className="flex-1 font-mono">{SCREEN_QUALITY_LABELS[q]}</span>
+              {q === screenQuality && <span className="text-[10px] font-mono text-kd-accent">✓</span>}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -85,16 +195,8 @@ export function VoiceControls({
   const error = useVoiceStore((s) => s.error)
   const pttHolding = useVoiceStore((s) => s.pttHolding)
   const screenSharing = useVoiceStore((s) => s.screenSharing)
-  const withAudio = useScreenShareSettings((s) => s.withAudio)
-  const audioCaptureSupported = useScreenShareSettings((s) => s.audioCaptureSupported)
-  const setWithAudio = useScreenShareSettings((s) => s.setWithAudio)
-  const screenQuality = useScreenShareSettings((s) => s.screenQuality)
   const inputMode = useVoiceInputSettings((s) => s.inputMode)
   const pttKey = useVoiceInputSettings((s) => s.pttKey)
-  // Воксовой RTT мы пока не меряем — показываем WS-latency как ближайший
-  // прокси (одна WAN-задержка). Заменим на реальную RTT из LiveKit статов
-  // в фазе полировки.
-  const wsLatency = useRealtimeStore((s) => s.latency)
 
   const isPtt = inputMode === 'push-to-talk'
   const micButton = isPtt
@@ -122,21 +224,13 @@ export function VoiceControls({
 
   return (
     <div className="px-4 py-2 border-t border-kd-border bg-kd-stage flex items-center gap-1.5 shrink-0">
-      <div
-        className={[
-          'text-[10px] font-mono mr-2',
-          status === 'connected' ? 'text-kd-online' : 'text-kd-text-mute',
-        ].join(' ')}
-      >
-        ●{' '}
-        {status === 'connected'
-          ? (wsLatency !== null ? `${wsLatency} мс` : 'в эфире')
-          : status === 'reconnecting'
-            ? 'переподключение…'
-            : status === 'connecting'
-              ? 'подключение…'
-              : status}
-      </div>
+      {/* Пинг убран — переедет в другое место. Статус показываем только
+          когда соединение нестабильно. */}
+      {(status === 'reconnecting' || status === 'connecting') && (
+        <span className="text-[10px] font-mono mr-2 text-kd-text-mute">
+          ● {status === 'reconnecting' ? 'переподключение…' : 'подключение…'}
+        </span>
+      )}
 
       {micButton}
 
@@ -149,65 +243,10 @@ export function VoiceControls({
         <Icon.Headphones size={13} />
       </CtrlButton>
 
-      <CtrlButton
-        label="демо"
-        onClick={onToggleScreenShare}
-        tone={screenSharing ? 'warn' : 'default'}
-        title={screenSharing ? 'остановить демонстрацию экрана' : 'начать демонстрацию экрана'}
-      >
-        <Icon.Monitor size={13} />
-      </CtrlButton>
-
-      {/* Toggle захвата системного звука. Disabled, если платформа уже
-          подтвердила, что не отдаёт audio (T-050a). Менять можно только
-          между сессиями — внутри активной демки переключение игнорируется
-          до следующего stop/start, и это OK. */}
-      <button
-        type="button"
-        onClick={() => setWithAudio(!withAudio)}
-        disabled={screenSharing || audioCaptureSupported === false}
-        title={
-          audioCaptureSupported === false
-            ? 'на вашей системе недоступно — браузер не отдаёт системный звук'
-            : screenSharing
-              ? 'переключите до начала демо'
-              : withAudio
-                ? 'захватывать системный звук вместе с экраном'
-                : 'демо без системного звука'
-        }
-        className={[
-          'inline-flex items-center gap-1.5 px-2 py-1.5 rounded-kd text-[11px] font-semibold transition-colors',
-          (screenSharing || audioCaptureSupported === false)
-            ? 'opacity-50 cursor-not-allowed bg-transparent text-kd-stage-text border border-kd-border'
-            : withAudio
-              ? 'bg-kd-panel-hi text-kd-text border border-transparent'
-              : 'bg-transparent text-kd-stage-text border border-kd-border hover:bg-kd-panel-hi/20',
-        ].join(' ')}
-      >
-        <NoteIcon />
-        со звуком
-      </button>
-
-      {/* Селектор качества screen share. Нативный <select> — потому что у нас
-          нет дизайн-системы dropdown'ов, а styling тут уже декоративный
-          (Chromium умеет рисовать стрелку и список сам). При смене во время
-          трансляции — restart через onChangeScreenQuality в VoiceScreen. */}
-      <label className="inline-flex items-center gap-1.5 text-[10px] font-mono text-kd-stage-text">
-        <select
-          value={screenQuality}
-          onChange={(e) => onChangeScreenQuality(e.target.value as ScreenQuality)}
-          title={
-            screenSharing
-              ? 'смена качества перезапустит трансляцию — picker появится снова'
-              : 'качество screen share'
-          }
-          className="bg-kd-panel border border-kd-border rounded-kd px-1.5 py-1 text-[10px] font-mono text-kd-text hover:bg-kd-panel-hi focus:outline-none focus:ring-1 focus:ring-kd-accent"
-        >
-          {SCREEN_QUALITY_ORDER.map((q) => (
-            <option key={q} value={q}>{SCREEN_QUALITY_LABELS[q]}</option>
-          ))}
-        </select>
-      </label>
+      <ScreenShareButton
+        onToggleScreenShare={onToggleScreenShare}
+        onChangeScreenQuality={onChangeScreenQuality}
+      />
 
       {screenSharing && (
         <span className="text-[10px] font-mono px-1.5 py-0.5 rounded text-kd-warm bg-kd-overlay-strong border border-kd-border">
