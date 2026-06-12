@@ -12,6 +12,7 @@ import { channels } from '../db/schema.js'
 import { audit } from '../lib/audit.js'
 import { db } from '../lib/db.js'
 import { assertMember, assertRole, notFound } from '../lib/permissions.js'
+import { broadcastToServer } from '../ws/broadcast.js'
 
 export const channelsRoutes: FastifyPluginAsyncZod = async (app) => {
   // ───── GET /api/channels/:channelId ─────
@@ -127,6 +128,12 @@ export const channelsRoutes: FastifyPluginAsyncZod = async (app) => {
         },
       })
 
+      void broadcastToServer(existingServerId, {
+        t: 'channel.update',
+        serverId: existingServerId,
+        channel,
+      })
+
       return reply.code(200).send(channel)
     },
   )
@@ -176,6 +183,12 @@ export const channelsRoutes: FastifyPluginAsyncZod = async (app) => {
         // достаточно идентифицируется по `name` в metadata.
         targetId:   null,
         metadata: { name: existing.name, kind: existing.kind },
+      })
+
+      void broadcastToServer(existingServerId, {
+        t: 'channel.delete',
+        serverId: existingServerId,
+        channelId,
       })
 
       return reply.code(204).send(null)

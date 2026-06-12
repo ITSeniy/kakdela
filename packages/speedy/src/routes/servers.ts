@@ -18,6 +18,8 @@ import { audit } from '../lib/audit.js'
 import { db } from '../lib/db.js'
 import { assertMember, assertRole, notFound } from '../lib/permissions.js'
 import { presence } from '../presence/store.js'
+import { broadcastToServer } from '../ws/broadcast.js'
+import { registry } from '../ws/registry.js'
 
 const STATUS_ORDER: Record<string, number> = { online: 0, idle: 1, dnd: 2, offline: 3 }
 
@@ -284,6 +286,15 @@ export const serversRoutes: FastifyPluginAsyncZod = async (app) => {
           category: channel.category,
         },
       })
+
+      // Hot-attach: подписки на каналы выдаются соединению на hello, поэтому
+      // уже подключённых участников сервера досубскрайбим вручную — иначе
+      // msg.new в новом канале не дойдёт до них до реконнекта (тот же
+      // паттерн, что у DM и тредов).
+      for (const conn of registry.forServer(serverId)) {
+        registry.subscribeChannel(conn, channel.id)
+      }
+      void broadcastToServer(serverId, { t: 'channel.create', serverId, channel })
 
       return reply.code(201).send(channel)
     },

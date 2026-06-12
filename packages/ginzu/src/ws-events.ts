@@ -1,7 +1,7 @@
 import { z } from 'zod'
 
-import { UserSchema, ServerSchema, MessageSchema, ServerMemberSchema } from './api-types.js'
-import type { User, Server, Message, ServerMember } from './api-types.js'
+import { UserSchema, ServerSchema, MessageSchema, ServerMemberSchema, ChannelSchema } from './api-types.js'
+import type { User, Server, Message, ServerMember, Channel } from './api-types.js'
 
 export type ServerEvent =
   | { t: 'ready'; user: User; servers: Server[] }
@@ -24,6 +24,9 @@ export type ServerEvent =
   | { t: 'user.update'; userId: string; displayName: string; avatarUrl: string | null; customStatus: string | null }
   | { t: 'thread.new'; parentChannelId: string; parentMessageId: string; threadChannelId: string; name: string }
   | { t: 'thread.archive'; parentChannelId: string; threadChannelId: string; archivedAt: string }
+  | { t: 'channel.create'; serverId: string; channel: Channel }
+  | { t: 'channel.update'; serverId: string; channel: Channel }
+  | { t: 'channel.delete'; serverId: string; channelId: string }
 
 export type ClientEvent =
   | { t: 'hello'; token: string }
@@ -78,6 +81,9 @@ export const ServerEventSchema = z.discriminatedUnion('t', [
     threadChannelId: uuid,
     archivedAt: z.string(),
   }),
+  z.object({ t: z.literal('channel.create'), serverId: uuid, channel: ChannelSchema }),
+  z.object({ t: z.literal('channel.update'), serverId: uuid, channel: ChannelSchema }),
+  z.object({ t: z.literal('channel.delete'), serverId: uuid, channelId: uuid }),
 ])
 
 export const ClientEventSchema = z.discriminatedUnion('t', [

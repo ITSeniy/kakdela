@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
+import { useLocation } from 'wouter'
 
 import type { User } from '@kakdela/ginzu/api-types'
 
@@ -25,6 +26,9 @@ export function App() {
   const prevStatusRef = useRef(status)
   const queryClient = useQueryClient()
   const setSession = useAuthStore((s) => s.setSession)
+  const [location, navigate] = useLocation()
+  const locationRef = useRef(location)
+  locationRef.current = location
 
   useEffect(() => {
     void initAuth()
@@ -58,6 +62,19 @@ export function App() {
       }
     })
   }, [queryClient, setSession])
+
+  // channel.create/update/delete: список каналов сервера обновляется live
+  // у всех участников. При удалении канала, который сейчас открыт, —
+  // уходим на корень сервера, чтобы не остаться в несуществующем чате.
+  useEffect(() => {
+    return wsClient.on((event) => {
+      if (event.t !== 'channel.create' && event.t !== 'channel.update' && event.t !== 'channel.delete') return
+      void queryClient.invalidateQueries({ queryKey: ['server', event.serverId] })
+      if (event.t === 'channel.delete' && locationRef.current.includes(event.channelId)) {
+        navigate(`/servers/${event.serverId}`)
+      }
+    })
+  }, [queryClient, navigate])
 
   // Сервер при каждом коннекте принудительно ставит presence=online. Если
   // пользователь выбрал «отошёл»/«не беспокоить» — восстанавливаем после
