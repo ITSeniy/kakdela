@@ -19,6 +19,7 @@ import { ParticipantTile } from './ParticipantTile.js'
 import { ScreenTile } from './ScreenTile.js'
 import { VoiceCallChat } from './VoiceCallChat.js'
 import { VoiceControls } from './VoiceControls.js'
+import { VoiceUserMenu, type VoiceUserMenuTarget } from './VoiceUserMenu.js'
 import { useCallChatUi } from './callChatUi.js'
 import {
   useScreenShareSettings,
@@ -48,6 +49,8 @@ interface CardData {
   muted: boolean
   speaking: boolean
   isSelf: boolean
+  serverMuted: boolean
+  serverDeafened: boolean
   screenTrack: LocalVideoTrack | RemoteVideoTrack | null
 }
 
@@ -218,6 +221,7 @@ export function VoiceScreen({ serverId, channel }: VoiceScreenProps) {
   const screenSharing = useVoiceStore((s) => s.screenSharing)
   const participants = useVoiceStore((s) => s.participants)
   const activeSpeakers = useVoiceStore((s) => s.activeSpeakers)
+  const selfSpeaking = useVoiceStore((s) => s.selfSpeaking)
   const error = useVoiceStore((s) => s.error)
   const setError = useVoiceStore((s) => s.setError)
   const chatOpen = useCallChatUi((s) => s.open)
@@ -236,6 +240,10 @@ export function VoiceScreen({ serverId, channel }: VoiceScreenProps) {
   const [notice, setNotice] = useState<string | null>(null)
   // Развёрнутая карточка (id из CardData). null — обычная сетка.
   const [focusedId, setFocusedId] = useState<string | null>(null)
+  // ПКМ по карточке — то же меню, что в дереве участников слева.
+  const [userMenu, setUserMenu] = useState<
+    { x: number; y: number; target: VoiceUserMenuTarget } | null
+  >(null)
 
   // Размер сцены для подбора раскладки 16:9 карточек (см. bestTileSize).
   const stageRef = useRef<HTMLDivElement | null>(null)
@@ -294,13 +302,17 @@ export function VoiceScreen({ serverId, channel }: VoiceScreenProps) {
       }
     }
     // Self всегда первый — пользователю важно видеть, что он в эфире.
+    // Своё кольцо — ТОЛЬКО локальный измеритель: серверный сигнал (плюс наш
+    // 500мс-дебаунс) гаснет на секунды позже и кольцо «залипало».
     pushBoth({
       userId: me.id,
       displayName: me.displayName,
       avatarUrl: me.avatarUrl ?? null,
       muted,
-      speaking: activeSpeakers.has(me.id),
+      speaking: selfSpeaking,
       isSelf: true,
+      serverMuted: false,
+      serverDeafened: false,
       screenTrack: screenSharing ? getLocalScreenVideoTrack() : null,
     })
     for (const p of participants.values() as IterableIterator<ParticipantState>) {
@@ -313,11 +325,13 @@ export function VoiceScreen({ serverId, channel }: VoiceScreenProps) {
         muted: p.isMuted,
         speaking: activeSpeakers.has(p.userId),
         isSelf: false,
+        serverMuted: p.serverMuted,
+        serverDeafened: p.serverDeafened,
         screenTrack: p.isScreenSharing ? getRemoteScreenVideoTrack(p.userId) : null,
       })
     }
     return result
-  }, [connectedToThis, me, muted, screenSharing, participants, activeSpeakers, memberMap])
+  }, [connectedToThis, me, muted, screenSharing, participants, activeSpeakers, selfSpeaking, memberMap])
 
   // Если развёрнутая карточка исчезла (вышел / прекратил демо) — в сетку.
   useEffect(() => {
@@ -373,6 +387,29 @@ export function VoiceScreen({ serverId, channel }: VoiceScreenProps) {
     setFocusedId((cur) => (cur === id ? null : id))
   }
 
+  const myRole = me ? memberMap.get(me.id)?.role : undefined
+  const canManage = myRole === 'owner' || myRole === 'admin'
+
+  const openCardMenu = (e: React.MouseEvent, card: CardData): void => {
+    // На себе меню не открываем — свои тумблеры в панели управления.
+    if (card.isSelf) return
+    e.preventDefault()
+    e.stopPropagation()
+    const streaming = cards.some((c) => c.kind === 'screen' && c.userId === card.userId)
+    setUserMenu({
+      x: e.clientX,
+      y: e.clientY,
+      target: {
+        channelId: channel.id,
+        userId: card.userId,
+        name: card.displayName,
+        live: streaming,
+        serverMuted: card.serverMuted,
+        serverDeafened: card.serverDeafened,
+      },
+    })
+  }
+
   return (
     <div className="relative flex-1 min-w-0 min-h-0 flex flex-col bg-kd-bg">
       <Header
@@ -389,7 +426,10 @@ export function VoiceScreen({ serverId, channel }: VoiceScreenProps) {
               {focusedCard ? (
                 <>
                   {/* Развёрнутая карточка занимает всю область */}
-                  <div className="flex-1 min-h-0 grid grid-cols-1 grid-rows-1">
+                  <div
+                    className="flex-1 min-h-0 grid grid-cols-1 grid-rows-1"
+                    onContextMenu={(e) => openCardMenu(e, focusedCard)}
+                  >
                     <Card
                       card={focusedCard}
                       focused
@@ -404,9 +444,14 @@ export function VoiceScreen({ serverId, channel }: VoiceScreenProps) {
                   </div>
                   {/* Остальные — в нижней полосе */}
                   {cards.length > 1 && (
-                    <div className="flex gap-2 shrink-0 overflow-x-auto h-[76px]">
+                    /* p-[3px] — чтобы speaking-кольцо не резалось скролл-боксом */
+                    <div className="flex gap-2 shrink-0 overflow-x-auto h-[82px] p-[3px]">
                       {cards.filter((c) => c.id !== focusedCard.id).map((c) => (
-                        <div key={c.id} className="w-[132px] shrink-0">
+                        <div
+                          key={c.id}
+                          className="w-[132px] shrink-0"
+                          onContextMenu={(e) => openCardMenu(e, c)}
+                        >
                           <Card card={c} compact onClick={() => toggleFocus(c.id)} />
                         </div>
                       ))}
@@ -416,16 +461,23 @@ export function VoiceScreen({ serverId, channel }: VoiceScreenProps) {
               ) : (
                 <div
                   ref={stageRef}
-                  className="flex-1 min-h-0 flex flex-wrap content-center justify-center overflow-hidden"
+                  // Без overflow-hidden: speaking-кольцо (box-shadow) рисуется
+                  // на 2px снаружи карточки и резалось на краях сетки.
+                  className="flex-1 min-h-0 flex flex-wrap content-center justify-center"
                   style={{ gap: TILE_GAP }}
                 >
                   {(() => {
+                    // −6px с каждой стороны — запас под кольцо.
                     const size = stageSize
-                      ? bestTileSize(cards.length, stageSize.w, stageSize.h)
+                      ? bestTileSize(cards.length, stageSize.w - 6, stageSize.h - 6)
                       : { w: 320, h: 180 }
                     const avatarSize = Math.max(36, Math.min(88, Math.round(size.h * 0.42)))
                     return cards.map((c) => (
-                      <div key={c.id} style={{ width: size.w, height: size.h }}>
+                      <div
+                        key={c.id}
+                        style={{ width: size.w, height: size.h }}
+                        onContextMenu={(e) => openCardMenu(e, c)}
+                      >
                         <Card
                           card={c}
                           avatarSize={avatarSize}
@@ -465,6 +517,15 @@ export function VoiceScreen({ serverId, channel }: VoiceScreenProps) {
         <div className="absolute left-1/2 -translate-x-1/2 bottom-16 px-3 py-1.5 rounded-kd text-[12px] font-medium bg-kd-accent text-white shadow-kd-tile">
           {notice}
         </div>
+      )}
+      {userMenu && (
+        <VoiceUserMenu
+          x={userMenu.x}
+          y={userMenu.y}
+          target={userMenu.target}
+          canManage={canManage}
+          onClose={() => setUserMenu(null)}
+        />
       )}
     </div>
   )

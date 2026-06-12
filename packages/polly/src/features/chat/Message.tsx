@@ -7,6 +7,7 @@ import { Badge } from '../../components/Badge.js'
 import { confirmDialog } from '../../components/ConfirmDialog.js'
 import { Icon } from '../../components/Icon.js'
 import { useProfileUi } from '../profile/store.js'
+import { useAppearance } from '../settings/appearance.js'
 import { useThreadUi } from '../threads/store.js'
 import { AttachmentList } from './AttachmentView.js'
 import { useChatDisplaySettings } from './displaySettings.js'
@@ -218,6 +219,10 @@ export function Message({
   // время появляется на ховере в левой колонке.
   const density = useChatDisplaySettings((s) => s.density)
   const compact = density === 'compact'
+  // Заливка строки под курсором — отключаемая в настройках внешнего вида.
+  // --kd-hover, а не panel-alt/NN: kd-цвета в tailwind-конфиге без
+  // <alpha-value>, и модификатор прозрачности на них молча не работает.
+  const hoverCls = useAppearance((s) => s.hoverHighlight) ? 'hover:bg-kd-hover' : ''
   const grouped =
     prev !== null &&
     prev.authorId === message.authorId &&
@@ -393,7 +398,7 @@ export function Message({
   if (compact) {
     return (
       <div
-        className={`group px-4 py-[2px] hover:bg-kd-panel-alt/40 ${opacityCls}`}
+        className={`group px-4 py-[2px] ${hoverCls} ${opacityCls}`}
         data-message-id={message.id}
         onContextMenu={openContextMenu}
       >
@@ -441,7 +446,7 @@ export function Message({
   if (grouped) {
     return (
       <div
-        className={`group flex gap-2.5 px-4 py-[2px] items-start hover:bg-kd-panel-alt/40 ${opacityCls}`}
+        className={`group flex gap-2.5 px-4 py-[2px] items-start ${hoverCls} ${opacityCls}`}
         data-message-id={message.id}
         onContextMenu={openContextMenu}
       >
@@ -474,7 +479,7 @@ export function Message({
 
   return (
     <div
-      className={`group px-4 py-1 hover:bg-kd-panel-alt/40 ${opacityCls}`}
+      className={`group px-4 py-1 ${hoverCls} ${opacityCls}`}
       data-message-id={message.id}
       onContextMenu={openContextMenu}
     >

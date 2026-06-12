@@ -1,5 +1,6 @@
 import { Avatar } from '../../components/Avatar.js'
 import { Icon } from '../../components/Icon.js'
+import { useAppearance } from '../settings/appearance.js'
 
 interface ParticipantTileProps {
   displayName: string
@@ -37,6 +38,9 @@ export function ParticipantTile({
   onClick,
 }: ParticipantTileProps) {
   const avatarSize = avatarSizeProp ?? (compact ? AVATAR_SIZE_COMPACT : AVATAR_SIZE)
+  const hoverCls = useAppearance((s) => s.hoverHighlight)
+    ? 'hover:brightness-110 transition-[filter,box-shadow]'
+    : ''
   return (
     <div
       role={onClick ? 'button' : undefined}
@@ -47,6 +51,7 @@ export function ParticipantTile({
         'relative w-full h-full rounded-lg overflow-hidden flex items-center justify-center min-w-0',
         compact ? 'min-h-[72px]' : '',
         onClick ? 'cursor-pointer' : '',
+        hoverCls,
       ].join(' ')}
       style={{
         // Тайл заметно светлее сцены (как в Discord), тёплый оттенок из

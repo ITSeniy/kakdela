@@ -29,6 +29,59 @@ let currentRoom: Room | null = null
 let audioContainer: HTMLDivElement | null = null
 const attachedAudioElements = new Map<string, HTMLMediaElement>()
 
+// ───── Локальный измеритель «я говорю» ─────
+//
+// Серверный ActiveSpeakersChanged приходит с задержкой ~300-500ms — своё
+// кольцо должно загораться мгновенно. Меряем RMS прямо с локального
+// мик-трека через WebAudio; замьюченный трек отдаёт тишину, так что mute
+// и PTT гасят кольцо сами собой.
+const SELF_SPEAKING_RMS = 0.04
+const SELF_SPEAKING_HOLD_MS = 300
+
+let speakingMeterStop: (() => void) | null = null
+
+function startLocalSpeakingMeter(msTrack: MediaStreamTrack): void {
+  stopLocalSpeakingMeter()
+  let ctx: AudioContext
+  try {
+    ctx = new AudioContext()
+  } catch {
+    return // нет WebAudio — остаёмся на серверном сигнале
+  }
+  const source = ctx.createMediaStreamSource(new MediaStream([msTrack]))
+  const analyser = ctx.createAnalyser()
+  analyser.fftSize = 512
+  source.connect(analyser)
+  const data = new Uint8Array(analyser.fftSize)
+  let raf = 0
+  let lastAbove = 0
+  const loop = () => {
+    analyser.getByteTimeDomainData(data)
+    let sum = 0
+    for (let i = 0; i < data.length; i++) {
+      const v = ((data[i] ?? 128) - 128) / 128
+      sum += v * v
+    }
+    const rms = Math.sqrt(sum / data.length)
+    const now = performance.now()
+    if (rms > SELF_SPEAKING_RMS) lastAbove = now
+    useVoiceStore.getState().setSelfSpeaking(now - lastAbove < SELF_SPEAKING_HOLD_MS)
+    raf = requestAnimationFrame(loop)
+  }
+  raf = requestAnimationFrame(loop)
+  speakingMeterStop = () => {
+    cancelAnimationFrame(raf)
+    try { source.disconnect() } catch { /* ignore */ }
+    void ctx.close().catch(() => { /* ignore */ })
+    useVoiceStore.getState().setSelfSpeaking(false)
+  }
+}
+
+function stopLocalSpeakingMeter(): void {
+  speakingMeterStop?.()
+  speakingMeterStop = null
+}
+
 function ensureAudioContainer(): HTMLDivElement {
   if (audioContainer && audioContainer.isConnected) return audioContainer
   const div = document.createElement('div')
@@ -134,6 +187,11 @@ export function installVoiceRoom(room: Room): void {
   // store именно отсюда (а не из REST-snapshot'а), чтобы list участников
   // был согласован с реальной комнатой.
   rebuildParticipantsFromRoom(room)
+  // Мик мог быть опубликован до attachListeners (гонки re-join) — метр
+  // «я говорю» тогда не получит LocalTrackPublished, цепляем вручную.
+  const micPub = room.localParticipant.getTrackPublication(Track.Source.Microphone)
+  const ms = micPub?.track?.mediaStreamTrack
+  if (ms) startLocalSpeakingMeter(ms)
 }
 
 /**
@@ -146,6 +204,7 @@ export async function disposeRoom(room: Room | null): Promise<void> {
   const wasActive = currentRoom === room
   if (wasActive) {
     currentRoom = null
+    stopLocalSpeakingMeter()
     clearAllAttachedAudio()
     removeAudioContainer()
   }
@@ -175,6 +234,7 @@ export async function disposeVoiceRoom(): Promise<void> {
 export function disposeVoiceRoomSync(): void {
   const room = currentRoom
   currentRoom = null
+  stopLocalSpeakingMeter()
   clearAllAttachedAudio()
   removeAudioContainer()
   if (!room) return
@@ -197,6 +257,9 @@ export async function restartMicConstraints(opts: AudioCaptureOptions): Promise<
   if (!(track instanceof LocalAudioTrack)) return
   try {
     await track.restartTrack(opts)
+    // restartTrack подменяет underlying MediaStreamTrack — метр «я говорю»
+    // держал бы мёртвый трек и молчал. Перецепляем на свежий.
+    startLocalSpeakingMeter(track.mediaStreamTrack)
   } catch (err) {
     console.warn('[livekit] restartTrack with new audio constraints failed', err)
   }
@@ -398,6 +461,11 @@ function attachListeners(room: Room): void {
     (pub: LocalTrackPublication, p: LocalParticipant) => {
       if (currentRoom !== room) return
       if (p !== room.localParticipant) return
+      if (pub.source === Track.Source.Microphone) {
+        const ms = pub.track?.mediaStreamTrack
+        if (ms) startLocalSpeakingMeter(ms)
+        return
+      }
       if (pub.source !== Track.Source.ScreenShare) return
       store().setScreenSharing(true)
     },
@@ -408,6 +476,10 @@ function attachListeners(room: Room): void {
     (pub: LocalTrackPublication, p: LocalParticipant) => {
       if (currentRoom !== room) return
       if (p !== room.localParticipant) return
+      if (pub.source === Track.Source.Microphone) {
+        stopLocalSpeakingMeter()
+        return
+      }
       if (pub.source !== Track.Source.ScreenShare) return
       store().setScreenSharing(false)
     },

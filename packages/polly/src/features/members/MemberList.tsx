@@ -114,7 +114,8 @@ function MemberRow({
           {tag && <Badge variant="role">{tag}</Badge>}
         </div>
         <div className="text-[10px] text-kd-text-soft truncate">
-          {voice ? 'на связи' : STATUS_LABEL[member.status]}
+          {/* Кастомный статус важнее типового «в сети» — как в Discord. */}
+          {member.customStatus ?? (voice ? 'на связи' : STATUS_LABEL[member.status])}
         </div>
       </div>
       {voice && <Icon.Mic size={10} className="text-kd-online shrink-0" />}

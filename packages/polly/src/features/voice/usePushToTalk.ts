@@ -21,9 +21,11 @@ export function usePushToTalk(): void {
   const pttKey = useVoiceInputSettings((s) => s.pttKey)
   const status = useVoiceStore((s) => s.status)
 
-  // Сброс при смене режима: чтобы пользователь не «застрял» в режиме
-  // «вы говорите» или с открытым микрофоном после переключения. Первый
-  // эффект-проход пропускаем — это лишь bind, никакой смены не было.
+  // Сброс при смене режима. Первый эффект-проход пропускаем — это лишь
+  // bind, никакой смены не было.
+  //   → push-to-talk: мик глушится до зажатия клавиши.
+  //   → голосовая активация: мик возвращается (если не deafen и не админ-мьют)
+  //     — иначе после PTT пользователь оставался немым и не понимал почему.
   const firstRun = useRef(true)
   useEffect(() => {
     if (firstRun.current) {
@@ -32,13 +34,27 @@ export function usePushToTalk(): void {
     }
     const voice = useVoiceStore.getState()
     voice.setPttHolding(false)
-    voice.setMuted(true)
     const room = getActiveRoom()
-    if (!room) return
-    const pub = room.localParticipant.getTrackPublication(Track.Source.Microphone)
-    if (pub?.track) {
-      pub.mute().catch((err: unknown) => {
-        console.warn('[voice] mode-switch mute failed', err)
+    if (inputMode === 'push-to-talk') {
+      voice.setMuted(true)
+      if (!room) return
+      const pub = room.localParticipant.getTrackPublication(Track.Source.Microphone)
+      if (pub?.track) {
+        pub.mute().catch((err: unknown) => {
+          console.warn('[voice] mode-switch mute failed', err)
+        })
+      }
+      return
+    }
+    // voice-activated
+    if (voice.deafened || voice.forcedMuted) {
+      voice.setMuted(true)
+      return
+    }
+    voice.setMuted(false)
+    if (room) {
+      room.localParticipant.setMicrophoneEnabled(true, audioCaptureOptions()).catch((err: unknown) => {
+        console.warn('[voice] mode-switch unmute failed', err)
       })
     }
   }, [inputMode])

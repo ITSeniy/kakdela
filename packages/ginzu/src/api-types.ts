@@ -172,6 +172,7 @@ export const MemberPublicSchema = z.object({
   displayName: z.string().max(64),
   avatarUrl: z.string().url().nullable(),
   status: z.enum(['online', 'idle', 'dnd', 'offline']),
+  customStatus: z.string().max(128).nullable().optional(),
   role: z.enum(['owner', 'admin', 'member']),
 })
 export type MemberPublic = z.infer<typeof MemberPublicSchema>

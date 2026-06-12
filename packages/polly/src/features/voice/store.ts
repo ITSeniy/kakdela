@@ -33,6 +33,10 @@ interface VoiceState {
   // PTT — пользователь сейчас удерживает hotkey. Только в memory: при
   // перезапуске сам по себе не «зажат».
   pttHolding: boolean
+  // Я сейчас говорю — по ЛОКАЛЬНОМУ анализу микрофона (см. lib/livekit.ts,
+  // startLocalSpeakingMeter). Серверный ActiveSpeakers приходит с задержкой
+  // ~300-500ms; своё кольцо должно загораться мгновенно.
+  selfSpeaking: boolean
   participants: Map<string, ParticipantState>
   activeSpeakers: Set<string>
   // identity того участника, чей screen share «закреплён» в фокусе. Не
@@ -53,6 +57,7 @@ interface VoiceActions {
   setScreenSharing(s: boolean): void
   setPinnedScreenUserId(id: string | null): void
   setPttHolding(holding: boolean): void
+  setSelfSpeaking(speaking: boolean): void
   setActiveSpeakers(ids: Iterable<string>): void
   upsertParticipant(p: Partial<ParticipantState> & { userId: string; displayName: string }): void
   patchParticipant(userId: string, patch: Partial<Omit<ParticipantState, 'userId'>>): void
@@ -70,6 +75,7 @@ const initialState: VoiceState = {
   forcedDeafened: false,
   screenSharing: false,
   pttHolding: false,
+  selfSpeaking: false,
   participants: new Map(),
   activeSpeakers: new Set(),
   pinnedScreenUserId: null,
@@ -154,6 +160,10 @@ export const useVoiceStore = create<VoiceState & VoiceActions>()(persist((set) =
 
   setPttHolding(holding) {
     set({ pttHolding: holding })
+  },
+
+  setSelfSpeaking(speaking) {
+    set((state) => (state.selfSpeaking === speaking ? state : { selfSpeaking: speaking }))
   },
 
   setActiveSpeakers(ids) {

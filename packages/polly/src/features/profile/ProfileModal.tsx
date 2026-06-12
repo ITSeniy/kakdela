@@ -94,8 +94,9 @@ function ReadView({ profile }: { profile: UserProfile }) {
 
   return (
     <div className="px-[18px] pb-4">
-      {/* аватар внахлёст на баннер */}
-      <div className="flex items-end gap-3 -mt-7 mb-3">
+      {/* аватар внахлёст на баннер; -mt-6 (не -7) + leading-none — иначе
+          колонка имени (прижатая к низу items-end) верхом упиралась в баннер */}
+      <div className="flex items-end gap-3 -mt-6 mb-3">
         <Avatar
           name={profile.displayName}
           avatarUrl={profile.avatarUrl}
@@ -104,13 +105,11 @@ function ReadView({ profile }: { profile: UserProfile }) {
           ring="var(--kd-accent)"
           ringColor="var(--kd-panel)"
         />
-        {/* leading-tight: колонка прижата к низу (items-end), при дефолтных
-            line-height имя вылезало верхом на баннер и выглядело обрезанным. */}
         <div className="flex-1 min-w-0 pb-1">
-          <div className="text-[18px] leading-tight font-bold text-kd-text tracking-[-0.01em] truncate">
+          <div className="text-[18px] leading-none font-bold text-kd-text tracking-[-0.01em] truncate">
             {profile.displayName}
           </div>
-          <div className="text-[11px] leading-tight mt-0.5 text-kd-text-mute font-mono truncate">
+          <div className="text-[11px] leading-none mt-1 text-kd-text-mute font-mono truncate">
             @{profile.username} · с нами с {fmtJoined(profile.createdAt)}
           </div>
         </div>

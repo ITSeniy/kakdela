@@ -33,8 +33,11 @@ export const DEFAULT_RADIUS = 6
 interface AppearanceState {
   accentId: string
   radius: number
+  /** Заливка строки под курсором (сообщения, участники голосовых). */
+  hoverHighlight: boolean
   setAccent(id: string): void
   setRadius(radius: number): void
+  setHoverHighlight(on: boolean): void
 }
 
 export const useAppearance = create<AppearanceState>()(
@@ -42,8 +45,10 @@ export const useAppearance = create<AppearanceState>()(
     (set) => ({
       accentId: DEFAULT_ACCENT_ID,
       radius: DEFAULT_RADIUS,
+      hoverHighlight: true,
       setAccent: (accentId) => set({ accentId }),
       setRadius: (radius) => set({ radius: Math.min(12, Math.max(0, Math.round(radius))) }),
+      setHoverHighlight: (hoverHighlight) => set({ hoverHighlight }),
     }),
     { name: 'kd:appearance' },
   ),

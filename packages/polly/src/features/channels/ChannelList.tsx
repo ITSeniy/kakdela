@@ -24,13 +24,12 @@ import {
   patchChannel,
   type ServerDetail,
 } from '../servers/api.js'
+import { useAppearance } from '../settings/appearance.js'
 import { useSettingsUi } from '../settings/store.js'
 import { ThreadList } from '../threads/ThreadList.js'
-import { applyParticipantVolume, toggleLocalParticipantMute } from '../../lib/livekit.js'
 import { moderateVoice } from '../voice/api.js'
-import { useLocalMute } from '../voice/localMute.js'
+import { VoiceUserMenu } from '../voice/VoiceUserMenu.js'
 import { useVoiceStore } from '../voice/store.js'
-import { useVoiceVolumes, volumesFor } from '../voice/volumeSettings.js'
 import { useVoiceChannelPresence } from '../voice/useVoiceChannelPresence.js'
 import { CreateChannelModal, type CreateChannelMode } from './CreateChannelModal.js'
 import { UserBar } from './UserBar.js'
@@ -137,9 +136,11 @@ function VoicePresenceTree({
   onUserDragStart(channelId: string, userId: string): void
   onUserDragEnd(): void
 }) {
+  // Заливка под курсором — отключаемая в настройках внешнего вида.
+  const hoverCls = useAppearance((s) => s.hoverHighlight) ? 'hover:bg-kd-hover' : ''
   if (rows.length === 0) return null
   return (
-    <div className="ml-1 mt-px mb-1 flex flex-col gap-px">
+    <div className="ml-1 mt-px mb-1 flex flex-col gap-0.5">
       {rows.map((row, i) => {
         const isLast = i === rows.length - 1
         return (
@@ -161,7 +162,7 @@ function VoicePresenceTree({
               onUserDragEnd()
             }}
             title="перейти в этот канал"
-            className="relative flex items-center gap-[7px] py-[3px] pr-2 pl-[18px] rounded text-left hover:bg-kd-panel-hi/40 transition-colors"
+            className={`relative flex items-center gap-[7px] py-1 pr-2 pl-[18px] rounded text-left transition-colors ${hoverCls}`}
           >
             {/* линия-ниточка: вертикаль + горизонтальный отвод */}
             <span
@@ -250,18 +251,15 @@ export function ChannelList({ serverId, activeChannelId }: ChannelListProps) {
   const [voiceUserMenu, setVoiceUserMenu] = useState<
     { x: number; y: number; channelId: string; row: VoiceUserRow } | null
   >(null)
-  const voiceUserMenuRef = useRef<HTMLDivElement>(null)
 
   // Live-состояние своего голосового подключения — для точных индикаторов
   // в дереве канала, в котором мы сидим (speaking есть только там).
   const activeVoiceChannelId = useVoiceStore((s) => s.activeChannelId)
   const activeSpeakers = useVoiceStore((s) => s.activeSpeakers)
+  const selfSpeaking = useVoiceStore((s) => s.selfSpeaking)
   const liveParticipants = useVoiceStore((s) => s.participants)
   const selfMuted = useVoiceStore((s) => s.muted)
   const selfDeafened = useVoiceStore((s) => s.deafened)
-  const localMutedIds = useLocalMute((s) => s.mutedUserIds)
-  const voiceVolumes = useVoiceVolumes((s) => s.volumes)
-  const setVoiceVolume = useVoiceVolumes((s) => s.setVolume)
 
   useEffect(() => {
     if (!menuOpen) return
@@ -296,24 +294,6 @@ export function ChannelList({ serverId, activeChannelId }: ChannelListProps) {
       document.removeEventListener('keydown', onKey)
     }
   }, [channelMenu])
-
-  useEffect(() => {
-    if (!voiceUserMenu) return
-    function onDown(e: MouseEvent) {
-      if (voiceUserMenuRef.current && !voiceUserMenuRef.current.contains(e.target as Node)) {
-        setVoiceUserMenu(null)
-      }
-    }
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') setVoiceUserMenu(null)
-    }
-    document.addEventListener('mousedown', onDown)
-    document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('mousedown', onDown)
-      document.removeEventListener('keydown', onKey)
-    }
-  }, [voiceUserMenu])
 
   useEffect(() => {
     if (!catMenu) return
@@ -477,7 +457,10 @@ export function ChannelList({ serverId, activeChannelId }: ChannelListProps) {
         userId: e.userId,
         name: m?.displayName || e.displayName || '?',
         avatarUrl: m?.avatarUrl ?? null,
-        speaking: isActiveChannel && activeSpeakers.has(e.userId),
+        // Для себя — только локальный измеритель (мгновенно загорается и
+        // гаснет); серверный сигнал для себя залипает на секунды.
+        speaking: isActiveChannel
+          && (isSelf ? selfSpeaking : activeSpeakers.has(e.userId)),
         muted,
         deafened,
         live: live?.isScreenSharing ?? e.isScreenSharing,
@@ -837,121 +820,20 @@ export function ChannelList({ serverId, activeChannelId }: ChannelListProps) {
       )}
 
       {voiceUserMenu && (
-        <div
-          ref={voiceUserMenuRef}
-          className="fixed z-50 min-w-[190px] bg-kd-panel border border-kd-border rounded-kd shadow-kd-modal py-1 select-none"
-          style={{
-            left: Math.min(voiceUserMenu.x, window.innerWidth - 198),
-            top: Math.min(voiceUserMenu.y, window.innerHeight - 160),
+        <VoiceUserMenu
+          x={voiceUserMenu.x}
+          y={voiceUserMenu.y}
+          target={{
+            channelId: voiceUserMenu.channelId,
+            userId: voiceUserMenu.row.userId,
+            name: voiceUserMenu.row.name,
+            live: voiceUserMenu.row.live,
+            serverMuted: voiceUserMenu.row.serverMuted,
+            serverDeafened: voiceUserMenu.row.serverDeafened,
           }}
-        >
-          <div className="px-3 py-1.5 text-[11px] font-bold text-kd-text truncate border-b border-kd-border mb-1">
-            {voiceUserMenu.row.name}
-          </div>
-          {/* Персональная громкость: голос всегда, стрим — когда транслирует.
-              Меню при перетаскивании ползунка не закрывается. */}
-          <div className="px-3 py-1.5 flex flex-col gap-0.5">
-            <label className="text-[10px] font-mono text-kd-text-mute flex items-center justify-between">
-              <span>громкость</span>
-              <span>{Math.round(volumesFor(voiceVolumes, voiceUserMenu.row.userId).user * 100)}%</span>
-            </label>
-            <input
-              type="range"
-              min={0}
-              max={100}
-              value={Math.round(volumesFor(voiceVolumes, voiceUserMenu.row.userId).user * 100)}
-              onChange={(e) => {
-                setVoiceVolume(voiceUserMenu.row.userId, 'user', Number(e.target.value) / 100)
-                applyParticipantVolume(voiceUserMenu.row.userId)
-              }}
-              className="w-full h-1 accent-kd-accent cursor-pointer"
-            />
-          </div>
-          {voiceUserMenu.row.live && (
-            <div className="px-3 py-1.5 flex flex-col gap-0.5">
-              <label className="text-[10px] font-mono text-kd-text-mute flex items-center justify-between">
-                <span>громкость стрима</span>
-                <span>{Math.round(volumesFor(voiceVolumes, voiceUserMenu.row.userId).stream * 100)}%</span>
-              </label>
-              <input
-                type="range"
-                min={0}
-                max={100}
-                value={Math.round(volumesFor(voiceVolumes, voiceUserMenu.row.userId).stream * 100)}
-                onChange={(e) => {
-                  setVoiceVolume(voiceUserMenu.row.userId, 'stream', Number(e.target.value) / 100)
-                  applyParticipantVolume(voiceUserMenu.row.userId)
-                }}
-                className="w-full h-1 accent-kd-accent cursor-pointer"
-              />
-            </div>
-          )}
-          <button
-            type="button"
-            onClick={() => {
-              toggleLocalParticipantMute(voiceUserMenu.row.userId)
-              setVoiceUserMenu(null)
-            }}
-            className="w-full text-left px-3 py-1.5 text-[12px] flex items-center gap-2 text-kd-text hover:bg-kd-panel-hi transition-colors"
-          >
-            {localMutedIds.includes(voiceUserMenu.row.userId) ? (
-              <><Icon.Speaker size={12} className="text-kd-text-mute" /> слышать снова</>
-            ) : (
-              <><Icon.MicOff size={12} className="text-kd-text-mute" /> заглушить локально</>
-            )}
-          </button>
-          {canManage && (
-            <>
-              <div className="my-1 h-px bg-kd-border mx-2" />
-              <button
-                type="button"
-                onClick={() => {
-                  moderateMutation.mutate({
-                    channelId: voiceUserMenu.channelId,
-                    userId: voiceUserMenu.row.userId,
-                    action: voiceUserMenu.row.serverMuted ? 'unmute' : 'mute',
-                  })
-                  setVoiceUserMenu(null)
-                }}
-                className="w-full text-left px-3 py-1.5 text-[12px] flex items-center gap-2 text-kd-text hover:bg-kd-panel-hi transition-colors"
-              >
-                <Icon.MicOff size={12} className="text-kd-warm" />
-                {voiceUserMenu.row.serverMuted ? 'вернуть микрофон' : 'заглушить микрофон'}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  moderateMutation.mutate({
-                    channelId: voiceUserMenu.channelId,
-                    userId: voiceUserMenu.row.userId,
-                    action: voiceUserMenu.row.serverDeafened ? 'undeafen' : 'deafen',
-                  })
-                  setVoiceUserMenu(null)
-                }}
-                className="w-full text-left px-3 py-1.5 text-[12px] flex items-center gap-2 text-kd-text hover:bg-kd-panel-hi transition-colors"
-              >
-                <Icon.HeadphonesOff size={12} className="text-kd-warm" />
-                {voiceUserMenu.row.serverDeafened ? 'вернуть звук' : 'выключить звук'}
-              </button>
-              <div className="my-1 h-px bg-kd-border mx-2" />
-              <button
-                type="button"
-                onClick={() => {
-                  moderateMutation.mutate({
-                    channelId: voiceUserMenu.channelId,
-                    userId: voiceUserMenu.row.userId,
-                    action: 'kick',
-                  })
-                  setVoiceUserMenu(null)
-                }}
-                className="w-full text-left px-3 py-1.5 text-[12px] flex items-center gap-2 text-kd-danger hover:bg-kd-danger/10 transition-colors"
-              >
-                <Icon.PhoneOff size={12} />
-                отключить от канала
-              </button>
-            </>
-          )}
-        </div>
+          canManage={canManage}
+          onClose={() => setVoiceUserMenu(null)}
+        />
       )}
 
       {catMenu && (

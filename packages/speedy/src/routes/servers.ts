@@ -205,6 +205,7 @@ export const serversRoutes: FastifyPluginAsyncZod = async (app) => {
           displayName: users.displayName,
           avatarUrl: users.avatarUrl,
           status: users.status,
+          customStatus: users.customStatus,
           role: serverMembers.role,
         })
         .from(serverMembers)

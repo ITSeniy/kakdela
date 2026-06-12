@@ -4,6 +4,7 @@
 import { Field } from '../../components/form/Field.js'
 import { Slider } from '../../components/form/Slider.js'
 import { Swatch } from '../../components/form/Swatch.js'
+import { Toggle } from '../../components/form/Toggle.js'
 import { ACCENTS, DEFAULT_RADIUS, useAppearance } from './appearance.js'
 import { DensityPicker } from './DensityPicker.js'
 import { ThemePicker } from './ThemePicker.js'
@@ -11,8 +12,10 @@ import { ThemePicker } from './ThemePicker.js'
 export function AppearanceSettings() {
   const accentId = useAppearance((s) => s.accentId)
   const radius = useAppearance((s) => s.radius)
+  const hoverHighlight = useAppearance((s) => s.hoverHighlight)
   const setAccent = useAppearance((s) => s.setAccent)
   const setRadius = useAppearance((s) => s.setRadius)
+  const setHoverHighlight = useAppearance((s) => s.setHoverHighlight)
 
   return (
     <div className="flex flex-col gap-[18px]">
@@ -47,6 +50,15 @@ export function AppearanceSettings() {
           max={12}
           onChange={setRadius}
           hint={`по умолчанию для кнопок, аватаров, карточек${radius !== DEFAULT_RADIUS ? ` · стандарт ${DEFAULT_RADIUS}` : ''}`}
+        />
+      </Field>
+
+      <Field label="прочее">
+        <Toggle
+          on={hoverHighlight}
+          onChange={setHoverHighlight}
+          label="подсветка при наведении"
+          hint="заливка строки под курсором — в чате и списках голосовых"
         />
       </Field>
 

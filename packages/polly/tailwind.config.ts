@@ -23,6 +23,7 @@ export default {
           'warm-deep': 'var(--kd-warm-deep)',
           'warm-soft': 'var(--kd-warm-soft)',
           'warm-bg': 'var(--kd-warm-bg)',
+          hover: 'var(--kd-hover)',
           danger: 'var(--kd-danger)',
           border: 'var(--kd-border)',
           'border-soft': 'var(--kd-border-soft)',
