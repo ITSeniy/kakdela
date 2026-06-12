@@ -63,12 +63,15 @@ export function App() {
     })
   }, [queryClient, setSession])
 
-  // channel.create/update/delete: список каналов сервера обновляется live
-  // у всех участников. При удалении канала, который сейчас открыт, —
-  // уходим на корень сервера, чтобы не остаться в несуществующем чате.
+  // channel.* / category.*: список каналов сервера обновляется live у всех
+  // участников. При удалении канала, который сейчас открыт, — уходим на
+  // корень сервера, чтобы не остаться в несуществующем чате.
   useEffect(() => {
     return wsClient.on((event) => {
-      if (event.t !== 'channel.create' && event.t !== 'channel.update' && event.t !== 'channel.delete') return
+      if (
+        event.t !== 'channel.create' && event.t !== 'channel.update' && event.t !== 'channel.delete'
+        && event.t !== 'category.create' && event.t !== 'category.delete'
+      ) return
       void queryClient.invalidateQueries({ queryKey: ['server', event.serverId] })
       if (event.t === 'channel.delete' && locationRef.current.includes(event.channelId)) {
         navigate(`/servers/${event.serverId}`)

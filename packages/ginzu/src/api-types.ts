@@ -174,9 +174,16 @@ export const MemberPublicSchema = z.object({
 })
 export type MemberPublic = z.infer<typeof MemberPublicSchema>
 
+export const ChannelCategorySchema = z.object({
+  name: z.string().min(1).max(64),
+  position: z.number().int().nonnegative(),
+})
+export type ChannelCategory = z.infer<typeof ChannelCategorySchema>
+
 export const ServerDetailSchema = z.object({
   server: ServerSchema,
   channels: z.array(ChannelSchema),
+  categories: z.array(ChannelCategorySchema),
   memberCount: z.number().int().nonnegative(),
 })
 export type ServerDetail = z.infer<typeof ServerDetailSchema>
@@ -220,10 +227,17 @@ export const CreateChannelRequestSchema = z.object({
 })
 export type CreateChannelRequest = z.infer<typeof CreateChannelRequestSchema>
 
+export const CreateCategoryRequestSchema = z.object({
+  name: z.string().min(1).max(64),
+})
+export type CreateCategoryRequest = z.infer<typeof CreateCategoryRequestSchema>
+
 export const PatchChannelRequestSchema = z.object({
   name: z.string().min(1).max(64).optional(),
   topic: z.string().max(256).nullable().optional(),
   position: z.number().int().nonnegative().optional(),
+  // null = убрать канал из категории (категория — просто метка на канале).
+  category: z.string().max(64).nullable().optional(),
 })
 export type PatchChannelRequest = z.infer<typeof PatchChannelRequestSchema>
 

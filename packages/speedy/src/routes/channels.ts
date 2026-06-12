@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod'
 import { z } from 'zod'
 
@@ -8,7 +8,7 @@ import {
   PatchChannelRequestSchema,
 } from '@kakdela/ginzu/api-types'
 
-import { channels } from '../db/schema.js'
+import { channelCategories, channels } from '../db/schema.js'
 import { audit } from '../lib/audit.js'
 import { db } from '../lib/db.js'
 import { assertMember, assertRole, notFound } from '../lib/permissions.js'
@@ -83,6 +83,7 @@ export const channelsRoutes: FastifyPluginAsyncZod = async (app) => {
           name:     channels.name,
           topic:    channels.topic,
           position: channels.position,
+          category: channels.category,
         })
         .from(channels)
         .where(eq(channels.id, channelId))
@@ -93,11 +94,25 @@ export const channelsRoutes: FastifyPluginAsyncZod = async (app) => {
 
       await assertRole(userId, existingServerId, ['owner', 'admin'])
 
-      const { name, topic, position } = req.body
+      const { name, topic, position, category } = req.body
       const updates: Partial<typeof channels.$inferInsert> = {}
       if (name !== undefined) updates.name = name
       if (topic !== undefined) updates.topic = topic ?? null
       if (position !== undefined) updates.position = position
+      if (category !== undefined) updates.category = category ?? null
+
+      // Категория — отдельная сущность: если канал двигают в категорию,
+      // которой нет в таблице (например, её успели удалить), регистрируем.
+      if (category) {
+        const maxCat = await db
+          .select({ max: sql<number>`COALESCE(MAX(position), -1)::int` })
+          .from(channelCategories)
+          .where(eq(channelCategories.serverId, existingServerId))
+        await db
+          .insert(channelCategories)
+          .values({ serverId: existingServerId, name: category, position: (maxCat[0]?.max ?? -1) + 1 })
+          .onConflictDoNothing()
+      }
 
       const updated = await db
         .update(channels)
@@ -123,8 +138,8 @@ export const channelsRoutes: FastifyPluginAsyncZod = async (app) => {
         targetType: 'channel',
         targetId:   channelId,
         metadata: {
-          before: { name: existing.name, topic: existing.topic, position: existing.position },
-          after:  { name: channel.name,  topic: channel.topic,  position: channel.position },
+          before: { name: existing.name, topic: existing.topic, position: existing.position, category: existing.category },
+          after:  { name: channel.name,  topic: channel.topic,  position: channel.position,  category: channel.category },
         },
       })
 

@@ -3,7 +3,9 @@ import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod'
 import { z } from 'zod'
 
 import {
+  ChannelCategorySchema,
   ChannelSchema,
+  CreateCategoryRequestSchema,
   CreateChannelRequestSchema,
   CreateServerRequestSchema,
   ErrorBodySchema,
@@ -13,7 +15,7 @@ import {
   ServerSchema,
 } from '@kakdela/ginzu/api-types'
 
-import { channels, serverMembers, servers, users } from '../db/schema.js'
+import { channelCategories, channels, serverMembers, servers, users } from '../db/schema.js'
 import { audit } from '../lib/audit.js'
 import { db } from '../lib/db.js'
 import { assertMember, assertRole, notFound } from '../lib/permissions.js'
@@ -152,11 +154,18 @@ export const serversRoutes: FastifyPluginAsyncZod = async (app) => {
         .where(eq(serverMembers.serverId, serverId))
       const memberCount = countRows[0]?.count ?? 0
 
+      const categoryRows = await db
+        .select({ name: channelCategories.name, position: channelCategories.position })
+        .from(channelCategories)
+        .where(eq(channelCategories.serverId, serverId))
+        .orderBy(channelCategories.position)
+
       // Топ-уровневые каналы: исключаем DM и треды (треды живут отдельно
       // в ThreadPanel и подгружаются через /api/channels/:id/threads).
       return reply.code(200).send({
         server,
         channels: channelRows.filter((c) => c.kind !== 'dm' && c.parentChannelId === null),
+        categories: categoryRows,
         memberCount,
       })
     },
@@ -251,6 +260,19 @@ export const serversRoutes: FastifyPluginAsyncZod = async (app) => {
 
       const { name, kind, category, topic } = req.body
 
+      // Категория — отдельная сущность: если канал создаётся с категорией,
+      // которой ещё нет в таблице, регистрируем её (в конец списка).
+      if (category) {
+        const maxCat = await db
+          .select({ max: sql<number>`COALESCE(MAX(position), -1)::int` })
+          .from(channelCategories)
+          .where(eq(channelCategories.serverId, serverId))
+        await db
+          .insert(channelCategories)
+          .values({ serverId, name: category, position: (maxCat[0]?.max ?? -1) + 1 })
+          .onConflictDoNothing()
+      }
+
       // Position: next after last channel of same kind
       const maxRows = await db
         .select({ max: sql<number>`COALESCE(MAX(position), -1)::int` })
@@ -297,6 +319,111 @@ export const serversRoutes: FastifyPluginAsyncZod = async (app) => {
       void broadcastToServer(serverId, { t: 'channel.create', serverId, channel })
 
       return reply.code(201).send(channel)
+    },
+  )
+
+  // ───── POST /api/servers/:serverId/categories ─────
+  //
+  // Категория может существовать пустой — это строка в channel_categories,
+  // каналы ссылаются на неё по имени (channels.category).
+  app.post(
+    '/servers/:serverId/categories',
+    {
+      preHandler: app.authenticate,
+      schema: {
+        params: z.object({ serverId: z.string().uuid() }),
+        body: CreateCategoryRequestSchema,
+        response: {
+          201: ChannelCategorySchema,
+          401: ErrorBodySchema,
+          403: ErrorBodySchema,
+          404: ErrorBodySchema,
+          409: ErrorBodySchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const { serverId } = req.params
+      const userId = req.authUser!.id
+
+      await assertRole(userId, serverId, ['owner', 'admin'])
+
+      const serverExists = await db
+        .select({ id: servers.id })
+        .from(servers)
+        .where(eq(servers.id, serverId))
+        .limit(1)
+      if (!serverExists[0]) throw notFound('server-not-found', 'server not found')
+
+      const { name } = req.body
+
+      const maxRows = await db
+        .select({ max: sql<number>`COALESCE(MAX(position), -1)::int` })
+        .from(channelCategories)
+        .where(eq(channelCategories.serverId, serverId))
+      const position = (maxRows[0]?.max ?? -1) + 1
+
+      const inserted = await db
+        .insert(channelCategories)
+        .values({ serverId, name, position })
+        .onConflictDoNothing()
+        .returning({ name: channelCategories.name, position: channelCategories.position })
+      const category = inserted[0]
+      if (!category) {
+        return reply.code(409).send({
+          error: { code: 'category-exists', message: 'category with this name already exists' },
+        })
+      }
+
+      void broadcastToServer(serverId, { t: 'category.create', serverId, name: category.name })
+
+      return reply.code(201).send(category)
+    },
+  )
+
+  // ───── DELETE /api/servers/:serverId/categories/:name ─────
+  //
+  // Каналы категории не удаляются — становятся «без категории».
+  app.delete(
+    '/servers/:serverId/categories/:name',
+    {
+      preHandler: app.authenticate,
+      schema: {
+        params: z.object({
+          serverId: z.string().uuid(),
+          name: z.string().min(1).max(64),
+        }),
+        response: {
+          204: z.null(),
+          401: ErrorBodySchema,
+          403: ErrorBodySchema,
+          404: ErrorBodySchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const { serverId, name } = req.params
+      const userId = req.authUser!.id
+
+      await assertRole(userId, serverId, ['owner', 'admin'])
+
+      const deleted = await db.transaction(async (tx) => {
+        const rows = await tx
+          .delete(channelCategories)
+          .where(and(eq(channelCategories.serverId, serverId), eq(channelCategories.name, name)))
+          .returning({ name: channelCategories.name })
+        if (rows.length === 0) return false
+        await tx
+          .update(channels)
+          .set({ category: null })
+          .where(and(eq(channels.serverId, serverId), eq(channels.category, name)))
+        return true
+      })
+      if (!deleted) throw notFound('category-not-found', 'category not found')
+
+      void broadcastToServer(serverId, { t: 'category.delete', serverId, name })
+
+      return reply.code(204).send(null)
     },
   )
 

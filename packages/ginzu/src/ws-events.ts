@@ -27,6 +27,8 @@ export type ServerEvent =
   | { t: 'channel.create'; serverId: string; channel: Channel }
   | { t: 'channel.update'; serverId: string; channel: Channel }
   | { t: 'channel.delete'; serverId: string; channelId: string }
+  | { t: 'category.create'; serverId: string; name: string }
+  | { t: 'category.delete'; serverId: string; name: string }
 
 export type ClientEvent =
   | { t: 'hello'; token: string }
@@ -84,6 +86,8 @@ export const ServerEventSchema = z.discriminatedUnion('t', [
   z.object({ t: z.literal('channel.create'), serverId: uuid, channel: ChannelSchema }),
   z.object({ t: z.literal('channel.update'), serverId: uuid, channel: ChannelSchema }),
   z.object({ t: z.literal('channel.delete'), serverId: uuid, channelId: uuid }),
+  z.object({ t: z.literal('category.create'), serverId: uuid, name: z.string() }),
+  z.object({ t: z.literal('category.delete'), serverId: uuid, name: z.string() }),
 ])
 
 export const ClientEventSchema = z.discriminatedUnion('t', [

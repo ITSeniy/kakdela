@@ -1,11 +1,13 @@
 import type {
   Channel,
+  ChannelCategory,
   CreateChannelRequest,
   CreateInviteResponse,
   CreateServerRequest,
   InviteSummary,
   InvitesListResponse,
   MemberPublic,
+  PatchChannelRequest,
   PatchServerRequest,
   Server,
 } from '@kakdela/ginzu/api-types'
@@ -20,6 +22,7 @@ export async function listServers(): Promise<Server[]> {
 export interface ServerDetail {
   server: Server
   channels: Channel[]
+  categories: ChannelCategory[]
   memberCount: number
 }
 
@@ -57,6 +60,31 @@ export async function createChannel(serverId: string, body: CreateChannelRequest
     method: 'POST',
     body: JSON.stringify(body),
   })
+}
+
+export async function createCategory(serverId: string, name: string): Promise<ChannelCategory> {
+  return apiFetch<ChannelCategory>(`/api/servers/${serverId}/categories`, {
+    method: 'POST',
+    body: JSON.stringify({ name }),
+  })
+}
+
+export async function deleteCategory(serverId: string, name: string): Promise<void> {
+  await apiFetch<void>(
+    `/api/servers/${serverId}/categories/${encodeURIComponent(name)}`,
+    { method: 'DELETE' },
+  )
+}
+
+export async function patchChannel(channelId: string, body: PatchChannelRequest): Promise<Channel> {
+  return apiFetch<Channel>(`/api/channels/${channelId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  })
+}
+
+export async function deleteChannel(channelId: string): Promise<void> {
+  await apiFetch<void>(`/api/channels/${channelId}`, { method: 'DELETE' })
 }
 
 export async function leaveServer(serverId: string): Promise<void> {

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useLocation } from 'wouter'
 
-import type { Channel, MemberPublic } from '@kakdela/ginzu/api-types'
+import type { Channel, ChannelCategory, MemberPublic } from '@kakdela/ginzu/api-types'
 
 import { Avatar } from '../../components/Avatar.js'
 import { Badge } from '../../components/Badge.js'
@@ -10,7 +10,15 @@ import { confirmDialog } from '../../components/ConfirmDialog.js'
 import { Icon } from '../../components/Icon.js'
 import { toast } from '../../components/toast/index.js'
 import { useAuthStore } from '../auth/store.js'
-import { getServerDetail, leaveServer, listMembers } from '../servers/api.js'
+import {
+  deleteCategory,
+  deleteChannel,
+  getServerDetail,
+  leaveServer,
+  listMembers,
+  patchChannel,
+  type ServerDetail,
+} from '../servers/api.js'
 import { useServerSettingsUi } from '../settings/store.js'
 import { ThreadList } from '../threads/ThreadList.js'
 import { useVoiceChannelPresence } from '../voice/useVoiceChannelPresence.js'
@@ -29,21 +37,36 @@ interface CategoryGroup {
 
 const UNCATEGORIZED_KEY = '__uncategorized__'
 
-function groupChannels(channels: Channel[]): CategoryGroup[] {
-  const map = new Map<string, CategoryGroup>()
-  // preserve first-seen order
+// Категории — отдельная сущность (могут быть пустыми): сначала каналы без
+// категории, затем категории из таблицы по position. Метки на каналах,
+// которых нет в таблице (легаси/гонки), добавляются в конец.
+function groupChannels(channels: Channel[], categories: ChannelCategory[]): CategoryGroup[] {
+  const uncategorized: CategoryGroup = { name: null, channels: [] }
+  const groups: CategoryGroup[] = [uncategorized]
+  const byName = new Map<string, CategoryGroup>()
+  for (const cat of [...categories].sort((a, b) => a.position - b.position)) {
+    const g: CategoryGroup = { name: cat.name, channels: [] }
+    groups.push(g)
+    byName.set(cat.name, g)
+  }
   for (const ch of channels) {
     if (ch.kind === 'dm') continue
-    const key = ch.category ?? UNCATEGORIZED_KEY
-    let group = map.get(key)
-    if (!group) {
-      group = { name: ch.category ?? null, channels: [] }
-      map.set(key, group)
+    const name = ch.category ?? null
+    if (name === null) {
+      uncategorized.channels.push(ch)
+      continue
     }
-    group.channels.push(ch)
+    let g = byName.get(name)
+    if (!g) {
+      g = { name, channels: [] }
+      groups.push(g)
+      byName.set(name, g)
+    }
+    g.channels.push(ch)
   }
-  for (const g of map.values()) g.channels.sort((a, b) => a.position - b.position)
-  return Array.from(map.values())
+  for (const g of groups) g.channels.sort((a, b) => a.position - b.position)
+  // Безымянную группу без каналов не рендерим, именованные живут и пустыми.
+  return groups.filter((g) => g.name !== null || g.channels.length > 0)
 }
 
 function ChannelRow({
@@ -148,8 +171,23 @@ export function ChannelList({ serverId, activeChannelId }: ChannelListProps) {
 
   // Меню действий сервера (шапка) + модалка создания канала/категории.
   const [menuOpen, setMenuOpen] = useState(false)
-  const [createMode, setCreateMode] = useState<CreateChannelMode | null>(null)
+  const [createState, setCreateState] =
+    useState<{ mode: CreateChannelMode; category?: string } | null>(null)
   const headerRef = useRef<HTMLDivElement>(null)
+
+  // Контекстные меню: ПКМ по строке канала / по заголовку категории.
+  const [channelMenu, setChannelMenu] = useState<{ x: number; y: number; channel: Channel } | null>(null)
+  const channelMenuRef = useRef<HTMLDivElement>(null)
+  const [catMenu, setCatMenu] = useState<{ x: number; y: number; name: string } | null>(null)
+  const catMenuRef = useRef<HTMLDivElement>(null)
+
+  // Drag & drop каналов: id перетягиваемого + куда сейчас целимся.
+  const [dragId, setDragId] = useState<string | null>(null)
+  const [dropTarget, setDropTarget] = useState<
+    | { kind: 'row'; channelId: string; above: boolean }
+    | { kind: 'cat'; category: string }
+    | null
+  >(null)
 
   useEffect(() => {
     if (!menuOpen) return
@@ -166,6 +204,42 @@ export function ChannelList({ serverId, activeChannelId }: ChannelListProps) {
       document.removeEventListener('keydown', onKey)
     }
   }, [menuOpen])
+
+  useEffect(() => {
+    if (!channelMenu) return
+    function onDown(e: MouseEvent) {
+      if (channelMenuRef.current && !channelMenuRef.current.contains(e.target as Node)) {
+        setChannelMenu(null)
+      }
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setChannelMenu(null)
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [channelMenu])
+
+  useEffect(() => {
+    if (!catMenu) return
+    function onDown(e: MouseEvent) {
+      if (catMenuRef.current && !catMenuRef.current.contains(e.target as Node)) {
+        setCatMenu(null)
+      }
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setCatMenu(null)
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [catMenu])
 
   const { data: detail } = useQuery({
     queryKey: ['server', serverId],
@@ -193,7 +267,8 @@ export function ChannelList({ serverId, activeChannelId }: ChannelListProps) {
   )
 
   const channels = detail?.channels ?? []
-  const groups = useMemo(() => groupChannels(channels), [channels])
+  const categories = detail?.categories ?? []
+  const groups = useMemo(() => groupChannels(channels, categories), [channels, categories])
   const voicePresence = useVoiceChannelPresence(channels)
 
   const myRole = userId ? memberMap.get(userId)?.role : undefined
@@ -224,6 +299,128 @@ export function ChannelList({ serverId, activeChannelId }: ChannelListProps) {
       danger: true,
     })
     if (ok) leaveMutation.mutate()
+  }
+
+  const deleteChannelMutation = useMutation({
+    mutationFn: (channelId: string) => deleteChannel(channelId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['server', serverId] })
+    },
+    onError: (err) => {
+      toast.error(`не получилось удалить канал: ${(err as Error).message}`)
+    },
+  })
+
+  async function confirmDeleteChannel(ch: Channel) {
+    setChannelMenu(null)
+    const ok = await confirmDialog({
+      title: `удалить «${ch.name}»?`,
+      body: 'канал удалится вместе со всеми сообщениями. это необратимо.',
+      confirmLabel: 'удалить',
+      danger: true,
+    })
+    if (ok) deleteChannelMutation.mutate(ch.id)
+  }
+
+  const deleteCategoryMutation = useMutation({
+    mutationFn: (name: string) => deleteCategory(serverId!, name),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['server', serverId] })
+    },
+    onError: (err) => {
+      toast.error(`не получилось удалить категорию: ${(err as Error).message}`)
+    },
+  })
+
+  async function confirmDeleteCategory(name: string) {
+    setCatMenu(null)
+    const ok = await confirmDialog({
+      title: `удалить категорию «${name}»?`,
+      body: 'каналы останутся на месте — просто без категории.',
+      confirmLabel: 'удалить',
+      danger: true,
+    })
+    if (ok) deleteCategoryMutation.mutate(name)
+  }
+
+  const reorderMutation = useMutation({
+    mutationFn: async (updates: Array<{ id: string; position: number; category: string | null }>) => {
+      // Последовательно: бэк применяет каждый PATCH отдельно, параллельная
+      // пачка для пары десятков каналов не стоит гонок в аудит-логе.
+      for (const u of updates) {
+        await patchChannel(u.id, { position: u.position, category: u.category })
+      }
+    },
+    onError: () => {
+      toast.error('не получилось переставить каналы')
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ['server', serverId] })
+    },
+  })
+
+  /** Применяет текущий dropTarget: пересобирает порядок групп и шлёт PATCH
+   *  только тем каналам, у кого реально изменилась позиция или категория.
+   *  Локально порядок применяется оптимистично через setQueryData. */
+  function performDrop() {
+    const draggedId = dragId
+    const target = dropTarget
+    setDragId(null)
+    setDropTarget(null)
+    if (!draggedId || !target || !detail) return
+    const dragged = channels.find((c) => c.id === draggedId)
+    if (!dragged) return
+
+    const newGroups = groups.map((g) => ({
+      name: g.name,
+      channels: g.channels.filter((c) => c.id !== draggedId),
+    }))
+
+    let inserted = false
+    if (target.kind === 'cat') {
+      const g = newGroups.find((x) => x.name === target.category)
+      if (g) {
+        g.channels.unshift(dragged)
+        inserted = true
+      }
+    } else {
+      for (const g of newGroups) {
+        const i = g.channels.findIndex((c) => c.id === target.channelId)
+        if (i >= 0) {
+          g.channels.splice(target.above ? i : i + 1, 0, dragged)
+          inserted = true
+          break
+        }
+      }
+    }
+    if (!inserted) return
+
+    // Позиции глобальные на сервер (detail отдаёт orderBy position),
+    // поэтому перенумеровываем сквозную раскладку группа за группой.
+    const updates: Array<{ id: string; position: number; category: string | null }> = []
+    let pos = 0
+    for (const g of newGroups) {
+      for (const c of g.channels) {
+        if (c.position !== pos || (c.category ?? null) !== g.name) {
+          updates.push({ id: c.id, position: pos, category: g.name })
+        }
+        pos += 1
+      }
+    }
+    if (updates.length === 0) return
+
+    queryClient.setQueryData<ServerDetail>(['server', serverId], (old) => {
+      if (!old) return old
+      const map = new Map(updates.map((u) => [u.id, u] as const))
+      const nextChannels = old.channels
+        .map((c) => {
+          const u = map.get(c.id)
+          return u ? { ...c, position: u.position, category: u.category } : c
+        })
+        .sort((a, b) => a.position - b.position)
+      return { ...old, channels: nextChannels }
+    })
+    reorderMutation.mutate(updates)
   }
 
   function toggleCat(name: string) {
@@ -288,13 +485,13 @@ export function ChannelList({ serverId, activeChannelId }: ChannelListProps) {
                 <div className="my-1 h-px bg-kd-border mx-2" />
                 <ServerMenuItem
                   glyph={<Icon.Hash size={12} className="text-kd-accent" />}
-                  onClick={() => { setMenuOpen(false); setCreateMode('channel') }}
+                  onClick={() => { setMenuOpen(false); setCreateState({ mode: 'channel' }) }}
                 >
                   создать канал
                 </ServerMenuItem>
                 <ServerMenuItem
                   glyph={<span className="text-kd-accent">—</span>}
-                  onClick={() => { setMenuOpen(false); setCreateMode('category') }}
+                  onClick={() => { setMenuOpen(false); setCreateState({ mode: 'category' }) }}
                 >
                   создать категорию
                 </ServerMenuItem>
@@ -319,20 +516,85 @@ export function ChannelList({ serverId, activeChannelId }: ChannelListProps) {
           return (
             <div key={catKey} className="mb-1.5">
               {group.name && (
-                <button
-                  type="button"
-                  onClick={() => toggleCat(catKey)}
-                  className="w-full px-2.5 py-[3px] text-[10px] font-semibold text-kd-text-mute font-mono tracking-[0.04em] flex items-center justify-between hover:text-kd-text-soft transition-colors"
+                <div
+                  className={[
+                    'group flex items-center gap-0.5 pr-1.5 rounded transition-colors',
+                    dropTarget?.kind === 'cat' && dropTarget.category === group.name
+                      ? 'bg-kd-panel-hi/60'
+                      : '',
+                  ].join(' ')}
+                  onDragOver={(e) => {
+                    if (!dragId) return
+                    e.preventDefault()
+                    e.dataTransfer.dropEffect = 'move'
+                    setDropTarget({ kind: 'cat', category: group.name! })
+                  }}
+                  onDrop={(e) => { e.preventDefault(); performDrop() }}
+                  onContextMenu={(e) => {
+                    if (!canManage) return
+                    e.preventDefault()
+                    setCatMenu({ x: e.clientX, y: e.clientY, name: group.name! })
+                  }}
                 >
-                  <span>— {group.name}</span>
-                  <span>{collapsed ? '›' : '⌄'}</span>
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => toggleCat(catKey)}
+                    className="flex-1 min-w-0 px-2.5 py-[3px] text-[10px] font-semibold text-kd-text-mute font-mono tracking-[0.04em] flex items-center gap-1 hover:text-kd-text-soft transition-colors text-left"
+                  >
+                    <span className={`inline-block transition-transform ${collapsed ? '-rotate-90' : ''}`}>
+                      ⌄
+                    </span>
+                    <span className="truncate">{group.name}</span>
+                  </button>
+                  {canManage && (
+                    <button
+                      type="button"
+                      title={`создать канал в «${group.name}»`}
+                      onClick={() => setCreateState({ mode: 'channel', category: group.name ?? undefined })}
+                      className="opacity-0 group-hover:opacity-100 transition-opacity text-kd-text-mute hover:text-kd-text-soft p-0.5 shrink-0"
+                    >
+                      <Icon.Plus size={11} />
+                    </button>
+                  )}
+                </div>
               )}
               {!collapsed && group.channels.map((c) => {
                 const presence = c.kind === 'voice' ? voicePresence.get(c.id) ?? [] : []
                 const isActive = c.id === activeChannelId
+                const isDropRow = dropTarget?.kind === 'row' && dropTarget.channelId === c.id
                 return (
-                  <div key={c.id}>
+                  <div
+                    key={c.id}
+                    className={`relative ${dragId === c.id ? 'opacity-40' : ''}`}
+                    draggable={canManage}
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData('text/plain', c.id)
+                      e.dataTransfer.effectAllowed = 'move'
+                      setDragId(c.id)
+                    }}
+                    onDragEnd={() => { setDragId(null); setDropTarget(null) }}
+                    onDragOver={(e) => {
+                      if (!dragId || dragId === c.id) return
+                      e.preventDefault()
+                      e.dataTransfer.dropEffect = 'move'
+                      const rect = e.currentTarget.getBoundingClientRect()
+                      const above = e.clientY < rect.top + rect.height / 2
+                      setDropTarget({ kind: 'row', channelId: c.id, above })
+                    }}
+                    onDrop={(e) => { e.preventDefault(); performDrop() }}
+                    onContextMenu={(e) => {
+                      if (!canManage) return
+                      e.preventDefault()
+                      setChannelMenu({ x: e.clientX, y: e.clientY, channel: c })
+                    }}
+                  >
+                    {isDropRow && (
+                      <div
+                        className={`absolute left-1.5 right-1.5 h-0.5 rounded bg-kd-accent z-10 pointer-events-none ${
+                          dropTarget.above ? 'top-0' : 'bottom-0'
+                        }`}
+                      />
+                    )}
                     <ChannelRow
                       channel={c}
                       active={isActive}
@@ -359,12 +621,53 @@ export function ChannelList({ serverId, activeChannelId }: ChannelListProps) {
 
       <UserBar />
 
-      {createMode && serverId && (
+      {channelMenu && (
+        <div
+          ref={channelMenuRef}
+          className="fixed z-50 min-w-[160px] bg-kd-panel border border-kd-border rounded-kd shadow-kd-modal py-1 select-none"
+          style={{
+            left: Math.min(channelMenu.x, window.innerWidth - 168),
+            top: Math.min(channelMenu.y, window.innerHeight - 48),
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => void confirmDeleteChannel(channelMenu.channel)}
+            className="w-full text-left px-3 py-1.5 text-[12px] flex items-center gap-2 text-kd-danger hover:bg-kd-danger/10 transition-colors"
+          >
+            <Icon.Trash size={12} />
+            удалить канал
+          </button>
+        </div>
+      )}
+
+      {catMenu && (
+        <div
+          ref={catMenuRef}
+          className="fixed z-50 min-w-[160px] bg-kd-panel border border-kd-border rounded-kd shadow-kd-modal py-1 select-none"
+          style={{
+            left: Math.min(catMenu.x, window.innerWidth - 168),
+            top: Math.min(catMenu.y, window.innerHeight - 48),
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => void confirmDeleteCategory(catMenu.name)}
+            className="w-full text-left px-3 py-1.5 text-[12px] flex items-center gap-2 text-kd-danger hover:bg-kd-danger/10 transition-colors"
+          >
+            <Icon.Trash size={12} />
+            удалить категорию
+          </button>
+        </div>
+      )}
+
+      {createState && serverId && (
         <CreateChannelModal
           serverId={serverId}
-          mode={createMode}
+          mode={createState.mode}
           categories={categoryNames}
-          onClose={() => setCreateMode(null)}
+          initialCategory={createState.category}
+          onClose={() => setCreateState(null)}
         />
       )}
     </aside>

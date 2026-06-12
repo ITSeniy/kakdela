@@ -49,6 +49,23 @@ export const servers = pgTable('servers', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
+// Категории каналов — отдельная сущность, чтобы категория могла жить пустой
+// (channels.category хранит имя как метку; consistency держат роуты).
+export const channelCategories = pgTable(
+  'channel_categories',
+  {
+    id:        uuid('id').primaryKey().defaultRandom(),
+    serverId:  uuid('server_id').notNull().references(() => servers.id, { onDelete: 'cascade' }),
+    name:      text('name').notNull(),
+    position:  integer('position').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    serverIdIdx:    index('channel_categories_server_id_idx').on(t.serverId),
+    serverNameUniq: uniqueIndex('channel_categories_server_name_unique_idx').on(t.serverId, t.name),
+  }),
+)
+
 export const channels = pgTable('channels', {
   id:               uuid('id').primaryKey().defaultRandom(),
   serverId:         uuid('server_id').references(() => servers.id, { onDelete: 'cascade' }),

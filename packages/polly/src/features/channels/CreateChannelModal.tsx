@@ -1,6 +1,6 @@
 // Модалка «создать канал» / «создать категорию» (открывается из меню шапки
-// сервера). Категория в нашей схеме — строковая метка на канале, отдельной
-// сущности нет, поэтому «создать категорию» = создать её первый канал.
+// сервера и плюсика у заголовка категории). Категория — отдельная сущность
+// (channel_categories) и может существовать пустой.
 
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -9,7 +9,7 @@ import { useLocation } from 'wouter'
 import { Icon } from '../../components/Icon.js'
 import { Modal, ModalHeader } from '../../components/Modal.js'
 import { ApiError } from '../../lib/api.js'
-import { createChannel } from '../servers/api.js'
+import { createCategory, createChannel } from '../servers/api.js'
 
 export type CreateChannelMode = 'channel' | 'category'
 
@@ -18,6 +18,8 @@ interface CreateChannelModalProps {
   mode: CreateChannelMode
   /** Существующие категории — для селекта в режиме «канал». */
   categories: string[]
+  /** Предвыбранная категория (плюсик у заголовка категории). */
+  initialCategory?: string
   onClose(): void
 }
 
@@ -26,7 +28,7 @@ const KIND_OPTIONS = [
   { value: 'voice', label: 'голосовой', hint: 'голос и демо экрана' },
 ] as const
 
-export function CreateChannelModal({ serverId, mode, categories, onClose }: CreateChannelModalProps) {
+export function CreateChannelModal({ serverId, mode, categories, initialCategory, onClose }: CreateChannelModalProps) {
   const queryClient = useQueryClient()
   const [, navigate] = useLocation()
 
@@ -34,20 +36,25 @@ export function CreateChannelModal({ serverId, mode, categories, onClose }: Crea
   const [kind, setKind] = useState<'text' | 'voice'>('text')
   // mode=channel: выбранная существующая категория ('' = без категории).
   // mode=category: имя новой категории.
-  const [category, setCategory] = useState('')
+  const [category, setCategory] = useState(initialCategory ?? '')
   const [error, setError] = useState<string | null>(null)
 
   const createMutation = useMutation({
-    mutationFn: () =>
-      createChannel(serverId, {
+    mutationFn: async () => {
+      if (mode === 'category') {
+        await createCategory(serverId, category.trim())
+        return null
+      }
+      return createChannel(serverId, {
         name: name.trim(),
         kind,
         ...(category.trim() ? { category: category.trim() } : {}),
-      }),
+      })
+    },
     onSuccess: (channel) => {
       void queryClient.invalidateQueries({ queryKey: ['server', serverId] })
       onClose()
-      navigate(`/servers/${serverId}/channels/${channel.id}`)
+      if (channel) navigate(`/servers/${serverId}/channels/${channel.id}`)
     },
     onError: (err) => {
       setError(err instanceof ApiError ? err.message : (err as Error).message)
@@ -55,8 +62,7 @@ export function CreateChannelModal({ serverId, mode, categories, onClose }: Crea
   })
 
   const canSubmit =
-    name.trim().length >= 1
-    && (mode !== 'category' || category.trim().length >= 1)
+    (mode === 'category' ? category.trim().length >= 1 : name.trim().length >= 1)
     && !createMutation.isPending
 
   function submit() {
@@ -77,8 +83,8 @@ export function CreateChannelModal({ serverId, mode, categories, onClose }: Crea
         {mode === 'category' && (
           <>
             <div className="text-[11px] text-kd-text-soft leading-relaxed">
-              категория появляется вместе со своим первым каналом — пустых
-              категорий не бывает.
+              категория группирует каналы в списке. может быть и пустой —
+              каналы добавишь потом плюсиком у её заголовка.
             </div>
             <div className="flex flex-col gap-1.5">
               <label className="text-[10px] font-mono text-kd-text-mute uppercase tracking-wider">
@@ -97,54 +103,58 @@ export function CreateChannelModal({ serverId, mode, categories, onClose }: Crea
           </>
         )}
 
-        <div className="flex flex-col gap-1.5">
-          <label className="text-[10px] font-mono text-kd-text-mute uppercase tracking-wider">
-            {mode === 'category' ? 'первый канал в ней' : 'имя канала'}
-          </label>
-          <input
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value.slice(0, 64))}
-            onKeyDown={onEnter}
-            placeholder={kind === 'voice' ? 'у костра' : 'общий'}
-            autoFocus={mode === 'channel'}
-            className="bg-kd-bg border border-kd-border rounded px-2 py-1.5 text-[13px] text-kd-text outline-none focus:border-kd-accent"
-          />
-        </div>
+        {mode === 'channel' && (
+          <>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[10px] font-mono text-kd-text-mute uppercase tracking-wider">
+                имя канала
+              </label>
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value.slice(0, 64))}
+                onKeyDown={onEnter}
+                placeholder={kind === 'voice' ? 'у костра' : 'общий'}
+                autoFocus
+                className="bg-kd-bg border border-kd-border rounded px-2 py-1.5 text-[13px] text-kd-text outline-none focus:border-kd-accent"
+              />
+            </div>
 
-        <div className="flex flex-col gap-1.5">
-          <label className="text-[10px] font-mono text-kd-text-mute uppercase tracking-wider">
-            тип канала
-          </label>
-          <div role="radiogroup" aria-label="тип канала" className="grid grid-cols-2 gap-2">
-            {KIND_OPTIONS.map((opt) => {
-              const active = opt.value === kind
-              return (
-                <button
-                  key={opt.value}
-                  type="button"
-                  role="radio"
-                  aria-checked={active}
-                  onClick={() => setKind(opt.value)}
-                  className={[
-                    'px-3 py-2 rounded-kd border text-left transition-colors',
-                    active
-                      ? 'border-kd-accent bg-kd-accent text-white'
-                      : 'border-kd-border bg-kd-panel text-kd-text hover:bg-kd-panel-hi',
-                  ].join(' ')}
-                >
-                  <div className="text-[12px] font-semibold flex items-center gap-1.5">
-                    {opt.value === 'voice' ? <Icon.Speaker size={11} /> : <Icon.Hash size={11} />}
-                    {opt.label}
-                  </div>
-                  <div className={`text-[10px] font-mono ${active ? 'text-white/75' : 'text-kd-text-mute'}`}>
-                    {opt.hint}
-                  </div>
-                </button>
-              )
-            })}
-          </div>
-        </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[10px] font-mono text-kd-text-mute uppercase tracking-wider">
+                тип канала
+              </label>
+              <div role="radiogroup" aria-label="тип канала" className="grid grid-cols-2 gap-2">
+                {KIND_OPTIONS.map((opt) => {
+                  const active = opt.value === kind
+                  return (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      role="radio"
+                      aria-checked={active}
+                      onClick={() => setKind(opt.value)}
+                      className={[
+                        'px-3 py-2 rounded-kd border text-left transition-colors',
+                        active
+                          ? 'border-kd-accent bg-kd-accent text-white'
+                          : 'border-kd-border bg-kd-panel text-kd-text hover:bg-kd-panel-hi',
+                      ].join(' ')}
+                    >
+                      <div className="text-[12px] font-semibold flex items-center gap-1.5">
+                        {opt.value === 'voice' ? <Icon.Speaker size={11} /> : <Icon.Hash size={11} />}
+                        {opt.label}
+                      </div>
+                      <div className={`text-[10px] font-mono ${active ? 'text-white/75' : 'text-kd-text-mute'}`}>
+                        {opt.hint}
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          </>
+        )}
 
         {mode === 'channel' && categories.length > 0 && (
           <div className="flex flex-col gap-1.5">
