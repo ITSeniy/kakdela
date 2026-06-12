@@ -1,13 +1,183 @@
 import { useEffect, useRef, useState } from 'react'
 
 import { Field } from '../../components/form/Field.js'
+import { Slider } from '../../components/form/Slider.js'
 import { Toggle } from '../../components/form/Toggle.js'
+import {
+  listAudioDevices,
+  useAudioDevices,
+  type AudioDeviceInfo,
+} from '../voice/deviceSettings.js'
 import {
   describeKey,
   useVoiceInputSettings,
   type InputMode,
 } from '../voice/inputSettings.js'
 import { useNoiseSettings } from '../voice/noiseSettings.js'
+
+const SELECT_CLS =
+  'w-full px-3 py-2 rounded-kd bg-kd-bg border border-kd-border text-[12px] text-kd-text outline-none focus:border-kd-accent'
+
+/** Селекты устройств + громкости + проверка микрофона (как в Discord). */
+function DeviceSettings() {
+  const micId = useAudioDevices((s) => s.micId)
+  const speakerId = useAudioDevices((s) => s.speakerId)
+  const micGain = useAudioDevices((s) => s.micGain)
+  const speakerVolume = useAudioDevices((s) => s.speakerVolume)
+  const setMicId = useAudioDevices((s) => s.setMicId)
+  const setSpeakerId = useAudioDevices((s) => s.setSpeakerId)
+  const setMicGain = useAudioDevices((s) => s.setMicGain)
+  const setSpeakerVolume = useAudioDevices((s) => s.setSpeakerVolume)
+
+  const [mics, setMics] = useState<AudioDeviceInfo[]>([])
+  const [speakers, setSpeakers] = useState<AudioDeviceInfo[]>([])
+  const [testing, setTesting] = useState(false)
+  const [level, setLevel] = useState(0)
+  const stopTestRef = useRef<(() => void) | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    async function load() {
+      try {
+        const { mics: m, speakers: s } = await listAudioDevices()
+        if (cancelled) return
+        setMics(m)
+        setSpeakers(s)
+      } catch { /* нет mediaDevices — пустые списки */ }
+    }
+    void load()
+    navigator.mediaDevices?.addEventListener?.('devicechange', load)
+    return () => {
+      cancelled = true
+      navigator.mediaDevices?.removeEventListener?.('devicechange', load)
+    }
+  }, [])
+
+  // Проверка микрофона: живой уровень с выбранного устройства.
+  async function startTest() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: micId !== 'default' ? { deviceId: { exact: micId } } : true,
+      })
+      const ctx = new AudioContext()
+      const src = ctx.createMediaStreamSource(stream)
+      const analyser = ctx.createAnalyser()
+      analyser.fftSize = 512
+      src.connect(analyser)
+      const data = new Uint8Array(analyser.fftSize)
+      let raf = 0
+      const loop = () => {
+        analyser.getByteTimeDomainData(data)
+        let sum = 0
+        for (let i = 0; i < data.length; i++) {
+          const v = ((data[i] ?? 128) - 128) / 128
+          sum += v * v
+        }
+        // sqrt(RMS) — растягиваем низ шкалы, иначе бары еле шевелятся.
+        setLevel(Math.min(1, Math.sqrt(Math.sqrt(sum / data.length)) * 1.4))
+        raf = requestAnimationFrame(loop)
+      }
+      raf = requestAnimationFrame(loop)
+      stopTestRef.current = () => {
+        cancelAnimationFrame(raf)
+        try { src.disconnect() } catch { /* ignore */ }
+        void ctx.close().catch(() => { /* ignore */ })
+        stream.getTracks().forEach((t) => t.stop())
+        setLevel(0)
+      }
+      setTesting(true)
+    } catch { /* нет разрешения — кнопка просто не включится */ }
+  }
+
+  function stopTest() {
+    stopTestRef.current?.()
+    stopTestRef.current = null
+    setTesting(false)
+  }
+
+  useEffect(() => () => { stopTestRef.current?.() }, [])
+  // Смена устройства во время теста — перезапускаем на новое.
+  useEffect(() => {
+    if (!testing) return
+    stopTestRef.current?.()
+    void startTest()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [micId])
+
+  const BAR_COUNT = 24
+  const litBars = Math.round(level * BAR_COUNT)
+
+  return (
+    <>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="микрофон">
+          <select value={micId} onChange={(e) => setMicId(e.target.value)} className={SELECT_CLS}>
+            <option value="default">по умолчанию</option>
+            {mics.map((d) => (
+              <option key={d.deviceId} value={d.deviceId}>{d.label}</option>
+            ))}
+          </select>
+        </Field>
+        <Field label="динамик">
+          <select value={speakerId} onChange={(e) => setSpeakerId(e.target.value)} className={SELECT_CLS}>
+            <option value="default">по умолчанию</option>
+            {speakers.map((d) => (
+              <option key={d.deviceId} value={d.deviceId}>{d.label}</option>
+            ))}
+          </select>
+        </Field>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <Slider
+          label="громкость микрофона"
+          display={`${Math.round(micGain * 100)}%`}
+          value={Math.round(micGain * 100)}
+          min={0}
+          max={200}
+          onChange={(v) => setMicGain(v / 100)}
+          hint="программное усиление поверх системного"
+        />
+        <Slider
+          label="громкость динамика"
+          display={`${Math.round(speakerVolume * 100)}%`}
+          value={Math.round(speakerVolume * 100)}
+          min={0}
+          max={100}
+          onChange={(v) => setSpeakerVolume(v / 100)}
+          hint="общая громкость всех в голосовом"
+        />
+      </div>
+
+      <Field label="проверка микрофона" hint="скажи что-нибудь — полоски покажут уровень">
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => { testing ? stopTest() : void startTest() }}
+            className={[
+              'px-3 py-1.5 rounded-kd text-[12px] font-semibold transition-colors shrink-0',
+              testing ? 'bg-kd-danger text-white hover:opacity-90' : 'bg-kd-accent text-white hover:bg-kd-accent-deep',
+            ].join(' ')}
+          >
+            {testing ? 'хватит' : 'проверка'}
+          </button>
+          <div className="flex-1 flex items-center gap-[3px] h-7">
+            {Array.from({ length: BAR_COUNT }, (_, i) => (
+              <span
+                key={i}
+                className="flex-1 rounded-sm transition-colors"
+                style={{
+                  height: '100%',
+                  background: i < litBars ? 'var(--kd-accent)' : 'var(--kd-panel-hi)',
+                }}
+              />
+            ))}
+          </div>
+        </div>
+      </Field>
+    </>
+  )
+}
 
 interface ModeOption {
   mode: InputMode
@@ -90,6 +260,8 @@ export function VoiceSettings() {
 
   return (
     <div className="flex flex-col gap-[18px]">
+      <DeviceSettings />
+
       <Field label="режим микрофона" hint="как включается передача голоса">
         {/* сегмент-переключатель в духе блока «плотность» (designs/final-settings.jsx) */}
         <div

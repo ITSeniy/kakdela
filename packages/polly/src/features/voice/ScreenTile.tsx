@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 
 import type { LocalVideoTrack, RemoteVideoTrack } from 'livekit-client'
 
+import { Avatar } from '../../components/Avatar.js'
+
 function formatQuality(track: LocalVideoTrack | RemoteVideoTrack): string | null {
   // dimensions есть и у Local- и у RemoteVideoTrack, но в публичных типах
   // SDK это не отражено. Читаем размеры через стандартный MediaTrackSettings
@@ -22,8 +24,12 @@ interface ScreenTileProps {
   busy?: boolean
   /** Компакт для нижней полосы: только видео + имя, без кнопок и бейджа. */
   compact?: boolean
+  /** Кто сейчас смотрит эту демку — стопка аватарок внизу-справа. */
+  watchers?: Array<{ name: string; avatarUrl: string | null }>
   onClick?(): void
   onSnapshot?(): void
+  /** Перестать смотреть (только чужие демки). */
+  onStopWatching?(): void
   screenTrack: LocalVideoTrack | RemoteVideoTrack
 }
 
@@ -64,8 +70,10 @@ export function ScreenTile({
   focused,
   busy,
   compact,
+  watchers,
   onClick,
   onSnapshot,
+  onStopWatching,
   screenTrack,
 }: ScreenTileProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
@@ -142,6 +150,23 @@ export function ScreenTile({
         <span className="text-[9px] font-bold text-kd-warm shrink-0">· LIVE</span>
       </div>
 
+      {/* Кто смотрит — стопка аватарок внизу-справа. */}
+      {!compact && watchers && watchers.length > 0 && (
+        <div
+          className="absolute right-1.5 bottom-1.5 flex items-center pl-1.5 pr-2 py-0.5 rounded bg-kd-overlay-strong"
+          title={`смотрят: ${watchers.map((w) => w.name).join(', ')}`}
+        >
+          {watchers.slice(0, 4).map((w, i) => (
+            <span key={i} className={i > 0 ? '-ml-1.5' : ''}>
+              <Avatar name={w.name} avatarUrl={w.avatarUrl} size={16} />
+            </span>
+          ))}
+          {watchers.length > 4 && (
+            <span className="ml-1 text-[9px] font-mono text-kd-stage-text">+{watchers.length - 4}</span>
+          )}
+        </div>
+      )}
+
       {/* Quality badge — слева вверху, чтобы не пересекаться с hover-кнопками. */}
       {!compact && quality && (
         <div className="absolute left-1.5 top-1.5 px-1.5 py-0.5 rounded font-mono bg-kd-overlay-strong text-kd-stage-text opacity-70 text-[9px] pointer-events-none">
@@ -153,6 +178,19 @@ export function ScreenTile({
           на каждое движение мыши. */}
       {!compact && (
         <div className="absolute right-1.5 top-1.5 flex gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+          {onStopWatching && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                onStopWatching()
+              }}
+              title="перестать смотреть"
+              className="inline-flex items-center justify-center px-1.5 h-6 rounded bg-kd-overlay-strong text-kd-stage-text text-[9px] font-mono"
+            >
+              ✕ стрим
+            </button>
+          )}
           {onSnapshot && (
             <button
               type="button"

@@ -41,6 +41,10 @@ interface VoiceState {
   selfSpeaking: boolean
   participants: Map<string, ParticipantState>
   activeSpeakers: Set<string>
+  // Чьи демки Я смотрю (opt-in подписка на screen-треки).
+  watchedScreens: Set<string>
+  // Кто что смотрит: watcherId → список streamerId (из data-сообщений).
+  watchingByUser: Map<string, string[]>
   // identity того участника, чей screen share «закреплён» в фокусе. Не
   // персистится — пин живёт только в текущей сессии театрального режима.
   pinnedScreenUserId: string | null
@@ -61,6 +65,8 @@ interface VoiceActions {
   setPinnedScreenUserId(id: string | null): void
   setPttHolding(holding: boolean): void
   setSelfSpeaking(speaking: boolean): void
+  setWatchedScreen(userId: string, watch: boolean): void
+  setWatching(watcherId: string, streamerIds: string[]): void
   setActiveSpeakers(ids: Iterable<string>): void
   upsertParticipant(p: Partial<ParticipantState> & { userId: string; displayName: string }): void
   patchParticipant(userId: string, patch: Partial<Omit<ParticipantState, 'userId'>>): void
@@ -82,6 +88,8 @@ const initialState: VoiceState = {
   selfSpeaking: false,
   participants: new Map(),
   activeSpeakers: new Set(),
+  watchedScreens: new Set(),
+  watchingByUser: new Map(),
   pinnedScreenUserId: null,
   error: null,
 }
@@ -123,6 +131,8 @@ export const useVoiceStore = create<VoiceState & VoiceActions>()(persist((set) =
       mutedBeforeDeafen: state.mutedBeforeDeafen,
       participants: new Map(),
       activeSpeakers: new Set(),
+      watchedScreens: new Set(),
+      watchingByUser: new Map(),
     }))
   },
 
@@ -172,6 +182,25 @@ export const useVoiceStore = create<VoiceState & VoiceActions>()(persist((set) =
 
   setSelfSpeaking(speaking) {
     set((state) => (state.selfSpeaking === speaking ? state : { selfSpeaking: speaking }))
+  },
+
+  setWatchedScreen(userId, watch) {
+    set((state) => {
+      if (state.watchedScreens.has(userId) === watch) return state
+      const next = new Set(state.watchedScreens)
+      if (watch) next.add(userId)
+      else next.delete(userId)
+      return { watchedScreens: next }
+    })
+  },
+
+  setWatching(watcherId, streamerIds) {
+    set((state) => {
+      const next = new Map(state.watchingByUser)
+      if (streamerIds.length === 0) next.delete(watcherId)
+      else next.set(watcherId, streamerIds)
+      return { watchingByUser: next }
+    })
   },
 
   setActiveSpeakers(ids) {
@@ -239,12 +268,17 @@ export const useVoiceStore = create<VoiceState & VoiceActions>()(persist((set) =
       next.delete(userId)
       const speakers = new Set(state.activeSpeakers)
       speakers.delete(userId)
+      // Ушёл — чистим и его watch-список, и его демку из моих просмотров.
+      const watchedScreens = new Set(state.watchedScreens)
+      watchedScreens.delete(userId)
+      const watchingByUser = new Map(state.watchingByUser)
+      watchingByUser.delete(userId)
       // Если ушёл pinned-демонстрирующий — снимаем пин, чтобы focus не
       // ушёл в пустоту в театральном режиме. computeLayout сам бы тоже
       // отработал корректно, но явная очистка экономит лишний фолбэк.
       const pinnedScreenUserId =
         state.pinnedScreenUserId === userId ? null : state.pinnedScreenUserId
-      return { participants: next, activeSpeakers: speakers, pinnedScreenUserId }
+      return { participants: next, activeSpeakers: speakers, pinnedScreenUserId, watchedScreens, watchingByUser }
     })
   },
 

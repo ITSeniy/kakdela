@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useLocation } from 'wouter'
+import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
 
 import { Icon } from '../../components/Icon.js'
 import { ServerIcon } from '../../components/ServerIcon.js'
@@ -16,6 +18,18 @@ interface ServerRailProps {
   inInboxMode?: boolean
   inSearchMode?: boolean
 }
+
+// Порядок серверов в рельсе — личное дело каждого устройства (как и в
+// Discord порядок локален для аккаунта; бэкенд-поля у нас нет).
+const useServerOrder = create<{ order: string[]; setOrder(order: string[]): void }>()(
+  persist(
+    (set) => ({
+      order: [],
+      setOrder: (order) => set({ order }),
+    }),
+    { name: 'kd:server-order' },
+  ),
+)
 
 export function ServerRail({
   activeServerId,
@@ -56,6 +70,37 @@ export function ServerRail({
     staleTime: 30_000,
   })
 
+  // Drag&drop порядка серверов: сортируем по сохранённому списку id,
+  // новые сервера — в конец в исходном порядке.
+  const order = useServerOrder((s) => s.order)
+  const setOrder = useServerOrder((s) => s.setOrder)
+  const [dragServerId, setDragServerId] = useState<string | null>(null)
+  const [dropIndex, setDropIndex] = useState<number | null>(null)
+
+  const sortedServers = useMemo(() => {
+    const idx = new Map(order.map((id, i) => [id, i]))
+    return [...servers].sort((a, b) => {
+      const ia = idx.get(a.id) ?? Number.MAX_SAFE_INTEGER
+      const ib = idx.get(b.id) ?? Number.MAX_SAFE_INTEGER
+      return ia - ib
+    })
+  }, [servers, order])
+
+  function performServerDrop() {
+    const dragged = dragServerId
+    const target = dropIndex
+    setDragServerId(null)
+    setDropIndex(null)
+    if (!dragged || target === null) return
+    const ids = sortedServers.map((s) => s.id).filter((id) => id !== dragged)
+    const from = sortedServers.findIndex((s) => s.id === dragged)
+    // target — индекс «вставить перед»; после удаления перетаскиваемого
+    // индексы правее него сдвигаются на 1.
+    const insertAt = target > from ? target - 1 : target
+    ids.splice(Math.max(0, Math.min(ids.length, insertAt)), 0, dragged)
+    setOrder(ids)
+  }
+
   // Глобальный счётчик непрочитанных упоминаний для бейджа на иконке Inbox.
   // Лимит 1 — нас интересует только unreadTotal, выдаваемый эндпоинтом.
   const { data: inboxData } = useQuery({
@@ -95,15 +140,43 @@ export function ServerRail({
       {/* py-1: ring активного сервера выступает на 3px за иконку — паддинг
           поменьше его подрезал у первого/последнего элемента. */}
       <div className="flex-1 min-h-0 overflow-y-auto kd-scrollbar-hide flex flex-col items-center gap-2.5 w-full py-1">
-        {servers.map((s) => (
-          <ServerIcon
+        {sortedServers.map((s, i) => (
+          <div
             key={s.id}
-            name={s.name}
-            iconUrl={s.iconUrl ?? null}
-            active={s.id === activeServerId}
-            onClick={() => navigate(`/servers/${s.id}`)}
-            title={s.name}
-          />
+            draggable
+            onDragStart={(e) => {
+              e.dataTransfer.setData('text/plain', s.id)
+              e.dataTransfer.effectAllowed = 'move'
+              setDragServerId(s.id)
+            }}
+            onDragEnd={() => { setDragServerId(null); setDropIndex(null) }}
+            onDragOver={(e) => {
+              if (!dragServerId) return
+              e.preventDefault()
+              const rect = e.currentTarget.getBoundingClientRect()
+              const above = e.clientY < rect.top + rect.height / 2
+              setDropIndex(above ? i : i + 1)
+            }}
+            onDrop={(e) => { e.preventDefault(); performServerDrop() }}
+            className="relative"
+          >
+            {/* индикатор вставки */}
+            {dragServerId && dropIndex === i && (
+              <span className="absolute -top-[6px] left-1 right-1 h-0.5 rounded bg-kd-accent pointer-events-none" />
+            )}
+            {dragServerId && dropIndex === i + 1 && (
+              <span className="absolute -bottom-[6px] left-1 right-1 h-0.5 rounded bg-kd-accent pointer-events-none" />
+            )}
+            <span className={dragServerId === s.id ? 'opacity-40 block' : 'block'}>
+              <ServerIcon
+                name={s.name}
+                iconUrl={s.iconUrl ?? null}
+                active={s.id === activeServerId}
+                onClick={() => navigate(`/servers/${s.id}`)}
+                title={s.name}
+              />
+            </span>
+          </div>
         ))}
 
         <div className="relative" ref={addRef}>

@@ -20,6 +20,7 @@ import { ThreadPanel } from '../features/threads/ThreadPanel.js'
 import { useThreadUi } from '../features/threads/store.js'
 import { useNotifyTriggers } from '../features/notify/triggers.js'
 import { VoiceScreen } from '../features/voice/VoiceScreen.js'
+import { useAudioDeviceSync } from '../features/voice/deviceSettings.js'
 import { useNoiseSuppressionSync } from '../features/voice/noiseSettings.js'
 import { useVoicePingSampler } from '../features/voice/pingStats.js'
 import { usePushToTalk } from '../features/voice/usePushToTalk.js'
@@ -31,6 +32,7 @@ export function Shell() {
   useNoiseSuppressionSync()
   useNotifyTriggers()
   useVoicePingSampler()
+  useAudioDeviceSync()
   const [location, navigate] = useLocation()
   const [, channelParams] = useRoute<{ serverId: string; channelId: string }>(
     '/servers/:serverId/channels/:channelId',

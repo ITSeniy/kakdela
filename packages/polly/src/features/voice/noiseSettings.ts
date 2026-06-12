@@ -3,6 +3,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
 import { restartMicConstraints } from '../../lib/livekit.js'
+import { useAudioDevices } from './deviceSettings.js'
 
 interface NoiseSettingsState {
   /**
@@ -46,11 +47,15 @@ export function audioCaptureOptions(): {
   noiseSuppression: boolean
   echoCancellation: boolean
   autoGainControl:  boolean
+  deviceId?: string
 } {
+  const micId = useAudioDevices.getState().micId
   return {
     noiseSuppression: useNoiseSettings.getState().noiseSuppression,
     echoCancellation: true,
     autoGainControl:  true,
+    // 'default' — отдаём выбор браузеру, явный id — конкретное устройство.
+    ...(micId && micId !== 'default' ? { deviceId: micId } : {}),
   }
 }
 

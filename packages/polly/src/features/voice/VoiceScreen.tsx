@@ -9,6 +9,7 @@ import { Icon } from '../../components/Icon.js'
 import {
   getLocalScreenVideoTrack,
   getRemoteScreenVideoTrack,
+  watchScreen,
 } from '../../lib/livekit.js'
 import { useAuthStore } from '../auth/store.js'
 import { sendMessage } from '../chat/api.js'
@@ -170,18 +171,87 @@ function bestTileSize(n: number, areaW: number, areaH: number): { w: number; h: 
   return { w: Math.floor(bestW), h: Math.floor(bestW / TILE_ASPECT) }
 }
 
+/** Заглушка непросматриваемой демки: тёмная карточка с кнопкой
+    «смотреть стрим» (и «смотреть все», если их несколько). */
+function UnwatchedStreamTile({
+  displayName, compact, othersCount, onWatch, onWatchAll,
+}: {
+  displayName: string
+  compact?: boolean
+  othersCount: number
+  onWatch(): void
+  onWatchAll(): void
+}) {
+  return (
+    <div
+      className={`relative w-full h-full rounded-lg overflow-hidden bg-kd-stage flex items-center justify-center ${compact ? 'min-h-[72px]' : 'min-h-[120px]'}`}
+      style={{ boxShadow: 'var(--kd-shadow-tile)', background: 'color-mix(in srgb, var(--kd-stage), var(--kd-stage-text) 4%)' }}
+    >
+      {compact ? (
+        <button
+          type="button"
+          onClick={onWatch}
+          title={`смотреть стрим · ${displayName}`}
+          className="text-[14px] text-kd-stage-text opacity-70 hover:opacity-100"
+        >
+          ▶
+        </button>
+      ) : (
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={onWatch}
+            className="px-3 py-1.5 rounded-kd bg-white/[0.08] hover:bg-white/[0.16] text-kd-stage-text text-[12px] font-semibold transition-colors"
+          >
+            ▶ смотреть стрим
+          </button>
+          {othersCount > 0 && (
+            <button
+              type="button"
+              onClick={onWatchAll}
+              title={`смотреть все стримы (+${othersCount})`}
+              className="w-8 h-8 rounded-kd bg-white/[0.08] hover:bg-white/[0.16] text-kd-stage-text text-[14px] font-mono transition-colors"
+            >
+              +
+            </button>
+          )}
+        </div>
+      )}
+      <div className="absolute left-1.5 bottom-1.5 flex items-center gap-1 px-1.5 py-0.5 rounded font-mono bg-kd-overlay-strong text-kd-stage-text max-w-[85%]">
+        <span className="text-[10px] font-semibold truncate">{displayName}</span>
+        <span className="text-[9px] font-bold text-kd-warm shrink-0">· LIVE</span>
+      </div>
+    </div>
+  )
+}
+
 function Card({
-  card, compact, focused, snapshotBusy, avatarSize, onClick, onSnapshot,
+  card, compact, focused, snapshotBusy, avatarSize, watchers, unwatchedOthers,
+  onClick, onSnapshot, onWatchAll,
 }: {
   card: CardData
   compact?: boolean
   focused?: boolean
   snapshotBusy?: boolean
   avatarSize?: number
+  watchers?: Array<{ name: string; avatarUrl: string | null }>
+  unwatchedOthers?: number
   onClick(): void
   onSnapshot?(): void
+  onWatchAll?(): void
 }) {
-  if (card.kind === 'screen' && card.screenTrack) {
+  if (card.kind === 'screen') {
+    if (!card.screenTrack) {
+      return (
+        <UnwatchedStreamTile
+          displayName={card.displayName}
+          compact={compact}
+          othersCount={unwatchedOthers ?? 0}
+          onWatch={() => watchScreen(card.userId, true)}
+          onWatchAll={() => onWatchAll?.()}
+        />
+      )
+    }
     return (
       <ScreenTile
         displayName={card.displayName}
@@ -189,8 +259,10 @@ function Card({
         focused={focused}
         compact={compact}
         busy={snapshotBusy}
+        watchers={watchers}
         onClick={onClick}
         onSnapshot={onSnapshot}
+        onStopWatching={card.isSelf ? undefined : () => watchScreen(card.userId, false)}
         screenTrack={card.screenTrack}
       />
     )
@@ -222,6 +294,8 @@ export function VoiceScreen({ serverId, channel }: VoiceScreenProps) {
   const participants = useVoiceStore((s) => s.participants)
   const activeSpeakers = useVoiceStore((s) => s.activeSpeakers)
   const selfSpeaking = useVoiceStore((s) => s.selfSpeaking)
+  const watchedScreens = useVoiceStore((s) => s.watchedScreens)
+  const watchingByUser = useVoiceStore((s) => s.watchingByUser)
   const error = useVoiceStore((s) => s.error)
   const setError = useVoiceStore((s) => s.setError)
   const chatOpen = useCallChatUi((s) => s.open)
@@ -301,10 +375,11 @@ export function VoiceScreen({ serverId, channel }: VoiceScreenProps) {
   const cards = useMemo<CardData[]>(() => {
     if (!connectedToThis || !me) return []
     const result: CardData[] = []
-    const pushBoth = (base: Omit<CardData, 'id' | 'kind'>) => {
+    const pushBoth = (base: Omit<CardData, 'id' | 'kind'>, streaming: boolean) => {
       // Лицо — всегда; демка — отдельной карточкой следом (как в Discord).
+      // У непросматриваемой демки screenTrack null — карточка-заглушка.
       result.push({ ...base, id: base.userId, kind: 'face', screenTrack: null })
-      if (base.screenTrack) {
+      if (streaming) {
         result.push({ ...base, id: `screen:${base.userId}`, kind: 'screen' })
       }
     }
@@ -321,7 +396,7 @@ export function VoiceScreen({ serverId, channel }: VoiceScreenProps) {
       serverMuted: false,
       serverDeafened: false,
       screenTrack: screenSharing ? getLocalScreenVideoTrack() : null,
-    })
+    }, screenSharing)
     for (const p of participants.values() as IterableIterator<ParticipantState>) {
       if (p.userId === me.id) continue
       const member = memberMap.get(p.userId)
@@ -334,11 +409,38 @@ export function VoiceScreen({ serverId, channel }: VoiceScreenProps) {
         isSelf: false,
         serverMuted: p.serverMuted,
         serverDeafened: p.serverDeafened,
-        screenTrack: p.isScreenSharing ? getRemoteScreenVideoTrack(p.userId) : null,
-      })
+        screenTrack: p.isScreenSharing && watchedScreens.has(p.userId)
+          ? getRemoteScreenVideoTrack(p.userId)
+          : null,
+      }, p.isScreenSharing)
     }
     return result
-  }, [connectedToThis, me, muted, screenSharing, participants, activeSpeakers, selfSpeaking, memberMap])
+  }, [connectedToThis, me, muted, screenSharing, participants, activeSpeakers, selfSpeaking, watchedScreens, memberMap])
+
+  // Кто смотрит чью демку: для бейджа на карточке стрима.
+  const watchersOf = useMemo(() => {
+    const map = new Map<string, Array<{ name: string; avatarUrl: string | null }>>()
+    const add = (streamerId: string, watcherId: string) => {
+      const m = memberMap.get(watcherId)
+      const list = map.get(streamerId) ?? []
+      list.push({ name: m?.displayName ?? '?', avatarUrl: m?.avatarUrl ?? null })
+      map.set(streamerId, list)
+    }
+    for (const [watcherId, streamers] of watchingByUser) {
+      for (const sid of streamers) add(sid, watcherId)
+    }
+    if (me) for (const sid of watchedScreens) add(sid, me.id)
+    return map
+  }, [watchingByUser, watchedScreens, memberMap, me])
+
+  const unwatchedStreamUserIds = useMemo(
+    () => cards.filter((c) => c.kind === 'screen' && !c.screenTrack && !c.isSelf).map((c) => c.userId),
+    [cards],
+  )
+
+  const watchAllStreams = (): void => {
+    for (const uid of unwatchedStreamUserIds) watchScreen(uid, true)
+  }
 
   // Если развёрнутая карточка исчезла (вышел / прекратил демо) — в сетку.
   useEffect(() => {
@@ -441,6 +543,9 @@ export function VoiceScreen({ serverId, channel }: VoiceScreenProps) {
                       card={focusedCard}
                       focused
                       snapshotBusy={snapshotBusyId === focusedCard.id}
+                      watchers={focusedCard.kind === 'screen' ? watchersOf.get(focusedCard.userId) : undefined}
+                      unwatchedOthers={unwatchedStreamUserIds.length - (focusedCard.screenTrack ? 0 : 1)}
+                      onWatchAll={watchAllStreams}
                       onClick={() => toggleFocus(focusedCard.id)}
                       onSnapshot={
                         focusedCard.kind === 'screen'
@@ -489,6 +594,13 @@ export function VoiceScreen({ serverId, channel }: VoiceScreenProps) {
                           card={c}
                           avatarSize={avatarSize}
                           snapshotBusy={snapshotBusyId === c.id}
+                          watchers={c.kind === 'screen' ? watchersOf.get(c.userId) : undefined}
+                          unwatchedOthers={
+                            c.kind === 'screen' && !c.screenTrack
+                              ? unwatchedStreamUserIds.length - 1
+                              : 0
+                          }
+                          onWatchAll={watchAllStreams}
                           onClick={() => toggleFocus(c.id)}
                           onSnapshot={
                             c.kind === 'screen' ? () => { void onSnapshot(c) } : undefined

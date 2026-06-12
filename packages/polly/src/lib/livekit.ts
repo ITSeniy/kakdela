@@ -16,6 +16,7 @@ import {
 } from 'livekit-client'
 import type { AudioCaptureOptions } from 'livekit-client'
 
+import { useAudioDevices } from '../features/voice/deviceSettings.js'
 import { useLocalMute } from '../features/voice/localMute.js'
 import { useVoiceStore } from '../features/voice/store.js'
 import { useVoiceVolumes, volumesFor } from '../features/voice/volumeSettings.js'
@@ -82,6 +83,110 @@ function stopLocalSpeakingMeter(): void {
   speakingMeterStop = null
 }
 
+// ───── Программное усиление микрофона ─────
+//
+// LiveKit-процессор: source → GainNode → destination, processedTrack уходит
+// в эфир. Ставится только при gain ≠ 1; слайдер обновляет узел напрямую.
+let micGainNode: GainNode | null = null
+
+function makeMicGainProcessor() {
+  let ctx: AudioContext | null = null
+  let src: MediaStreamAudioSourceNode | null = null
+  const proc = {
+    name: 'kd-mic-gain',
+    processedTrack: undefined as MediaStreamTrack | undefined,
+    async init(opts: { track: MediaStreamTrack; audioContext?: AudioContext }) {
+      ctx = opts.audioContext ?? new AudioContext()
+      src = ctx.createMediaStreamSource(new MediaStream([opts.track]))
+      micGainNode = ctx.createGain()
+      micGainNode.gain.value = useAudioDevices.getState().micGain
+      const dest = ctx.createMediaStreamDestination()
+      src.connect(micGainNode)
+      micGainNode.connect(dest)
+      proc.processedTrack = dest.stream.getAudioTracks()[0]
+    },
+    async restart(opts: { track: MediaStreamTrack; audioContext?: AudioContext }) {
+      await proc.destroy()
+      await proc.init(opts)
+    },
+    async destroy() {
+      try { src?.disconnect() } catch { /* ignore */ }
+      try { micGainNode?.disconnect() } catch { /* ignore */ }
+      micGainNode = null
+      proc.processedTrack = undefined
+    },
+  }
+  return proc
+}
+
+/** Применяет текущее усиление к живому мик-треку: обновляет узел либо
+    ставит/снимает процессор. Без поддержки setProcessor — тихий no-op. */
+export async function applyMicGainLive(): Promise<void> {
+  const room = currentRoom
+  if (!room) return
+  const track = room.localParticipant.getTrackPublication(Track.Source.Microphone)?.track
+  if (!(track instanceof LocalAudioTrack)) return
+  const gain = useAudioDevices.getState().micGain
+
+  if (micGainNode) {
+    if (Math.abs(gain - 1) < 0.01) {
+      const stop = (track as unknown as { stopProcessor?: () => Promise<void> }).stopProcessor
+      try { await stop?.call(track) } catch { /* ignore */ }
+      micGainNode = null
+    } else {
+      micGainNode.gain.value = gain
+    }
+    return
+  }
+  if (Math.abs(gain - 1) < 0.01) return
+  const setProcessor = (track as unknown as {
+    setProcessor?: (p: ReturnType<typeof makeMicGainProcessor>) => Promise<void>
+  }).setProcessor
+  if (typeof setProcessor !== 'function') return
+  try {
+    await setProcessor.call(track, makeMicGainProcessor())
+  } catch (err) {
+    console.warn('[livekit] mic gain processor failed', err)
+  }
+}
+
+// ───── Opt-in просмотр стримов ─────
+//
+// Демки не грузятся сами: при публикации чужого screen-трека подписка
+// снимается, пока пользователь не нажмёт «смотреть стрим». Кто что смотрит —
+// разлетается data-сообщениями {t:'kd-watch'} и живёт в voice store.
+const dataEncoder = new TextEncoder()
+const dataDecoder = new TextDecoder()
+
+function isScreenSource(source: Track.Source): boolean {
+  return source === Track.Source.ScreenShare || source === Track.Source.ScreenShareAudio
+}
+
+function applyScreenSubscription(p: RemoteParticipant): void {
+  const watched = useVoiceStore.getState().watchedScreens.has(p.identity)
+  for (const pub of p.trackPublications.values()) {
+    if (!isScreenSource(pub.source)) continue
+    void (pub as RemoteTrackPublication).setSubscribed(watched)
+  }
+}
+
+/** Смотреть/перестать смотреть демку участника. */
+export function watchScreen(userId: string, watch: boolean): void {
+  useVoiceStore.getState().setWatchedScreen(userId, watch)
+  const room = currentRoom
+  if (!room) return
+  const p = room.remoteParticipants.get(userId)
+  if (p) applyScreenSubscription(p)
+  broadcastWatching(room)
+}
+
+/** Рассылает мой список просматриваемых демок (для бейджей «кто смотрит»). */
+function broadcastWatching(room: Room): void {
+  const watching = [...useVoiceStore.getState().watchedScreens]
+  const payload = dataEncoder.encode(JSON.stringify({ t: 'kd-watch', watching }))
+  void room.localParticipant.publishData(payload, { reliable: true }).catch(() => { /* ignore */ })
+}
+
 function ensureAudioContainer(): HTMLDivElement {
   if (audioContainer && audioContainer.isConnected) return audioContainer
   const div = document.createElement('div')
@@ -109,6 +214,24 @@ function attachAudio(track: RemoteTrack): void {
   el.dataset.kdTrackSid = sid
   ensureAudioContainer().appendChild(el)
   attachedAudioElements.set(sid, el)
+  void applySinkTo(el)
+}
+
+/** Назначает выбранный динамик audio-элементу (setSinkId, Chromium). */
+async function applySinkTo(el: HTMLMediaElement): Promise<void> {
+  const speakerId = useAudioDevices.getState().speakerId
+  const sink = (el as HTMLMediaElement & { setSinkId?: (id: string) => Promise<void> }).setSinkId
+  if (typeof sink !== 'function') return
+  try {
+    await sink.call(el, speakerId === 'default' ? '' : speakerId)
+  } catch (err) {
+    console.warn('[livekit] setSinkId failed', err)
+  }
+}
+
+/** Переназначает динамик всем уже играющим audio-элементам. */
+export async function applySpeakerDevice(): Promise<void> {
+  await Promise.all([...attachedAudioElements.values()].map((el) => applySinkTo(el)))
 }
 
 function detachAudio(track: RemoteTrack): void {
@@ -192,6 +315,9 @@ export function installVoiceRoom(room: Room): void {
   const micPub = room.localParticipant.getTrackPublication(Track.Source.Microphone)
   const ms = micPub?.track?.mediaStreamTrack
   if (ms) startLocalSpeakingMeter(ms)
+  // Чужие демки по умолчанию не смотрим + сообщаем свой watch-список.
+  for (const p of room.remoteParticipants.values()) applyScreenSubscription(p)
+  broadcastWatching(room)
 }
 
 /**
@@ -266,12 +392,14 @@ export async function restartMicConstraints(opts: AudioCaptureOptions): Promise<
 }
 
 /** Итоговая громкость участника: deafen глушит всех, локальный мьют —
- *  точечно, дальше — персональные регуляторы голоса и стрима. */
+ *  точечно, дальше — персональные регуляторы голоса и стрима, умноженные
+ *  на общую громкость динамика. */
 function applyVolumeFor(p: RemoteParticipant, deafened: boolean): void {
   const silenced = deafened || useLocalMute.getState().isMuted(p.identity)
+  const master = useAudioDevices.getState().speakerVolume
   const vols = volumesFor(useVoiceVolumes.getState().volumes, p.identity)
-  p.setVolume(silenced ? 0 : vols.user, Track.Source.Microphone)
-  p.setVolume(silenced ? 0 : vols.stream, Track.Source.ScreenShareAudio)
+  p.setVolume(silenced ? 0 : Math.min(1, vols.user * master), Track.Source.Microphone)
+  p.setVolume(silenced ? 0 : Math.min(1, vols.stream * master), Track.Source.ScreenShareAudio)
 }
 
 /** Переприменяет громкость одного участника в активной комнате — дёргается
@@ -373,6 +501,8 @@ function attachListeners(room: Room): void {
       isMuted: !hasUnmutedMic(p),
     })
     applyVolumeFor(p, useVoiceStore.getState().deafened)
+    // Новенький не знает, чьи демки я смотрю — повторяем свой список.
+    broadcastWatching(room)
   })
 
   room.on(RoomEvent.ParticipantDisconnected, (p: RemoteParticipant) => {
@@ -391,14 +521,40 @@ function attachListeners(room: Room): void {
   // уже говорит. Симметрично TrackUnpublished — на случай unpublish при муте.
   room.on(RoomEvent.TrackPublished, (pub: RemoteTrackPublication, p: RemoteParticipant) => {
     if (currentRoom !== room) return
-    if (pub.source !== Track.Source.Microphone) return
-    store().patchParticipant(p.identity, { isMuted: !hasUnmutedMic(p) })
+    if (pub.source === Track.Source.Microphone) {
+      store().patchParticipant(p.identity, { isMuted: !hasUnmutedMic(p) })
+      return
+    }
+    if (isScreenSource(pub.source)) {
+      // Карточка демки появляется сразу, но подписка — только по клику.
+      store().patchParticipant(p.identity, { isScreenSharing: true })
+      applyScreenSubscription(p)
+    }
   })
 
   room.on(RoomEvent.TrackUnpublished, (pub: RemoteTrackPublication, p: RemoteParticipant) => {
     if (currentRoom !== room) return
-    if (pub.source !== Track.Source.Microphone) return
-    store().patchParticipant(p.identity, { isMuted: !hasUnmutedMic(p) })
+    if (pub.source === Track.Source.Microphone) {
+      store().patchParticipant(p.identity, { isMuted: !hasUnmutedMic(p) })
+      return
+    }
+    if (isScreenSource(pub.source) && !hasScreenShare(p)) {
+      store().patchParticipant(p.identity, { isScreenSharing: false })
+      // Следующий стрим этого участника снова начнётся как «не смотрю».
+      store().setWatchedScreen(p.identity, false)
+    }
+  })
+
+  // «Кто смотрит чью демку» — лёгкий обмен data-сообщениями.
+  room.on(RoomEvent.DataReceived, (payload: Uint8Array, participant?: RemoteParticipant) => {
+    if (currentRoom !== room) return
+    if (!participant) return
+    try {
+      const msg = JSON.parse(dataDecoder.decode(payload)) as { t?: string; watching?: string[] }
+      if (msg.t === 'kd-watch' && Array.isArray(msg.watching)) {
+        store().setWatching(participant.identity, msg.watching.filter((x) => typeof x === 'string'))
+      }
+    } catch { /* чужой формат — игнорируем */ }
   })
 
   room.on(RoomEvent.TrackMuted, (pub: TrackPublication, p: Participant) => {
@@ -464,6 +620,7 @@ function attachListeners(room: Room): void {
       if (pub.source === Track.Source.Microphone) {
         const ms = pub.track?.mediaStreamTrack
         if (ms) startLocalSpeakingMeter(ms)
+        void applyMicGainLive()
         return
       }
       if (pub.source !== Track.Source.ScreenShare) return
