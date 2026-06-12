@@ -21,6 +21,7 @@ import { useThreadUi } from '../features/threads/store.js'
 import { useNotifyTriggers } from '../features/notify/triggers.js'
 import { VoiceScreen } from '../features/voice/VoiceScreen.js'
 import { useNoiseSuppressionSync } from '../features/voice/noiseSettings.js'
+import { useVoicePingSampler } from '../features/voice/pingStats.js'
 import { usePushToTalk } from '../features/voice/usePushToTalk.js'
 
 const LAST_CHANNEL_KEY = 'kd:last-channel'
@@ -29,6 +30,7 @@ export function Shell() {
   usePushToTalk()
   useNoiseSuppressionSync()
   useNotifyTriggers()
+  useVoicePingSampler()
   const [location, navigate] = useLocation()
   const [, channelParams] = useRoute<{ serverId: string; channelId: string }>(
     '/servers/:serverId/channels/:channelId',

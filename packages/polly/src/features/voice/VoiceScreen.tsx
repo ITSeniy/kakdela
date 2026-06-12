@@ -230,6 +230,13 @@ export function VoiceScreen({ serverId, channel }: VoiceScreenProps) {
   const connectedToThis =
     activeChannelId === channel.id && (status === 'connected' || status === 'reconnecting')
 
+  // VoiceDock'у нужен сервер активного ГС (имя + телепорт). Move между
+  // каналами не меняет сервер (бэк валидирует same-server), так что
+  // обновление отсюда покрывает все случаи.
+  useEffect(() => {
+    if (connectedToThis) useVoiceStore.getState().setActiveServerId(serverId)
+  }, [connectedToThis, serverId])
+
   const { data: members = [] } = useQuery({
     queryKey: ['members', serverId],
     queryFn: () => listMembers(serverId),

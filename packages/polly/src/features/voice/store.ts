@@ -18,6 +18,8 @@ export interface ParticipantState {
 
 interface VoiceState {
   activeChannelId: string | null
+  /** Сервер активного голосового канала — для VoiceDock (имя/телепорт). */
+  activeServerId: string | null
   status: VoiceStatus
   muted: boolean
   deafened: boolean
@@ -50,6 +52,7 @@ interface VoiceActions {
   setStatus(status: VoiceStatus): void
   setError(err: string | null): void
   setActiveChannelId(id: string | null): void
+  setActiveServerId(id: string | null): void
   setMuted(muted: boolean): void
   setDeafened(deafened: boolean): void
   setMutedBeforeDeafen(m: boolean): void
@@ -67,6 +70,7 @@ interface VoiceActions {
 
 const initialState: VoiceState = {
   activeChannelId: null,
+  activeServerId: null,
   status: 'idle',
   muted: false,
   deafened: false,
@@ -132,6 +136,10 @@ export const useVoiceStore = create<VoiceState & VoiceActions>()(persist((set) =
 
   setActiveChannelId(id) {
     set({ activeChannelId: id })
+  },
+
+  setActiveServerId(id) {
+    set({ activeServerId: id })
   },
 
   setMuted(muted) {

@@ -12,6 +12,7 @@ import { Icon } from '../../components/Icon.js'
 import { useAuthStore } from '../auth/store.js'
 import { useMyStatus, type MyStatus } from '../presence/store.js'
 import { useProfileUi } from '../profile/store.js'
+import { VoiceDock } from '../voice/VoiceDock.js'
 import { useVoiceInputSettings } from '../voice/inputSettings.js'
 import { useVoiceStore } from '../voice/store.js'
 import { useVoiceRoom } from '../voice/useVoiceRoom.js'
@@ -74,7 +75,10 @@ export function UserBar() {
   const micOff = muted || deafened
 
   return (
-    <div className="relative flex items-center gap-2 px-3 py-2 bg-kd-panel-alt border-t border-kd-border shrink-0">
+    <div className="shrink-0">
+    {/* Док голосовой связи пристыковывается сверху, когда мы в ГС. */}
+    <VoiceDock />
+    <div className="relative flex items-center gap-2 px-3 py-2 bg-kd-panel-alt border-t border-kd-border">
       <button
         type="button"
         onClick={() => openProfile(user.id)}
@@ -167,6 +171,7 @@ export function UserBar() {
           ))}
         </div>
       )}
+    </div>
     </div>
   )
 }
