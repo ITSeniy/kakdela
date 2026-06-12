@@ -9,6 +9,8 @@ import { uploadAttachment } from '../files/upload.js'
 import { Avatar } from '../../components/Avatar.js'
 import { Field } from '../../components/form/Field.js'
 import { AvatarCropper } from './AvatarCropper.js'
+import { BannerPicker } from './BannerPicker.js'
+import { TimezoneSelect } from './TimezoneSelect.js'
 import { patchMe } from './api.js'
 
 interface ProfileEditFormProps {
@@ -29,6 +31,9 @@ export function ProfileEditForm({ profile, onSaved, onCancel }: ProfileEditFormP
   const [displayName, setDisplayName] = useState(profile.displayName)
   const [customStatus, setCustomStatus] = useState(profile.customStatus ?? '')
   const [avatarUrl, setAvatarUrl] = useState<string | null>(profile.avatarUrl)
+  const [about, setAbout] = useState(profile.about ?? '')
+  const [timezone, setTimezone] = useState<string | null>(profile.timezone)
+  const [bannerUrl, setBannerUrl] = useState<string | null>(profile.bannerUrl)
   const [cropperOpen, setCropperOpen] = useState(false)
   const [avatarBusy, setAvatarBusy] = useState(false)
 
@@ -43,6 +48,9 @@ export function ProfileEditForm({ profile, onSaved, onCancel }: ProfileEditFormP
     displayName !== profile.displayName
     || (customStatus || null) !== (profile.customStatus ?? null)
     || avatarUrl !== profile.avatarUrl
+    || (about.trim() || null) !== (profile.about ?? null)
+    || timezone !== profile.timezone
+    || bannerUrl !== profile.bannerUrl
     || newPassword !== ''
 
   async function onAvatarCropConfirm(blob: Blob) {
@@ -63,8 +71,8 @@ export function ProfileEditForm({ profile, onSaved, onCancel }: ProfileEditFormP
   async function save() {
     setError(null)
     if (newPassword) {
-      if (newPassword.length < 12) {
-        setError('новый пароль — минимум 12 символов')
+      if (newPassword.length < 6) {
+        setError('новый пароль — минимум 6 символов')
         return
       }
       if (newPassword !== confirmPassword) {
@@ -84,6 +92,10 @@ export function ProfileEditForm({ profile, onSaved, onCancel }: ProfileEditFormP
       const nextStatus = customStatus.trim() === '' ? null : customStatus
       if (nextStatus !== (profile.customStatus ?? null)) updates.customStatus = nextStatus
       if (avatarUrl !== profile.avatarUrl) updates.avatarUrl = avatarUrl
+      const nextAbout = about.trim() === '' ? null : about.trim()
+      if (nextAbout !== (profile.about ?? null)) updates.about = nextAbout
+      if (timezone !== profile.timezone) updates.timezone = timezone
+      if (bannerUrl !== profile.bannerUrl) updates.bannerUrl = bannerUrl
       if (newPassword) {
         updates.currentPassword = currentPassword
         updates.newPassword = newPassword
@@ -141,6 +153,10 @@ export function ProfileEditForm({ profile, onSaved, onCancel }: ProfileEditFormP
         )}
       </Field>
 
+      <Field label="баннер" hint="фото сверху карточки профиля; без него — тёплый градиент">
+        <BannerPicker value={bannerUrl} onChange={setBannerUrl} />
+      </Field>
+
       <Field label="отображаемое имя">
         <input
           type="text"
@@ -161,6 +177,20 @@ export function ProfileEditForm({ profile, onSaved, onCancel }: ProfileEditFormP
         />
       </Field>
 
+      <Field label={`о себе · ${about.length}/512`} hint="чем живёшь, что любишь">
+        <textarea
+          value={about}
+          onChange={(e) => setAbout(e.target.value.slice(0, 512))}
+          rows={3}
+          placeholder="пью какао, играю в инди и собираю кактусы 🌵"
+          className={`${INPUT_CLS} resize-none font-sans`}
+        />
+      </Field>
+
+      <Field label="часовой пояс" hint="друзья увидят, который у тебя час">
+        <TimezoneSelect value={timezone} onChange={setTimezone} />
+      </Field>
+
       <Field label="смена пароля" hint="требуется текущий пароль; смена сбрасывает все сессии">
         <div className="flex flex-col gap-2.5">
           <input
@@ -174,7 +204,7 @@ export function ProfileEditForm({ profile, onSaved, onCancel }: ProfileEditFormP
           <input
             type="password"
             autoComplete="new-password"
-            placeholder="новый пароль (мин. 12)"
+            placeholder="новый пароль (мин. 6)"
             value={newPassword}
             onChange={(e) => setNewPassword(e.target.value)}
             className={INPUT_CLS}

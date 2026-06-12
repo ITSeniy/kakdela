@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   srem: vi.fn(),
   del: vi.fn(),
   set: vi.fn(),
+  hdel: vi.fn(),
   channelLookup: vi.fn(),
   broadcastToServer: vi.fn(),
 }))
@@ -17,6 +18,7 @@ vi.mock('../lib/redis.js', () => ({
     srem: mocks.srem,
     del: mocks.del,
     set: mocks.set,
+    hdel: mocks.hdel,
   },
 }))
 

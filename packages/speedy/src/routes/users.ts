@@ -128,6 +128,9 @@ export const usersRoutes: FastifyPluginAsyncZod = async (app) => {
         avatarUrl:     target.avatarUrl,
         customStatus:  target.customStatus ?? null,
         status:        liveStatus,
+        about:         target.about ?? null,
+        timezone:      target.timezone ?? null,
+        bannerUrl:     target.bannerUrl ?? null,
         createdAt:     target.createdAt.toISOString(),
         sharedServers,
         isSelf,
@@ -185,6 +188,9 @@ export const usersRoutes: FastifyPluginAsyncZod = async (app) => {
       if (body.displayName !== undefined)  updates.displayName  = body.displayName
       if (body.customStatus !== undefined) updates.customStatus = body.customStatus
       if (body.avatarUrl !== undefined)    updates.avatarUrl    = body.avatarUrl
+      if (body.about !== undefined)        updates.about        = body.about
+      if (body.timezone !== undefined)     updates.timezone     = body.timezone
+      if (body.bannerUrl !== undefined)    updates.bannerUrl    = body.bannerUrl
 
       if (Object.keys(updates).length > 0) {
         await db.update(users).set(updates).where(eq(users.id, userId))

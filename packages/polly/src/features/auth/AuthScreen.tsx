@@ -4,6 +4,7 @@ import { Avatar } from '../../components/Avatar.js'
 import { ThemeToggle } from '../../components/ThemeToggle.js'
 import { ApiError } from '../../lib/api.js'
 import { login, register } from './api.js'
+import { PROFILE_SETUP_FLAG } from './ProfileSetupScreen.js'
 
 type Mode = 'login' | 'register'
 
@@ -62,12 +63,14 @@ interface FieldProps {
   placeholder?: string
   hint?: React.ReactNode
   mono?: boolean
+  /** Нередактируемый префикс внутри поля («@» для ника). */
+  prefix?: string
   error?: string
   onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void
   autoComplete?: string
 }
 
-function Field({ label, value, onChange, type = 'text', placeholder, hint, mono, error, onKeyDown, autoComplete }: FieldProps) {
+function Field({ label, value, onChange, type = 'text', placeholder, hint, mono, prefix, error, onKeyDown, autoComplete }: FieldProps) {
   return (
     <div className="mb-3.5">
       <div className="flex items-baseline justify-between mb-1.5">
@@ -76,20 +79,28 @@ function Field({ label, value, onChange, type = 'text', placeholder, hint, mono,
         </label>
         {hint && <span className="text-[10px] text-kd-text-mute font-mono">{hint}</span>}
       </div>
-      <input
-        type={type}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        autoComplete={autoComplete}
-        onKeyDown={onKeyDown}
-        className={[
-          'w-full px-2 py-1.5 text-[13px] rounded bg-kd-bg border outline-none transition-colors',
-          'placeholder:text-kd-text-mute focus:border-kd-accent',
-          mono ? 'font-mono' : '',
-          error ? 'border-kd-danger' : 'border-kd-border',
-        ].join(' ')}
-      />
+      <div className="relative">
+        {prefix && (
+          <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[13px] font-mono text-kd-text-mute select-none pointer-events-none">
+            {prefix}
+          </span>
+        )}
+        <input
+          type={type}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+          autoComplete={autoComplete}
+          onKeyDown={onKeyDown}
+          className={[
+            'w-full py-1.5 text-[13px] rounded bg-kd-bg border outline-none transition-colors',
+            prefix ? 'pl-6 pr-2' : 'px-2',
+            'placeholder:text-kd-text-mute focus:border-kd-accent',
+            mono ? 'font-mono' : '',
+            error ? 'border-kd-danger' : 'border-kd-border',
+          ].join(' ')}
+        />
+      </div>
       {error && <p className="mt-1 text-[10px] text-kd-danger font-mono">{error}</p>}
     </div>
   )
@@ -194,8 +205,7 @@ export function AuthScreen({ initialMode = 'login', initialInviteCode = '' }: Au
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
 
-  // Register fields
-  const [displayName, setDisplayName] = useState('')
+  // Register fields. Имя задаётся на втором шаге (оформление профиля).
   const [username, setUsername] = useState('')
   const [inviteCode, setInviteCode] = useState(initialInviteCode)
 
@@ -208,7 +218,6 @@ export function AuthScreen({ initialMode = 'login', initialInviteCode = '' }: Au
     setMode(next)
     setEmail('')
     setPassword('')
-    setDisplayName('')
     setUsername('')
     setInviteCode('')
     setGlobalError(null)
@@ -224,13 +233,20 @@ export function AuthScreen({ initialMode = 'login', initialInviteCode = '' }: Au
       if (mode === 'login') {
         await login(email.trim(), password)
       } else {
-        await register({
-          inviteCode: inviteCode.trim(),
-          username: username.trim(),
-          displayName: displayName.trim(),
-          email: email.trim(),
-          password,
-        })
+        // Флаг до register: после setSession Router мгновенно уходит с этого
+        // экрана и должен сразу показать шаг оформления профиля.
+        localStorage.setItem(PROFILE_SETUP_FLAG, '1')
+        try {
+          await register({
+            inviteCode: inviteCode.trim(),
+            username: username.trim(),
+            email: email.trim(),
+            password,
+          })
+        } catch (err) {
+          localStorage.removeItem(PROFILE_SETUP_FLAG)
+          throw err
+        }
       }
     } catch (err) {
       if (err instanceof ApiError) {
@@ -328,21 +344,13 @@ export function AuthScreen({ initialMode = 'login', initialInviteCode = '' }: Au
         ) : (
           <>
             <Field
-              label="как тебя звать"
-              value={displayName}
-              onChange={setDisplayName}
-              placeholder="Аня Котова"
-              hint="можно потом изменить"
-              autoComplete="name"
-              onKeyDown={onEnter}
-            />
-            <Field
               label="ник"
               value={username}
-              onChange={setUsername}
+              onChange={(v) => setUsername(v.toLowerCase())}
               placeholder="anya"
-              hint="так тебя зовут @"
+              hint="постоянный — выбирай с душой"
               mono
+              prefix="@"
               error={fieldErrors['username']}
               autoComplete="username"
               onKeyDown={onEnter}
@@ -364,7 +372,7 @@ export function AuthScreen({ initialMode = 'login', initialInviteCode = '' }: Au
               onChange={setPassword}
               type="password"
               placeholder="••••••••••••"
-              hint="мин. 12 символов"
+              hint="мин. 6 символов"
               autoComplete="new-password"
               onKeyDown={onEnter}
             />

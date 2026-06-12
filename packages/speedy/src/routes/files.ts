@@ -41,6 +41,13 @@ const THUMB_MAX_SIDE = 480
 const THUMB_WEBP_QUALITY = 82
 const THUMB_SOURCE_MAX_BYTES = 25 * 1024 * 1024
 
+// Слишком большие оригиналы ужимаем на месте при finalize: длинная сторона
+// ≤2560px достаточна и для баннеров, и для чата, а хранилище не пухнет от
+// 40-мегапиксельных фото. GIF не трогаем (анимация).
+const ORIGINAL_MAX_SIDE = 2560
+const ORIGINAL_JPEG_QUALITY = 85
+const ORIGINAL_WEBP_QUALITY = 90
+
 function kindFromMime(mime: string): AttachmentKind {
   if (mime.startsWith('image/')) return 'image'
   if (mime.startsWith('video/')) return 'video'
@@ -134,6 +141,38 @@ async function makeThumbnail(file: {
     ContentType: 'image/webp',
   }))
   return thumbKey
+}
+
+/** Ужимает слишком большой оригинал картинки на месте (тот же key, тот же
+    формат). Возвращает новые размеры/вес либо null (не картинка / gif /
+    в пределах лимита / слишком тяжёлый для обработки в памяти). */
+async function downscaleOriginal(file: {
+  key: string
+  contentType: string
+  sizeBytes: number
+}, width: number | null, height: number | null): Promise<{ width: number; height: number; sizeBytes: number } | null> {
+  if (!file.contentType.startsWith('image/')) return null
+  if (file.contentType === 'image/gif') return null
+  if (file.sizeBytes > THUMB_SOURCE_MAX_BYTES) return null
+  if (width === null || height === null) return null
+  if (Math.max(width, height) <= ORIGINAL_MAX_SIDE) return null
+
+  const original = await readFull(file.key)
+  let pipeline = sharp(original)
+    .rotate() // уважаем EXIF-ориентацию фото
+    .resize(ORIGINAL_MAX_SIDE, ORIGINAL_MAX_SIDE, { fit: 'inside', withoutEnlargement: true })
+  if (file.contentType === 'image/png') pipeline = pipeline.png()
+  else if (file.contentType === 'image/webp') pipeline = pipeline.webp({ quality: ORIGINAL_WEBP_QUALITY })
+  else pipeline = pipeline.jpeg({ quality: ORIGINAL_JPEG_QUALITY })
+
+  const { data, info } = await pipeline.toBuffer({ resolveWithObject: true })
+  await s3.send(new PutObjectCommand({
+    Bucket: S3_BUCKET,
+    Key: file.key,
+    Body: data,
+    ContentType: file.contentType,
+  }))
+  return { width: info.width, height: info.height, sizeBytes: data.length }
 }
 
 async function deleteObject(key: string): Promise<void> {
@@ -286,18 +325,33 @@ export const filesRoutes: FastifyPluginAsyncZod = async (app) => {
         }
       }
 
+      // Сильно большие картинки ужимаем на месте — best-effort: при ошибке
+      // остаётся оригинал как есть.
+      let sizeBytes = file.sizeBytes
+      try {
+        const downscaled = await downscaleOriginal(file, width, height)
+        if (downscaled) {
+          width = downscaled.width
+          height = downscaled.height
+          sizeBytes = downscaled.sizeBytes
+          req.log.info({ fileId: id, width, height, sizeBytes }, '[files] oversized image downscaled in place')
+        }
+      } catch (err) {
+        req.log.warn({ err, fileId: id }, '[files] original downscale failed (non-fatal)')
+      }
+
       // Миниатюра для чата — best-effort: при ошибке файл всё равно ready,
       // клиент покажет оригинал.
       let thumbKey: string | null = null
       try {
-        thumbKey = await makeThumbnail(file, width, height)
+        thumbKey = await makeThumbnail({ ...file, sizeBytes }, width, height)
       } catch (err) {
         req.log.warn({ err, fileId: id }, '[files] thumbnail generation failed (non-fatal)')
       }
 
       const updated = await db
         .update(files)
-        .set({ status: 'ready', width, height, thumbKey })
+        .set({ status: 'ready', width, height, thumbKey, sizeBytes })
         .where(eq(files.id, id))
         .returning()
       const fresh = updated[0]

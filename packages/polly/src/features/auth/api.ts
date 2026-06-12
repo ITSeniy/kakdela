@@ -36,7 +36,8 @@ export async function login(email: string, password: string): Promise<void> {
 export async function register(params: {
   inviteCode: string
   username: string
-  displayName: string
+  /** Опционально: имя задаётся на втором шаге, сервер подставит username. */
+  displayName?: string
   email: string
   password: string
 }): Promise<void> {

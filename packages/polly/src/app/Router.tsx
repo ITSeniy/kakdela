@@ -2,6 +2,7 @@ import { useState } from 'react'
 
 import { AuthScreen } from '../features/auth/AuthScreen.js'
 import { OnboardingScreen } from '../features/auth/OnboardingScreen.js'
+import { PROFILE_SETUP_FLAG, ProfileSetupScreen } from '../features/auth/ProfileSetupScreen.js'
 import { useAuthStore } from '../features/auth/store.js'
 import { Shell } from './Shell.js'
 
@@ -27,12 +28,25 @@ function Splash() {
 export function Router() {
   const status = useAuthStore((s) => s.status)
   const [authView, setAuthView] = useState<AuthView>(getInitialAuthView)
+  // Бамп для ре-рендера после завершения шага оформления профиля —
+  // сам флаг живёт в localStorage (ставится при регистрации).
+  const [, setSetupTick] = useState(0)
 
   if (status === 'idle' || status === 'loading') {
     return <Splash />
   }
 
   if (status === 'authed') {
+    if (localStorage.getItem(PROFILE_SETUP_FLAG) === '1') {
+      return (
+        <ProfileSetupScreen
+          onDone={() => {
+            localStorage.removeItem(PROFILE_SETUP_FLAG)
+            setSetupTick((x) => x + 1)
+          }}
+        />
+      )
+    }
     return <Shell />
   }
 

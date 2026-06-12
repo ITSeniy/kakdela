@@ -102,12 +102,14 @@ const usernameSchema = z
   .max(32)
   .regex(/^[a-z0-9_]+$/, 'username: только a-z, 0-9, _')
 
-const passwordSchema = z.string().min(12).max(200)
+const passwordSchema = z.string().min(6).max(200)
 
 export const RegisterRequestSchema = z.object({
   inviteCode: z.string().min(4).max(32),
   username: usernameSchema,
-  displayName: z.string().min(1).max(64),
+  // Имя задаётся на втором шаге регистрации (оформление профиля);
+  // без него сервер подставляет username.
+  displayName: z.string().min(1).max(64).optional(),
   email: z.string().email().max(254),
   password: passwordSchema,
 })
@@ -321,6 +323,9 @@ export const UserProfileSchema = z.object({
   avatarUrl:    z.string().url().nullable(),
   customStatus: z.string().nullable(),
   status:       z.enum(['online', 'idle', 'dnd', 'offline']),
+  about:        z.string().max(512).nullable(),
+  timezone:     z.string().max(64).nullable(),
+  bannerUrl:    z.string().url().nullable(),
   createdAt:    z.string(),
   sharedServers: z.array(SharedServerSchema),
   isSelf:       z.boolean(),
@@ -331,8 +336,11 @@ export const PatchMeRequestSchema = z.object({
   displayName:     z.string().min(1).max(64).optional(),
   customStatus:    z.string().max(128).nullable().optional(),
   avatarUrl:       z.string().url().nullable().optional(),
+  about:           z.string().max(512).nullable().optional(),
+  timezone:        z.string().max(64).nullable().optional(),
+  bannerUrl:       z.string().url().nullable().optional(),
   currentPassword: z.string().min(1).max(200).optional(),
-  newPassword:     z.string().min(12).max(200).optional(),
+  newPassword:     z.string().min(6).max(200).optional(),
 }).refine(
   (v) => (v.newPassword === undefined) === (v.currentPassword === undefined),
   { message: 'newPassword requires currentPassword (and vice versa)', path: ['newPassword'] },

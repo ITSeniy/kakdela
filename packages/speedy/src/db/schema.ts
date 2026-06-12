@@ -35,6 +35,11 @@ export const users = pgTable('users', {
   email:        text('email').notNull().unique(),
   passwordHash: text('password_hash').notNull(),
   avatarUrl:    text('avatar_url'),
+  // Кастомизация профиля (T-089 + баннер): «о себе», IANA-таймзона и
+  // фото-баннер вместо градиента в карточке профиля.
+  about:        text('about'),
+  timezone:     text('timezone'),
+  bannerUrl:    text('banner_url'),
   status:       userStatusEnum('status').notNull().default('offline'),
   customStatus: text('custom_status'),
   createdAt:    timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

@@ -124,7 +124,9 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
       try {
         const rows = await db
           .insert(users)
-          .values({ username, displayName, email, passwordHash })
+          // Имя приходит со второго шага регистрации (PATCH /me); до тех пор
+          // показываем username.
+          .values({ username, displayName: displayName ?? username, email, passwordHash })
           .returning()
         const row = rows[0]
         if (!row) throw new Error('insert into users returned no rows')

@@ -129,6 +129,8 @@ describe('listParticipants', () => {
         joinedAt: new Date(1_700_000_000_000).toISOString(),
         isPublishing: true,
         isScreenSharing: true,
+        // мик-трека нет вовсе → считается замьюченным
+        isMuted: true,
       },
       {
         userId: 'user-2',
@@ -136,6 +138,7 @@ describe('listParticipants', () => {
         joinedAt: new Date(1_700_000_000_000).toISOString(),
         isPublishing: false,
         isScreenSharing: false,
+        isMuted: false,
       },
     ])
   })
