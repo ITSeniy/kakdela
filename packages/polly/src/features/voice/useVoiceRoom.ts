@@ -85,17 +85,41 @@ export function useVoiceRoom(): UseVoiceRoom {
 
   const toggleDeafen = useCallback(async () => {
     const room = getActiveRoom()
-    const { deafened, muted, setDeafened, setMuted } = useVoiceStore.getState()
+    const {
+      deafened, muted, mutedBeforeDeafen,
+      setDeafened, setMuted, setMutedBeforeDeafen,
+    } = useVoiceStore.getState()
     const nextDeafened = !deafened
     setDeafened(nextDeafened)
     applyDeafenVolume(room, nextDeafened)
-    if (nextDeafened && !muted) {
-      setMuted(true)
+    if (nextDeafened) {
+      // Запоминаем, был ли мик заглушен ДО deafen: un-deafen вернёт как было.
+      setMutedBeforeDeafen(muted)
+      if (!muted) {
+        setMuted(true)
+        if (room) {
+          try {
+            await room.localParticipant.setMicrophoneEnabled(false)
+          } catch (err) {
+            console.warn('[voice] mic disable failed on deafen', err)
+          }
+        }
+      }
+    } else if (
+      !mutedBeforeDeafen && muted
+      // В PTT миком управляет только клавиша — un-deafen его не трогает.
+      && useVoiceInputSettings.getState().inputMode !== 'push-to-talk'
+    ) {
+      // Глушили только наушниками — включаем мик обратно. Если мик был
+      // заглушен отдельно до deafen — оставляем заглушенным.
+      setMuted(false)
       if (room) {
         try {
-          await room.localParticipant.setMicrophoneEnabled(false)
+          await room.localParticipant.setMicrophoneEnabled(true, audioCaptureOptions())
         } catch (err) {
-          console.warn('[voice] mic disable failed on deafen', err)
+          const name = err instanceof Error ? err.name : ''
+          const code = name === 'NotAllowedError' ? 'no-mic-permission' : 'mic-toggle-failed'
+          useVoiceStore.getState().setError(code)
         }
       }
     }

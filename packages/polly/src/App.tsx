@@ -10,6 +10,7 @@ import { ConnectionBanner } from './components/ConnectionBanner.js'
 import { Toaster } from './components/toast/index.js'
 import { initAuth } from './features/auth/api.js'
 import { useAuthStore } from './features/auth/store.js'
+import { useMyStatus } from './features/presence/store.js'
 import { ProfileModal } from './features/profile/ProfileModal.js'
 import { CreateServerModal } from './features/servers/CreateServerModal.js'
 import { JoinServerModal } from './features/servers/JoinServerModal.js'
@@ -57,6 +58,17 @@ export function App() {
       }
     })
   }, [queryClient, setSession])
+
+  // Сервер при каждом коннекте принудительно ставит presence=online. Если
+  // пользователь выбрал «отошёл»/«не беспокоить» — восстанавливаем после
+  // ready (срабатывает и на первом коннекте, и на реконнектах).
+  useEffect(() => {
+    return wsClient.on((event) => {
+      if (event.t !== 'ready') return
+      const myStatus = useMyStatus.getState().myStatus
+      if (myStatus !== 'online') wsClient.send({ t: 'presence', status: myStatus })
+    })
+  }, [])
 
   // Logout / token revocation — гарантируем выход из голоса перед очисткой
   // auth state, чтобы не остался зомби-участник в LiveKit под именем

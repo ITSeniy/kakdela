@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
 
 import type { VoiceParticipantPublic } from '@kakdela/ginzu/api-types'
 
@@ -17,6 +18,10 @@ interface VoiceState {
   status: VoiceStatus
   muted: boolean
   deafened: boolean
+  // Был ли мик заглушен отдельно ДО deafen. Un-deafen возвращает мик в это
+  // состояние: глушили только наушниками — мик включится обратно, глушили
+  // мик отдельно — останется заглушенным (Discord-семантика).
+  mutedBeforeDeafen: boolean
   screenSharing: boolean
   // PTT — пользователь сейчас удерживает hotkey. Только в memory: при
   // перезапуске сам по себе не «зажат».
@@ -36,6 +41,7 @@ interface VoiceActions {
   setActiveChannelId(id: string | null): void
   setMuted(muted: boolean): void
   setDeafened(deafened: boolean): void
+  setMutedBeforeDeafen(m: boolean): void
   setScreenSharing(s: boolean): void
   setPinnedScreenUserId(id: string | null): void
   setPttHolding(holding: boolean): void
@@ -51,6 +57,7 @@ const initialState: VoiceState = {
   status: 'idle',
   muted: false,
   deafened: false,
+  mutedBeforeDeafen: false,
   screenSharing: false,
   pttHolding: false,
   participants: new Map(),
@@ -80,17 +87,23 @@ function cancelAllSpeakerOffs(): void {
   pendingSpeakerOff.clear()
 }
 
-export const useVoiceStore = create<VoiceState & VoiceActions>()((set) => ({
+export const useVoiceStore = create<VoiceState & VoiceActions>()(persist((set) => ({
   ...initialState,
 
   reset() {
     cancelAllSpeakerOffs()
     // Не сохраняем error/lastChannel — это идеальная очистка после leave.
-    set({
+    // muted/deafened — пользовательские тумблеры (UserBar/VoiceControls),
+    // они переживают сессию как в Discord: заглушился — останешься
+    // заглушённым и в следующем звонке.
+    set((state) => ({
       ...initialState,
+      muted: state.muted,
+      deafened: state.deafened,
+      mutedBeforeDeafen: state.mutedBeforeDeafen,
       participants: new Map(),
       activeSpeakers: new Set(),
-    })
+    }))
   },
 
   setStatus(status) {
@@ -111,6 +124,10 @@ export const useVoiceStore = create<VoiceState & VoiceActions>()((set) => ({
 
   setDeafened(deafened) {
     set({ deafened })
+  },
+
+  setMutedBeforeDeafen(m) {
+    set({ mutedBeforeDeafen: m })
   },
 
   setScreenSharing(s) {
@@ -213,4 +230,13 @@ export const useVoiceStore = create<VoiceState & VoiceActions>()((set) => ({
     }
     set({ participants: next, activeSpeakers: new Set() })
   },
+}), {
+  name: 'kd:voice:prefs',
+  // Персистим только пользовательские тумблеры — остальное session-state
+  // (Map/Set участников всё равно несериализуемы).
+  partialize: (s) => ({
+    muted: s.muted,
+    deafened: s.deafened,
+    mutedBeforeDeafen: s.mutedBeforeDeafen,
+  }),
 }))
