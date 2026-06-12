@@ -25,7 +25,7 @@ import {
   checkMagicBytes,
   isAllowedMime,
 } from '../lib/file-validation.js'
-import { S3_BUCKET, S3_ENDPOINT, s3 } from '../lib/s3.js'
+import { S3_BUCKET, S3_PUBLIC_ENDPOINT, s3, s3Public } from '../lib/s3.js'
 import { uuidv7 } from '../lib/uuidv7.js'
 
 const PRESIGN_TTL_SECONDS = 300
@@ -52,7 +52,7 @@ function kindFromMime(mime: string): AttachmentKind {
 }
 
 function publicUrlFor(key: string): string {
-  return `${S3_ENDPOINT}/${S3_BUCKET}/${key}`
+  return `${S3_PUBLIC_ENDPOINT}/${S3_BUCKET}/${key}`
 }
 
 export function toAttachment(row: {
@@ -192,7 +192,7 @@ export const filesRoutes: FastifyPluginAsyncZod = async (app) => {
         ContentLength: size,
       })
 
-      const uploadUrl = await getSignedUrl(s3, command, {
+      const uploadUrl = await getSignedUrl(s3Public, command, {
         expiresIn: PRESIGN_TTL_SECONDS,
         // Иначе SDK подписывает host-заголовок, который браузер вычисляет
         // отдельно, и MinIO бьёт SignatureMismatch.

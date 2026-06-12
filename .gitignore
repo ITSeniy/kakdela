@@ -1,10 +1,13 @@
 # Зависимости
 node_modules/
 
-# Секреты — только .env.example идёт в репозиторий
+# Секреты — только .env.example / .env.prod.example идут в репозиторий
 .env
 .env.local
 .env.*.local
+.env.production
+ops/livekit/livekit.prod.yaml
+ops/backup/id_*
 
 # Сборка
 dist/

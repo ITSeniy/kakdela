@@ -1,6 +1,10 @@
 # Продовская инфра-плоскость КакДела (postgres / redis / minio / livekit
 # + backup-cron). Сам speedy (backend) и caddy reverse-proxy запускаются
-# отдельно — этим compose'ом мы НЕ управляем приложением, только данными.
+# отдельным docker-compose.app.yml — этим compose'ом мы НЕ управляем
+# приложением, только данными. Оба compose'а живут в общей docker-сети
+# kd-net (создаётся этим файлом, app-compose подключается как external).
+#
+# Полная инструкция деплоя на VPS: docs/DEPLOY.md
 # По сравнению с dev-compose'ом:
 #   • Сервисы СЛУШАЮТ только на внутренней docker-сети (кроме livekit —
 #     ему нужен UDP-доступ снаружи).
@@ -80,12 +84,14 @@ services:
     restart: unless-stopped
     command: ["--config", "/etc/livekit.yaml"]
     volumes:
-      - ./ops/livekit/livekit.yaml:/etc/livekit.yaml:ro
+      # livekit.prod.yaml создаётся из livekit.prod.example.yaml (не в git!)
+      - ./ops/livekit/livekit.prod.yaml:/etc/livekit.yaml:ro
+    # 7880 (signaling) наружу НЕ публикуем — он ходит через caddy по WSS
+    # (https://<домен>/livekit). Наружу нужны только медиа-порты.
     ports:
-      - "7880:7880"
-      - "7881:7881"
-      - "7882:7882/udp"
-      - "50000-50100:50000-50100/udp"
+      - "7881:7881"                      # ICE/TCP fallback
+      - "7882:7882/udp"                  # UDP mux
+      - "50000-50100:50000-50100/udp"    # RTP media
 
   # ─── Backups: cron + pg_dump + mc + rsync ─────────────────────────────
   #
@@ -136,3 +142,8 @@ volumes:
   kd-redis:
   kd-minio:
   kd-backups:
+
+# Именованная сеть, общая с docker-compose.app.yml (speedy + caddy).
+networks:
+  default:
+    name: kd-net

@@ -48,6 +48,8 @@ pnpm --filter @kakdela/speedy db:generate   # drizzle-kit generate
 pnpm --filter @kakdela/speedy db:studio     # drizzle-kit studio
 ```
 
+**VPS deploy**: full guide in `docs/DEPLOY.md`. Two compose files on a shared `kd-net` network: `docker-compose.prod.yml` (data: postgres/redis/minio/livekit/backup) + `docker-compose.app.yml` (speedy + caddy with the web client baked in). Secrets template: `.env.prod.example`; LiveKit config template: `ops/livekit/livekit.prod.example.yaml`. The speedy image runs on tsx (not compiled dist — ginzu exports TS sources) and bundles francine for migrations/seeding.
+
 ---
 
 ## Architecture

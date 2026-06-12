@@ -1,0 +1,43 @@
+# Шаблон прод-конфига LiveKit. Скопируй и заполни секреты:
+#   cp ops/livekit/livekit.prod.example.yaml ops/livekit/livekit.prod.yaml
+#
+# livekit.prod.yaml в .gitignore — реальные ключи не коммитим.
+#
+# ВАЖНО: ключ/секрет здесь и LIVEKIT_API_KEY / LIVEKIT_API_SECRET в .env
+# должны совпадать. Секрет — минимум 32 символа: openssl rand -hex 32
+
+port: 7880
+bind_addresses:
+  - ""
+
+rtc:
+  tcp_port: 7881
+  port_range_start: 50000
+  port_range_end: 50100
+  # На VPS LiveKit сам определяет публичный IP через STUN и рекламирует его
+  # в ICE-кандидатах. Без этого клиенты получат недостижимый docker-IP.
+  use_external_ip: true
+
+# REPLACE: тот же ключ → LIVEKIT_API_KEY, тот же секрет → LIVEKIT_API_SECRET
+keys:
+  kdprod: "REPLACE_WITH_openssl_rand_hex_32"
+
+log_level: info
+
+# Webhook'и летят в speedy по внутренней docker-сети kd-net.
+# api_key — имя ключа из `keys` выше.
+webhook:
+  api_key: kdprod
+  urls:
+    - http://speedy:3001/api/internal/livekit-webhook
+
+room:
+  auto_create: true
+  empty_timeout: 300
+  max_participants: 25
+
+# TURN выключен: для теста хватает прямого UDP (порты открыты на VPS) и
+# TCP-fallback'а на 7881. Если у кого-то из друзей злой корпоративный NAT —
+# включить и выдать отдельный домен с TLS (см. доку LiveKit).
+turn:
+  enabled: false

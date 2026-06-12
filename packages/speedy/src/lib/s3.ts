@@ -19,10 +19,27 @@ export const s3 = new S3Client({
   forcePathStyle: true,
 })
 
+/**
+ * Клиент для presigned URL, которые исполняет браузер/Tauri. Подпись SigV4
+ * включает host — поэтому подписывать нужно тем endpoint'ом, по которому
+ * реально пойдёт запрос клиента (S3_PUBLIC_ENDPOINT), а не внутренним.
+ * Серверные операции (GetObject, PutObject миниатюр) остаются на `s3`.
+ */
+export const s3Public = new S3Client({
+  endpoint: env.S3_PUBLIC_ENDPOINT ?? env.S3_ENDPOINT,
+  region: env.S3_REGION,
+  credentials: {
+    accessKeyId: env.S3_ACCESS_KEY,
+    secretAccessKey: env.S3_SECRET_KEY,
+  },
+  forcePathStyle: true,
+})
+
 export const S3_BUCKET = env.S3_BUCKET
 export const S3_EMOJI_BUCKET = env.S3_EMOJI_BUCKET
 export const S3_ENDPOINT = env.S3_ENDPOINT
+export const S3_PUBLIC_ENDPOINT = env.S3_PUBLIC_ENDPOINT ?? env.S3_ENDPOINT
 
 export function emojiPublicUrl(key: string): string {
-  return `${S3_ENDPOINT}/${S3_EMOJI_BUCKET}/${key}`
+  return `${S3_PUBLIC_ENDPOINT}/${S3_EMOJI_BUCKET}/${key}`
 }

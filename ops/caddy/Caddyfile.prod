@@ -1,0 +1,44 @@
+# Прод-Caddyfile. Запекается в образ kd-caddy (ops/caddy/Dockerfile).
+# KD_DOMAIN приходит из environment контейнера (docker-compose.app.yml → .env).
+# TLS-сертификаты Caddy получает сам у Let's Encrypt — нужны только
+# A-записи KD_DOMAIN и s3.KD_DOMAIN на IP VPS и открытые 80/443.
+
+{$KD_DOMAIN} {
+	encode zstd gzip
+
+	# REST API
+	handle /api/* {
+		reverse_proxy speedy:3001
+	}
+
+	# WebSocket-gateway
+	handle /ws {
+		reverse_proxy speedy:3001
+	}
+
+	# Health-проба (удобно для uptime-мониторинга)
+	handle /healthz {
+		reverse_proxy speedy:3001
+	}
+
+	# LiveKit: signaling (WSS) и twirp-API от speedy. Медиа (UDP/RTP)
+	# идёт мимо Caddy — напрямую в контейнер livekit, см. порты
+	# в docker-compose.prod.yml.
+	handle /livekit/* {
+		uri strip_prefix /livekit
+		reverse_proxy livekit:7880
+	}
+
+	# Web-клиент (SPA): всё остальное — статика с fallback на index.html
+	handle {
+		root * /srv/web
+		try_files {path} /index.html
+		file_server
+	}
+}
+
+# MinIO на отдельном поддомене — presigned-подписи (SigV4) включают host
+# и путь, path-prefix на основном домене сломал бы их.
+s3.{$KD_DOMAIN} {
+	reverse_proxy minio:9000
+}

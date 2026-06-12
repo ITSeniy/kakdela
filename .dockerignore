@@ -1,0 +1,24 @@
+# Контекст docker-сборок — корень репозитория (Dockerfile'ы speedy и caddy).
+# Без этого файла в контекст утекают гигабайты: target/ от Rust, node_modules.
+
+node_modules
+**/node_modules
+**/dist
+packages/polly/src-tauri/target
+
+.git
+.claude
+
+# Секреты не должны попадать в слои образа — конфиг приходит через
+# environment в docker compose.
+.env
+.env.*
+!.env.example
+!.env.prod.example
+packages/polly/.env*
+ops/livekit/livekit.prod.yaml
+ops/backup/id_*
+
+designs
+tasks
+*.log

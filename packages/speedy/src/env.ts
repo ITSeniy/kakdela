@@ -21,6 +21,10 @@ const EnvSchema = z.object({
   LIVEKIT_API_SECRET: z.string(),
 
   S3_ENDPOINT: z.string(),
+  // Endpoint, который видят КЛИЕНТЫ (presigned PUT, public GET). На VPS speedy
+  // ходит в MinIO по docker-сети (http://minio:9000), а браузеру/Tauri нужен
+  // публичный https-адрес (https://s3.<домен>). Не задан → равен S3_ENDPOINT.
+  S3_PUBLIC_ENDPOINT: z.string().optional(),
   S3_REGION: z.string().default('us-east-1'),
   S3_BUCKET: z.string().default('kakdela'),
   S3_EMOJI_BUCKET: z.string().default('kakdela-emoji'),

@@ -1,0 +1,66 @@
+# Прод-плоскость ПРИЛОЖЕНИЯ: speedy (backend) + caddy (TLS, reverse-proxy,
+# статика web-клиента). Данные (postgres/redis/minio/livekit/backup) живут
+# в docker-compose.prod.yml — подними его ПЕРВЫМ, он создаёт сеть kd-net.
+#
+# Порядок на VPS (детали — docs/DEPLOY.md):
+#   docker compose -f docker-compose.prod.yml up -d
+#   docker compose -f docker-compose.app.yml build
+#   docker compose -f docker-compose.app.yml run --rm speedy pnpm francine migrate
+#   docker compose -f docker-compose.app.yml up -d
+#
+# Разделение на два compose'а намеренное: app можно пересобирать/рестартовать,
+# не трогая контейнеры с данными.
+
+services:
+  speedy:
+    build:
+      context: .
+      dockerfile: packages/speedy/Dockerfile
+    image: kakdela/speedy:latest
+    container_name: kd-speedy
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NODE_ENV: production
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3001/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    # Порты наружу не публикуем — снаружи к speedy ходят только через caddy.
+
+  caddy:
+    build:
+      context: .
+      dockerfile: ops/caddy/Dockerfile
+      args:
+        VITE_SPEEDY_URL: ${VITE_SPEEDY_URL:?set VITE_SPEEDY_URL in .env}
+        VITE_SPEEDY_WS_URL: ${VITE_SPEEDY_WS_URL:?set VITE_SPEEDY_WS_URL in .env}
+        VITE_LIVEKIT_URL: ${VITE_LIVEKIT_URL:?set VITE_LIVEKIT_URL in .env}
+    image: kakdela/caddy:latest
+    container_name: kd-caddy
+    restart: unless-stopped
+    depends_on:
+      - speedy
+    environment:
+      KD_DOMAIN: ${KD_DOMAIN:?set KD_DOMAIN in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"   # HTTP/3
+    volumes:
+      # Сертификаты Let's Encrypt и состояние Caddy — переживают пересборку.
+      - kd-caddy-data:/data
+      - kd-caddy-config:/config
+
+volumes:
+  kd-caddy-data:
+  kd-caddy-config:
+
+# Сеть создаёт docker-compose.prod.yml (data-плоскость) — без неё app
+# не стартует, и это правильно: сначала данные, потом приложение.
+networks:
+  default:
+    name: kd-net
+    external: true

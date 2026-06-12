@@ -34,7 +34,13 @@ async function main() {
   app.setValidatorCompiler(validatorCompiler)
   app.setSerializerCompiler(serializerCompiler)
 
-  await app.register(cors, { origin: env.PUBLIC_ORIGIN, credentials: true })
+  // Кроме PUBLIC_ORIGIN (web-клиент) разрешаем origin'ы Tauri-webview:
+  // в собранном desktop-клиенте страница живёт не на нашем домене, а на
+  // http://tauri.localhost (Windows) / tauri://localhost (macOS, Linux).
+  await app.register(cors, {
+    origin: [env.PUBLIC_ORIGIN, 'http://tauri.localhost', 'tauri://localhost'],
+    credentials: true,
+  })
   await app.register(cookie)
   await app.register(rateLimit, {
     global: false,

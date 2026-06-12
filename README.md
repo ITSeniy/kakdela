@@ -116,6 +116,6 @@ pizza-parlor/
 
 ## Производство
 
-Прод-деплой описан в `ops/`. Минимум: один VPS 2 vCPU / 4 GB, Caddy спереди, всё в docker-compose. См. §3.4 архитектурного документа.
+Пошаговая инструкция деплоя на VPS — **[docs/DEPLOY.md](docs/DEPLOY.md)**. Минимум: один VPS 2 vCPU / 2 GB, Caddy спереди, всё в docker-compose (`docker-compose.prod.yml` — данные, `docker-compose.app.yml` — приложение). Конфиги прокси/LiveKit/бэкапов — в `ops/`.
 
 Для Windows-инсталлятора: `pnpm --filter @kakdela/polly tauri build` соберёт `.msi` в `packages/polly/src-tauri/target/release/bundle/msi/`. Code signing — отдельная история, для группы друзей можно жить без подписи, но SmartScreen будет ругаться при первом запуске.
