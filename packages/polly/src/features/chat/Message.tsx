@@ -234,6 +234,15 @@ export function Message({
   const time = fmtTime(message.createdAt)
   const opacityCls = pendingStatus === 'sending' ? 'opacity-60' : ''
 
+  // Контекст для шапки лайтбокса: кто, где и когда отправил картинку.
+  const lightboxContext = {
+    authorName: name,
+    authorAvatarUrl: member?.avatarUrl ?? null,
+    channelName: channelMap.get(message.channelId)?.name,
+    messageId: message.id,
+    createdAt: message.createdAt,
+  }
+
   function copyContent() {
     if (navigator.clipboard) void navigator.clipboard.writeText(message.content)
   }
@@ -434,7 +443,7 @@ export function Message({
         </div>
         {(msgAttachments.length > 0 || msgThread !== null || reactionsEl !== null) && (
           <div className="pl-11">
-            {msgAttachments.length > 0 && <AttachmentList attachments={msgAttachments} />}
+            {msgAttachments.length > 0 && <AttachmentList attachments={msgAttachments} lightboxContext={lightboxContext} />}
             <ThreadBadge />
             {reactionsEl}
           </div>
@@ -468,7 +477,7 @@ export function Message({
               ошибка · повторить?
             </button>
           )}
-          {msgAttachments.length > 0 && <AttachmentList attachments={msgAttachments} />}
+          {msgAttachments.length > 0 && <AttachmentList attachments={msgAttachments} lightboxContext={lightboxContext} />}
           <ThreadBadge />
           {reactionsEl}
         </div>
@@ -522,7 +531,7 @@ export function Message({
               )}
             </div>
           )}
-          {msgAttachments.length > 0 && <AttachmentList attachments={msgAttachments} />}
+          {msgAttachments.length > 0 && <AttachmentList attachments={msgAttachments} lightboxContext={lightboxContext} />}
           <ThreadBadge />
           {reactionsEl}
         </div>

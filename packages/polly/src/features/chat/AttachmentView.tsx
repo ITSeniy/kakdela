@@ -4,11 +4,13 @@ import type { Attachment } from '@kakdela/ginzu/api-types'
 
 import { Icon } from '../../components/Icon.js'
 import { openExternal } from '../../lib/host/shell.js'
-import { Lightbox } from './Lightbox.js'
+import { Lightbox, type LightboxContext } from './Lightbox.js'
 import { formatBytes } from './formatBytes.js'
 
 interface AttachmentListProps {
   attachments: Attachment[]
+  /** Контекст сообщения для шапки лайтбокса (автор, канал, дата, jump). */
+  lightboxContext?: LightboxContext
 }
 
 /** EXT для плашки карточки файла: расширение из имени, максимум 4 символа. */
@@ -102,7 +104,7 @@ function FileCard({ attachment }: { attachment: Attachment }) {
   )
 }
 
-export function AttachmentList({ attachments }: AttachmentListProps) {
+export function AttachmentList({ attachments, lightboxContext }: AttachmentListProps) {
   const [lightboxIdx, setLightboxIdx] = useState<number | null>(null)
   if (attachments.length === 0) return null
 
@@ -132,6 +134,7 @@ export function AttachmentList({ attachments }: AttachmentListProps) {
           images={images}
           startIndex={lightboxIdx}
           onClose={() => setLightboxIdx(null)}
+          context={lightboxContext}
         />
       )}
     </div>
