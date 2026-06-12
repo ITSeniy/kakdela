@@ -6,9 +6,6 @@ import type { User, UserProfile } from '@kakdela/ginzu/api-types'
 import { ApiError } from '../../lib/api.js'
 import { useAuthStore } from '../auth/store.js'
 import { uploadAttachment } from '../files/upload.js'
-import { DensityPicker } from '../settings/DensityPicker.js'
-import { ThemePicker } from '../settings/ThemePicker.js'
-import { VoiceSettings } from '../settings/VoiceSettings.js'
 import { Avatar } from '../../components/Avatar.js'
 import { Field } from '../../components/form/Field.js'
 import { AvatarCropper } from './AvatarCropper.js'
@@ -17,7 +14,8 @@ import { patchMe } from './api.js'
 interface ProfileEditFormProps {
   profile: UserProfile
   onSaved: (user: User) => void
-  onCancel: () => void
+  /** Без onCancel кнопка «отмена» не рендерится (страница настроек). */
+  onCancel?: () => void
 }
 
 const INPUT_CLS =
@@ -163,16 +161,6 @@ export function ProfileEditForm({ profile, onSaved, onCancel }: ProfileEditFormP
         />
       </Field>
 
-      <Field label="тема" hint="следуем системе или фиксируем вручную">
-        <ThemePicker />
-      </Field>
-
-      <Field label="плотность сообщений" hint="как группировать сообщения в чате">
-        <DensityPicker />
-      </Field>
-
-      <VoiceSettings />
-
       <Field label="смена пароля" hint="требуется текущий пароль; смена сбрасывает все сессии">
         <div className="flex flex-col gap-2.5">
           <input
@@ -209,13 +197,15 @@ export function ProfileEditForm({ profile, onSaved, onCancel }: ProfileEditFormP
       )}
 
       <div className="flex items-center justify-end gap-2 pt-2 border-t border-kd-border">
-        <button
-          type="button"
-          onClick={onCancel}
-          className="px-4 py-1.5 rounded border border-kd-border text-[12px] font-mono text-kd-text-soft hover:text-kd-text"
-        >
-          отмена
-        </button>
+        {onCancel && (
+          <button
+            type="button"
+            onClick={onCancel}
+            className="px-4 py-1.5 rounded border border-kd-border text-[12px] font-mono text-kd-text-soft hover:text-kd-text"
+          >
+            отмена
+          </button>
+        )}
         <button
           type="button"
           onClick={() => void save()}

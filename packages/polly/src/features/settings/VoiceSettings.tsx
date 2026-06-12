@@ -45,15 +45,18 @@ function KeyCapture({
     function onKey(ev: KeyboardEvent) {
       if (ev.code === 'Escape') {
         ev.preventDefault()
+        // Не отдаём Esc дальше — иначе закроется и экран настроек под нами.
+        ev.stopPropagation()
         onCancel()
         return
       }
       if (RESERVED_KEYS.has(ev.code)) return
       ev.preventDefault()
+      ev.stopPropagation()
       onConfirm(ev.code)
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
   }, [onCancel, onConfirm])
 
   return (

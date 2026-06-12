@@ -24,7 +24,7 @@ import {
   patchChannel,
   type ServerDetail,
 } from '../servers/api.js'
-import { useServerSettingsUi } from '../settings/store.js'
+import { useSettingsUi } from '../settings/store.js'
 import { ThreadList } from '../threads/ThreadList.js'
 import { applyParticipantVolume, toggleLocalParticipantMute } from '../../lib/livekit.js'
 import { moderateVoice } from '../voice/api.js'
@@ -219,7 +219,7 @@ export function ChannelList({ serverId, activeChannelId }: ChannelListProps) {
   const [, navigate] = useLocation()
   const queryClient = useQueryClient()
   const [collapsedCats, setCollapsedCats] = useState<Set<string>>(new Set())
-  const openServerSettings = useServerSettingsUi((s) => s.open)
+  const openSettings = useSettingsUi((s) => s.open)
   const userId = useAuthStore((s) => s.user?.id)
 
   // Меню действий сервера (шапка) + модалка создания канала/категории.
@@ -638,14 +638,14 @@ export function ChannelList({ serverId, activeChannelId }: ChannelListProps) {
             {canManage && (
               <ServerMenuItem
                 glyph={<span className="text-kd-warm">↪</span>}
-                onClick={() => { setMenuOpen(false); openServerSettings(serverId, 'invites') }}
+                onClick={() => { setMenuOpen(false); openSettings('server-invites', serverId) }}
               >
                 пригласить на сервер
               </ServerMenuItem>
             )}
             <ServerMenuItem
               glyph={<Icon.Settings size={12} className="text-kd-text-mute" />}
-              onClick={() => { setMenuOpen(false); openServerSettings(serverId) }}
+              onClick={() => { setMenuOpen(false); openSettings('server-overview', serverId) }}
             >
               настройки сервера
             </ServerMenuItem>

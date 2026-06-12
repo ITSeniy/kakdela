@@ -9,9 +9,9 @@ import type { UserProfile } from '@kakdela/ginzu/api-types'
 import { ApiError } from '../../lib/api.js'
 import { Avatar } from '../../components/Avatar.js'
 import { Modal } from '../../components/Modal.js'
+import { useSettingsUi } from '../settings/store.js'
 import { getUserProfile } from './api.js'
 import { useProfileUi } from './store.js'
-import { ProfileEditForm } from './ProfileEditForm.js'
 
 const STATUS_LABEL: Record<UserProfile['status'], string> = {
   online:  'в сети',
@@ -50,11 +50,18 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 function ReadView({ profile }: { profile: UserProfile }) {
   const [, navigate] = useLocation()
   const close = useProfileUi((s) => s.close)
-  const setEditing = useProfileUi((s) => s.setEditing)
+  const openSettings = useSettingsUi((s) => s.open)
 
   function openDm() {
     close()
     navigate(`/dm/with/${profile.id}`)
+  }
+
+  // Редактирование живёт в полноэкранных настройках («аккаунт → мой профиль»);
+  // отсюда — только ссылка туда.
+  function openProfileSettings() {
+    close()
+    openSettings('profile')
   }
 
   return (
@@ -80,10 +87,10 @@ function ReadView({ profile }: { profile: UserProfile }) {
         {profile.isSelf ? (
           <button
             type="button"
-            onClick={() => setEditing(true)}
+            onClick={openProfileSettings}
             className="px-2.5 py-[5px] mb-1 rounded bg-kd-panel-alt border border-kd-border text-[11px] font-mono font-semibold text-kd-text hover:bg-kd-panel-hi shrink-0"
           >
-            редактировать
+            ⚙ настройки профиля
           </button>
         ) : (
           <button
@@ -143,9 +150,7 @@ function ReadView({ profile }: { profile: UserProfile }) {
 
 export function ProfileModal() {
   const openUserId = useProfileUi((s) => s.openUserId)
-  const editing = useProfileUi((s) => s.editing)
   const close = useProfileUi((s) => s.close)
-  const setEditing = useProfileUi((s) => s.setEditing)
 
   const enabled = openUserId !== null
   const { data: profile, isLoading, error } = useQuery({
@@ -179,16 +184,7 @@ export function ProfileModal() {
         {errorMsg && !profile && (
           <div className="p-8 text-center text-kd-danger font-mono text-[11px]">{errorMsg}</div>
         )}
-        {profile && !editing && <ReadView profile={profile} />}
-        {profile && editing && profile.isSelf && (
-          <div className="px-[18px] py-4">
-            <ProfileEditForm
-              profile={profile}
-              onSaved={() => setEditing(false)}
-              onCancel={() => setEditing(false)}
-            />
-          </div>
-        )}
+        {profile && <ReadView profile={profile} />}
       </div>
     </Modal>
   )

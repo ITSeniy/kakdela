@@ -15,7 +15,7 @@ import { useMyStatus } from './features/presence/store.js'
 import { ProfileModal } from './features/profile/ProfileModal.js'
 import { CreateServerModal } from './features/servers/CreateServerModal.js'
 import { JoinServerModal } from './features/servers/JoinServerModal.js'
-import { ServerSettingsModal } from './features/settings/ServerSettingsModal.js'
+import { SettingsScreen } from './features/settings/SettingsScreen.js'
 import { CreateThreadDialog } from './features/threads/CreateThreadDialog.js'
 import { useVoiceModerationSync } from './features/voice/moderationSync.js'
 import { leaveVoiceRoom } from './features/voice/useVoiceRoom.js'
@@ -121,8 +121,8 @@ export function App() {
   return (
     <>
       <Router />
+      <SettingsScreen />
       <ProfileModal />
-      <ServerSettingsModal />
       <CreateServerModal />
       <JoinServerModal />
       <CreateThreadDialog />

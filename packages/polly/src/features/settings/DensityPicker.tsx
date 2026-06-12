@@ -1,5 +1,7 @@
 // Переключатель плотности сообщений (designs/final-settings.jsx → блок
-// «плотность»): сегменты в одну строку, активный — accent.
+// «плотность»): сегменты в общей панели, активный — panel-hi. Заливка
+// акцентом здесь не используется: тёмный --kd-accent светлый (он для текста
+// и обводок), и залитый им сегмент выглядит блёкло.
 
 import { useChatDisplaySettings, type ChatDensity } from '../chat/displaySettings.js'
 
@@ -13,7 +15,11 @@ export function DensityPicker() {
   const setDensity = useChatDisplaySettings((s) => s.setDensity)
 
   return (
-    <div role="radiogroup" aria-label="плотность сообщений" className="grid grid-cols-2 gap-2">
+    <div
+      role="radiogroup"
+      aria-label="плотность сообщений"
+      className="flex bg-kd-panel border border-kd-border rounded-kd p-[3px] gap-0.5"
+    >
       {OPTIONS.map((opt) => {
         const active = opt.value === density
         return (
@@ -24,16 +30,14 @@ export function DensityPicker() {
             aria-checked={active}
             onClick={() => setDensity(opt.value)}
             className={[
-              'px-3 py-2 rounded-kd border text-left transition-colors',
-              active
-                ? 'border-kd-accent bg-kd-accent text-white'
-                : 'border-kd-border bg-kd-panel text-kd-text hover:bg-kd-panel-hi',
+              'flex-1 px-2.5 py-2 rounded text-center transition-colors',
+              active ? 'bg-kd-panel-hi' : 'hover:bg-kd-panel-soft',
             ].join(' ')}
           >
-            <div className="text-[12px] font-semibold">{opt.label}</div>
-            <div className={`text-[10px] font-mono ${active ? 'text-white/75' : 'text-kd-text-mute'}`}>
-              {opt.hint}
+            <div className={`text-[12px] font-semibold ${active ? 'text-kd-text' : 'text-kd-text-soft'}`}>
+              {opt.label}
             </div>
+            <div className="text-[10px] font-mono text-kd-text-mute mt-0.5">{opt.hint}</div>
           </button>
         )
       })}

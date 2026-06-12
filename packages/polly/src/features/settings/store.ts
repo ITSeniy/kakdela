@@ -1,23 +1,40 @@
 import { create } from 'zustand'
 
-export type ServerSettingsTab = 'general' | 'emoji' | 'invites' | 'audit'
+// Страницы полноэкранных настроек (designs/final-settings.jsx → KD_SetNav).
+// Группа «сервер» доступна, только когда настройки открыты с serverId.
+export type SettingsPage =
+  | 'server-overview'
+  | 'server-emoji'
+  | 'server-members'
+  | 'server-invites'
+  | 'server-audit'
+  | 'profile'
+  | 'notifications'
+  | 'appearance'
+  | 'voice'
+  | 'shortcuts'
 
-interface ServerSettingsUiState {
-  /** id сервера, чью админ-панель открыли. null — закрыто. */
-  openServerId: string | null
-  tab:          ServerSettingsTab
+interface SettingsUiState {
+  isOpen: boolean
+  page: SettingsPage
+  /** Сервер, чья группа «сервер» показана в навигации. null — только аккаунт. */
+  serverId: string | null
 }
 
-interface ServerSettingsUiActions {
-  open(serverId: string, tab?: ServerSettingsTab): void
+interface SettingsUiActions {
+  open(page?: SettingsPage, serverId?: string | null): void
   close(): void
-  setTab(tab: ServerSettingsTab): void
+  setPage(page: SettingsPage): void
 }
 
-export const useServerSettingsUi = create<ServerSettingsUiState & ServerSettingsUiActions>()((set) => ({
-  openServerId: null,
-  tab:          'general',
-  open(serverId, tab) { set({ openServerId: serverId, tab: tab ?? 'general' }) },
-  close()             { set({ openServerId: null }) },
-  setTab(tab)         { set({ tab }) },
+export const useSettingsUi = create<SettingsUiState & SettingsUiActions>()((set) => ({
+  isOpen: false,
+  page: 'profile',
+  serverId: null,
+  // С serverId — серверные настройки (только группа «сервер»), без — личные.
+  open(page, serverId) {
+    set({ isOpen: true, page: page ?? 'profile', serverId: serverId ?? null })
+  },
+  close() { set({ isOpen: false }) },
+  setPage(page) { set({ page }) },
 }))

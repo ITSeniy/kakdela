@@ -14,7 +14,7 @@ import {
   listMembers,
   patchServer,
 } from '../servers/api.js'
-import { useServerSettingsUi } from './store.js'
+import { useSettingsUi } from './store.js'
 
 interface GeneralSettingsProps {
   serverId: string
@@ -22,7 +22,7 @@ interface GeneralSettingsProps {
 
 export function GeneralSettings({ serverId }: GeneralSettingsProps) {
   const queryClient = useQueryClient()
-  const closeSettings = useServerSettingsUi((s) => s.close)
+  const closeSettings = useSettingsUi((s) => s.close)
   const [, navigate] = useLocation()
   const userId = useAuthStore((s) => s.user?.id)
 

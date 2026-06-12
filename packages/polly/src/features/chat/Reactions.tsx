@@ -27,7 +27,17 @@ export function ReactionEmoji({ emoji, emojiMap }: { emoji: string; emojiMap?: R
 
 export function Reactions({ messageId, reactions, currentUserId, memberMap, emojiMap, onAdd, onRemove }: ReactionsProps) {
   const [pickerOpen, setPickerOpen] = useState(false)
+  // Вверх по умолчанию; у верха экрана места под picker (~435px) нет — вниз.
+  const [pickerUp, setPickerUp] = useState(true)
   const pickerContainerRef = useRef<HTMLDivElement>(null)
+
+  function togglePicker() {
+    if (!pickerOpen) {
+      const top = pickerContainerRef.current?.getBoundingClientRect().top ?? 0
+      setPickerUp(top > 450)
+    }
+    setPickerOpen((o) => !o)
+  }
 
   const customList = useMemo(
     () => (emojiMap && emojiMap.size > 0 ? [...emojiMap.values()] : undefined),
@@ -71,7 +81,7 @@ export function Reactions({ messageId, reactions, currentUserId, memberMap, emoj
       <div className="relative" ref={pickerContainerRef}>
         <button
           type="button"
-          onClick={() => setPickerOpen((o) => !o)}
+          onClick={togglePicker}
           className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center px-1.5 py-px rounded text-[11px] border border-dashed border-kd-border text-kd-text-mute hover:border-kd-accent-soft hover:text-kd-text-soft"
           title="добавить реакцию"
         >
@@ -79,7 +89,7 @@ export function Reactions({ messageId, reactions, currentUserId, memberMap, emoj
         </button>
 
         {pickerOpen && (
-          <div className="absolute bottom-8 left-0 z-50 shadow-lg">
+          <div className={`absolute ${pickerUp ? 'bottom-full mb-1' : 'top-full mt-1'} left-0 z-50 shadow-lg`}>
             <Suspense fallback={<div className="p-3 text-[11px] text-kd-text-mute bg-kd-panel rounded-kd border border-kd-border">…</div>}>
               <LazyEmojiPicker
                 customEmoji={customList}

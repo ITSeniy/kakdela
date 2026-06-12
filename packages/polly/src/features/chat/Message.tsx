@@ -77,6 +77,8 @@ function Actions({
   onPickReaction: (emoji: string) => void
 }) {
   const [pickerOpen, setPickerOpen] = useState(false)
+  // Вверх по умолчанию; у верха экрана места под picker (~435px) нет — вниз.
+  const [pickerUp, setPickerUp] = useState(true)
   const pickerContainerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -90,15 +92,23 @@ function Actions({
     return () => document.removeEventListener('mousedown', handleMouseDown)
   }, [pickerOpen])
 
+  function togglePicker() {
+    if (!pickerOpen) {
+      const top = pickerContainerRef.current?.getBoundingClientRect().top ?? 0
+      setPickerUp(top > 450)
+    }
+    setPickerOpen((o) => !o)
+  }
+
   if (pendingStatus) return null
   return (
     <div className={`${pickerOpen ? 'opacity-100' : 'opacity-0'} group-hover:opacity-100 transition-opacity flex items-center gap-1 text-kd-text-mute self-start mt-0.5 shrink-0`}>
       <div className="relative" ref={pickerContainerRef}>
-        <button type="button" onClick={() => setPickerOpen((o) => !o)} title="добавить реакцию" className="hover:text-kd-text p-1 block">
+        <button type="button" onClick={togglePicker} title="добавить реакцию" className="hover:text-kd-text p-1 block">
           <Icon.Smile size={13} />
         </button>
         {pickerOpen && (
-          <div className="absolute bottom-full right-0 mb-1 z-50 shadow-lg">
+          <div className={`absolute ${pickerUp ? 'bottom-full mb-1' : 'top-full mt-1'} right-0 z-50 shadow-lg`}>
             <Suspense fallback={<div className="p-3 text-[11px] text-kd-text-mute bg-kd-panel rounded-kd border border-kd-border">…</div>}>
               <LazyEmojiPicker
                 customEmoji={customEmoji}

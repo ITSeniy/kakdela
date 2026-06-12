@@ -16,7 +16,10 @@ import { env } from '../env.js'
 import { audit } from '../lib/audit.js'
 import { db } from '../lib/db.js'
 
-const BASE32 = 'abcdefghjkmnpqrstuvwxyz23456789'
+// Ровно 32 символа — каждое 5-битное значение (0..31) обязано попадать в
+// алфавит, иначе charAt(31) вернёт пустую строку и код выйдет 7-значным.
+// Исключены визуально неоднозначные i/l/o/1; «0» есть, o→0 чинит normalizeCode.
+const BASE32 = 'abcdefghjkmnpqrstuvwxyz023456789'
 
 function generateCode(): string {
   const bytes = randomBytes(5)
@@ -32,7 +35,7 @@ function generateCode(): string {
 }
 
 function normalizeCode(raw: string): string {
-  return raw.toLowerCase().replace(/[^a-z0-9]/g, '')
+  return raw.toLowerCase().replace(/[^a-z0-9]/g, '').replace(/o/g, '0')
 }
 
 export const invitesRoutes: FastifyPluginAsyncZod = async (app) => {

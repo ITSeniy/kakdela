@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, ne, or, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNull, ne, or, sql } from 'drizzle-orm'
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod'
 import { z } from 'zod'
 
@@ -75,30 +75,20 @@ export const dmRoutes: FastifyPluginAsyncZod = async (app) => {
       const otherUserById = new Map(otherUsersRows.map((u) => [u.id, u]))
       const presenceMap = await presence.getStatusBulk(otherIds)
 
-      // 2) Последнее НЕ-удалённое сообщение каждого DM-канала — двух-шаговая
-      //    схема (max id per channel → fetch row by id) проще DISTINCT ON и
-      //    дружит со штатным query builder drizzle.
-      const lastIdRows = await db
-        .select({
+      // 2) Последнее НЕ-удалённое сообщение каждого DM-канала. DISTINCT ON
+      //    вместо MAX(id): агрегата max(uuid) в Postgres нет, а id (uuidv7)
+      //    монотонен — сортировки по нему достаточно.
+      const lastMsgRows = await db
+        .selectDistinctOn([messages.channelId], {
+          id:        messages.id,
           channelId: messages.channelId,
-          maxId:     sql<string>`MAX(${messages.id})`,
+          authorId:  messages.authorId,
+          content:   messages.content,
+          createdAt: messages.createdAt,
         })
         .from(messages)
         .where(and(inArray(messages.channelId, channelIds), isNull(messages.deletedAt)))
-        .groupBy(messages.channelId)
-      const lastIds = lastIdRows.map((r) => r.maxId).filter((id): id is string => Boolean(id))
-      const lastMsgRows = lastIds.length > 0
-        ? await db
-            .select({
-              id:        messages.id,
-              channelId: messages.channelId,
-              authorId:  messages.authorId,
-              content:   messages.content,
-              createdAt: messages.createdAt,
-            })
-            .from(messages)
-            .where(inArray(messages.id, lastIds))
-        : []
+        .orderBy(messages.channelId, desc(messages.id))
       const lastByChannel = new Map(lastMsgRows.map((m) => [m.channelId, m]))
 
       // 3) unread = одно SQL'е через JOIN с dm_channels:

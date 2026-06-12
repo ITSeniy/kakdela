@@ -20,14 +20,17 @@ export function Modal({ onClose, children, width = 420, className, closeOnBackdr
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') {
         e.preventDefault()
+        // Capture + stopPropagation: Esc закрывает только модалку, не доходя
+        // до лежащих под ней слоёв (полноэкранные настройки, меню).
+        e.stopPropagation()
         onClose()
       }
     }
-    window.addEventListener('keydown', onKey)
+    window.addEventListener('keydown', onKey, true)
     const prev = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     return () => {
-      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('keydown', onKey, true)
       document.body.style.overflow = prev
     }
   }, [onClose])

@@ -30,7 +30,9 @@ francine invite create — создать инвайт-код
   pnpm francine invite create --server <uuid> --expires-in 7d --max-uses 10
 `
 
-const BASE32 = 'abcdefghjkmnpqrstuvwxyz23456789'
+// Ровно 32 символа (см. speedy/routes/invites.ts) — 31-символьный алфавит
+// терял символ при выпадении индекса 31 и выдавал 7-значные коды.
+const BASE32 = 'abcdefghjkmnpqrstuvwxyz023456789'
 
 function generateCode(): string {
   const bytes = randomBytes(5)

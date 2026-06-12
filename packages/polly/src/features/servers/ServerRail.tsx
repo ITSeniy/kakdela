@@ -4,9 +4,9 @@ import { useLocation } from 'wouter'
 
 import { Icon } from '../../components/Icon.js'
 import { ServerIcon } from '../../components/ServerIcon.js'
-import { ThemeToggle } from '../../components/ThemeToggle.js'
 import { wsClient } from '../../lib/ws.js'
 import { listInboxMentions } from '../inbox/api.js'
+import { useSettingsUi } from '../settings/store.js'
 import { listServers } from './api.js'
 import { useServerCreateJoinUi } from './store.js'
 
@@ -27,6 +27,7 @@ export function ServerRail({
   const queryClient = useQueryClient()
   const openCreate = useServerCreateJoinUi((s) => s.openCreate)
   const openJoin = useServerCreateJoinUi((s) => s.openJoin)
+  const openSettings = useSettingsUi((s) => s.open)
   // Позиция fixed-меню «добавить сервер». null = закрыто. Меню нельзя
   // позиционировать absolute внутри списка: overflow-y-auto контейнера
   // обрезает всё, что выходит за ширину рельсы, — fixed клипу не подвержен.
@@ -171,7 +172,14 @@ export function ServerRail({
         >
           <Icon.Search size={15} />
         </button>
-        <ThemeToggle size={15} />
+        <button
+          type="button"
+          onClick={() => openSettings('profile')}
+          title="настройки"
+          className="transition-colors hover:text-kd-text"
+        >
+          <Icon.Settings size={15} />
+        </button>
       </div>
     </aside>
   )

@@ -10,6 +10,7 @@ import { notify } from '../../lib/host/notify.js'
 import { wsClient } from '../../lib/ws.js'
 import { listInboxMentions } from '../inbox/api.js'
 import { getServerDetail } from '../servers/api.js'
+import { useNotifyPrefs } from './prefs.js'
 
 // Debounce-окно на канал — не больше одной нотификации в этот интервал. Без
 // этого активный mention-poll в чатике типа «@here» мгновенно даёт 10 toast'ов.
@@ -110,6 +111,11 @@ export function useNotifyTriggers(): void {
       if (event.t === 'mention') {
         // Нас не должно дёргать на собственные @everyone — но проверим.
         if (event.mentionedUserId !== currentUserId) return
+        if (!useNotifyPrefs.getState().mentions) {
+          // Уведомления об упоминаниях выключены — но badge держим свежим.
+          void queryClient.invalidateQueries({ queryKey: ['inbox-unread'] })
+          return
+        }
         if (!shouldNotify(event.channelId, uiRef.current, focusedRef.current)) return
 
         const now = Date.now()
@@ -124,6 +130,7 @@ export function useNotifyTriggers(): void {
       }
 
       if (event.t === 'dm.new') {
+        if (!useNotifyPrefs.getState().dms) return
         if (!shouldNotify(event.channelId, uiRef.current, focusedRef.current)) return
         void notify({
           title: 'новое личное сообщение',

@@ -322,6 +322,22 @@ function attachListeners(room: Room): void {
     store().setActiveSpeakers(speakers.map((s) => s.identity))
   })
 
+  // Мик-трек публикуется ЛЕНИВО: кто зашёл замьюченным, не имеет publication
+  // вовсе. При первом unmute прилетает TrackPublished (не TrackUnmuted!) —
+  // без этого обработчика иконка «мик выключен» застревала, хотя человек
+  // уже говорит. Симметрично TrackUnpublished — на случай unpublish при муте.
+  room.on(RoomEvent.TrackPublished, (pub: RemoteTrackPublication, p: RemoteParticipant) => {
+    if (currentRoom !== room) return
+    if (pub.source !== Track.Source.Microphone) return
+    store().patchParticipant(p.identity, { isMuted: !hasUnmutedMic(p) })
+  })
+
+  room.on(RoomEvent.TrackUnpublished, (pub: RemoteTrackPublication, p: RemoteParticipant) => {
+    if (currentRoom !== room) return
+    if (pub.source !== Track.Source.Microphone) return
+    store().patchParticipant(p.identity, { isMuted: !hasUnmutedMic(p) })
+  })
+
   room.on(RoomEvent.TrackMuted, (pub: TrackPublication, p: Participant) => {
     if (currentRoom !== room) return
     if (pub.source !== Track.Source.Microphone) return
