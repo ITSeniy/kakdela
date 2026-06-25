@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useLocation } from 'wouter'
 
-import type { DmSummary } from '@kakdela/ginzu/api-types'
+import type { CustomEmoji, DmSummary } from '@kakdela/ginzu/api-types'
 
 import { Avatar } from '../../components/Avatar.js'
 import { Badge } from '../../components/Badge.js'
@@ -12,6 +12,8 @@ import { SectionLabel } from '../../components/SectionLabel.js'
 import { wsClient } from '../../lib/ws.js'
 import { useAuthStore } from '../auth/store.js'
 import { UserBar } from '../channels/UserBar.js'
+import { renderMarkdownInline } from '../chat/markdown.js'
+import { useAllServerEmoji } from '../emoji/api.js'
 import { listDms } from './api.js'
 
 interface DmListProps {
@@ -39,17 +41,19 @@ function pluralRu(n: number, one: string, few: string, many: string): string {
 }
 
 function DmRow({
-  dm, active, currentUserId, onClick,
+  dm, active, currentUserId, emojiMap, onClick,
 }: {
   dm: DmSummary
   active: boolean
   currentUserId: string | null
+  emojiMap: ReadonlyMap<string, CustomEmoji>
   onClick: () => void
 }) {
   const lastIsMine = dm.lastMessage?.authorId === currentUserId
-  const preview = dm.lastMessage
-    ? (lastIsMine ? 'вы: ' : '') + dm.lastMessage.preview
-    : 'новый диалог'
+  // Превью — инлайном, чтобы `:name:` стал картинкой. Префикс «вы:» — текстом.
+  const previewHtml = dm.lastMessage
+    ? (lastIsMine ? 'вы: ' : '') + renderMarkdownInline(dm.lastMessage.preview, { emoji: emojiMap })
+    : null
   const unread = dm.unreadCount > 0
   const offline = dm.otherUser.status === 'offline'
   return (
@@ -80,11 +84,16 @@ function DmRow({
             {fmtWhen(dm.lastMessage?.createdAt)}
           </span>
         </div>
-        <div
-          className={`text-[11px] truncate mt-px ${unread ? 'text-kd-text font-semibold' : 'text-kd-text-soft'}`}
-        >
-          {preview}
-        </div>
+        {previewHtml !== null ? (
+          <div
+            className={`kd-md text-[11px] truncate mt-px ${unread ? 'text-kd-text font-semibold' : 'text-kd-text-soft'}`}
+            dangerouslySetInnerHTML={{ __html: previewHtml }}
+          />
+        ) : (
+          <div className={`text-[11px] truncate mt-px ${unread ? 'text-kd-text font-semibold' : 'text-kd-text-soft'}`}>
+            новый диалог
+          </div>
+        )}
       </div>
       {unread && <Badge variant="mention">{dm.unreadCount}</Badge>}
     </button>
@@ -102,6 +111,7 @@ export function DmList({ activeChannelId }: DmListProps) {
     queryFn: listDms,
     staleTime: 10_000,
   })
+  const emojiMap = useAllServerEmoji()
 
   // Realtime: при `msg.new` в DM-канале — refetch списка (обновится
   // unread/preview/порядок). При `dm.new` (новый собеседник написал нам
@@ -165,6 +175,7 @@ export function DmList({ activeChannelId }: DmListProps) {
             dm={dm}
             active={dm.channelId === activeChannelId}
             currentUserId={user?.id ?? null}
+            emojiMap={emojiMap}
             onClick={() => navigate(`/dm/${dm.channelId}`)}
           />
         ))}

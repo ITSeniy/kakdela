@@ -1,8 +1,8 @@
-import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useLocation } from 'wouter'
 
-import type { InboxMention } from '@kakdela/ginzu/api-types'
+import type { CustomEmoji, InboxMention } from '@kakdela/ginzu/api-types'
 
 import { Avatar } from '../../components/Avatar.js'
 import { Badge } from '../../components/Badge.js'
@@ -12,6 +12,7 @@ import { SectionLabel } from '../../components/SectionLabel.js'
 import { toast } from '../../components/toast/index.js'
 import { wsClient } from '../../lib/ws.js'
 import { UserBar } from '../channels/UserBar.js'
+import { useAllServerEmoji } from '../emoji/api.js'
 import { listInboxMentions, markMentionsRead } from './api.js'
 
 // Короткая задержка — мгновение, чтобы скролл-пролёт не «съедал» упоминания,
@@ -48,14 +49,27 @@ const MENTION_LABEL: Record<InboxMention['mentionType'], string> = {
   here:     'для онлайн',
 }
 
-/** Подсветка @ника внутри сниппета (designs/final-inbox.jsx, KD_InboxRow). */
-function renderSnippet(content: string): ReactNode {
+/** Резолв custom emoji `:name:` → <img>, остальное — текстом. */
+function renderEmoji(text: string, emojiMap: ReadonlyMap<string, CustomEmoji>): ReactNode {
+  const parts = text.split(/(:[a-z0-9_]+:)/g)
+  if (parts.length === 1) return text
+  return parts.map((p, i) => {
+    const m = /^:([a-z0-9_]+):$/.exec(p)
+    const name = m?.[1]
+    const emoji = name ? emojiMap.get(name) : undefined
+    return emoji
+      ? <img key={i} src={emoji.imageUrl} alt={p} className="kd-emoji" draggable={false} />
+      : <Fragment key={i}>{p}</Fragment>
+  })
+}
+
+/** Подсветка @ника + custom emoji внутри сниппета (designs/final-inbox.jsx). */
+function renderSnippet(content: string, emojiMap: ReadonlyMap<string, CustomEmoji>): ReactNode {
   const parts = content.split(/(@[0-9A-Za-zА-Яа-яЁё._-]+)/g)
-  if (parts.length === 1) return content
   return parts.map((part, i) =>
     part.startsWith('@')
       ? <span key={i} className="text-kd-warm font-semibold">{part}</span>
-      : <span key={i}>{part}</span>,
+      : <Fragment key={i}>{renderEmoji(part, emojiMap)}</Fragment>,
   )
 }
 
@@ -111,12 +125,13 @@ function Sidebar({ unreadTotal, activeFilter, onSelectFilter }: SidebarProps) {
 
 interface RowProps {
   mention: InboxMention
+  emojiMap: ReadonlyMap<string, CustomEmoji>
   onClick: () => void
   onMarkRead: () => void
   observeRead: (el: HTMLElement | null, messageId: string) => void
 }
 
-function Row({ mention, onClick, onMarkRead, observeRead }: RowProps) {
+function Row({ mention, emojiMap, onClick, onMarkRead, observeRead }: RowProps) {
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
     observeRead(ref.current, mention.messageId)
@@ -163,7 +178,7 @@ function Row({ mention, onClick, onMarkRead, observeRead }: RowProps) {
         </div>
         <div className="text-[13px] text-kd-text leading-normal break-words">
           <span className="font-bold">{mention.authorName}:</span>{' '}
-          <span className="text-kd-text-soft">{renderSnippet(mention.content)}</span>
+          <span className="kd-md text-kd-text-soft">{renderSnippet(mention.content, emojiMap)}</span>
         </div>
       </div>
       {isUnread && (
@@ -186,6 +201,7 @@ function Row({ mention, onClick, onMarkRead, observeRead }: RowProps) {
 export function InboxScreen() {
   const [, navigate] = useLocation()
   const queryClient = useQueryClient()
+  const emojiMap = useAllServerEmoji()
   const [filter, setFilter] = useState<'all' | 'unread'>('all')
 
   const { data, refetch } = useQuery({
@@ -371,6 +387,7 @@ export function InboxScreen() {
                   <Row
                     key={m.messageId}
                     mention={m}
+                    emojiMap={emojiMap}
                     onClick={() => openMention(m)}
                     onMarkRead={() => markOneRead(m.messageId)}
                     observeRead={observeRead}

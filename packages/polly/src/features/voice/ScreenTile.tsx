@@ -153,16 +153,16 @@ export function ScreenTile({
       {/* Кто смотрит — стопка аватарок внизу-справа. */}
       {!compact && watchers && watchers.length > 0 && (
         <div
-          className="absolute right-1.5 bottom-1.5 flex items-center pl-1.5 pr-2 py-0.5 rounded bg-kd-overlay-strong"
+          className="absolute right-1.5 bottom-1.5 flex items-center pl-1 pr-2 py-1 rounded-lg bg-kd-overlay-strong"
           title={`смотрят: ${watchers.map((w) => w.name).join(', ')}`}
         >
           {watchers.slice(0, 4).map((w, i) => (
-            <span key={i} className={i > 0 ? '-ml-1.5' : ''}>
-              <Avatar name={w.name} avatarUrl={w.avatarUrl} size={16} />
+            <span key={i} className={i > 0 ? '-ml-2 ring-2 ring-kd-stage rounded-full' : 'ring-2 ring-kd-stage rounded-full'}>
+              <Avatar name={w.name} avatarUrl={w.avatarUrl} size={28} />
             </span>
           ))}
           {watchers.length > 4 && (
-            <span className="ml-1 text-[9px] font-mono text-kd-stage-text">+{watchers.length - 4}</span>
+            <span className="ml-1.5 text-[11px] font-mono font-bold text-kd-stage-text">+{watchers.length - 4}</span>
           )}
         </div>
       )}

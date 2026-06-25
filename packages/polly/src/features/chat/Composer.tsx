@@ -65,6 +65,17 @@ function TypingLine({ channelId, memberMap }: {
   useEffect(() => {
     setTypers(new Map())
     const unsub = wsClient.on((event) => {
+      // Пришло сообщение — автор больше не «печатает». Убираем его сразу, не
+      // дожидаясь TTL (раньше индикатор висел все 8 секунд после отправки).
+      if (event.t === 'msg.new' && event.channelId === channelId) {
+        setTypers((m) => {
+          if (!m.has(event.message.authorId)) return m
+          const next = new Map(m)
+          next.delete(event.message.authorId)
+          return next
+        })
+        return
+      }
       if (event.t !== 'typing' || event.channelId !== channelId) return
       if (event.userId === meId) return
       setTypers((m) => {

@@ -82,6 +82,14 @@ export function useVoiceModerationSync(): void {
         toast.info('админ перенёс вас в другой канал')
         playSound('moved')
         void joinVoiceRoom(event.toChannelId)
+        // Если пользователь сейчас смотрит именно на тот голосовой канал, из
+        // которого его переносят (фокус на интерфейсе ГС) — ведём фокус следом.
+        // Если он в это время читает текст/личку/настройки — не дёргаем.
+        const m = /^\/servers\/([0-9a-f-]+)\/channels\/([0-9a-f-]+)/i.exec(window.location.pathname)
+        if (m && m[2] === event.fromChannelId) {
+          history.pushState({}, '', `/servers/${m[1]}/channels/${event.toChannelId}`)
+          window.dispatchEvent(new PopStateEvent('popstate'))
+        }
         return
       }
 

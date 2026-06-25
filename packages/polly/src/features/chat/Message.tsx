@@ -13,7 +13,7 @@ import { AttachmentList } from './AttachmentView.js'
 import { useChatDisplaySettings } from './displaySettings.js'
 import { ContextMenu } from './ContextMenu.js'
 import { Reactions } from './Reactions.js'
-import { renderMarkdown } from './markdown.js'
+import { renderMarkdown, renderMarkdownInline } from './markdown.js'
 import type { PendingMessage } from './types.js'
 
 const LazyEmojiPicker = lazy(() => import('./EmojiPicker.js'))
@@ -184,6 +184,14 @@ export function Message({
   const msgAttachments = 'attachments' in message ? (message.attachments ?? []) : []
   const msgThread = 'thread' in message ? (message.thread ?? null) : null
 
+  // Цитата ответа — инлайном: эмодзи `:name:` и базовое форматирование.
+  const replyHtml = useMemo(
+    () => (msgReplyTo && !msgReplyTo.deleted
+      ? renderMarkdownInline(msgReplyTo.content, { members: memberMap, channels: channelMap, emoji: emojiMap })
+      : null),
+    [msgReplyTo, memberMap, channelMap, emojiMap],
+  )
+
   const previewForThread =
     message.content.length > 60 ? message.content.slice(0, 57) + '…' : message.content
 
@@ -322,7 +330,7 @@ export function Message({
             <span className="font-mono font-bold text-kd-text-soft shrink-0">
               ↳ {msgReplyTo.authorName}
             </span>
-            <span className="opacity-80 truncate min-w-0">{msgReplyTo.content}</span>
+            <span className="kd-md opacity-80 truncate min-w-0" dangerouslySetInnerHTML={{ __html: replyHtml ?? '' }} />
           </>
         )}
       </button>

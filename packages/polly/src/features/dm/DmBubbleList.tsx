@@ -5,7 +5,7 @@
 
 import { type MouseEvent, useEffect, useMemo, useRef, useState } from 'react'
 
-import type { Channel, DmSummary, MemberPublic, Message as IMessage } from '@kakdela/ginzu/api-types'
+import type { Channel, CustomEmoji, DmSummary, MemberPublic, Message as IMessage } from '@kakdela/ginzu/api-types'
 
 import { Avatar } from '../../components/Avatar.js'
 import { DayDivider } from '../../components/DayDivider.js'
@@ -14,9 +14,10 @@ import { openExternal } from '../../lib/host/shell.js'
 import { AttachmentList } from '../chat/AttachmentView.js'
 import { ContextMenu } from '../chat/ContextMenu.js'
 import { Reactions } from '../chat/Reactions.js'
-import { renderMarkdown } from '../chat/markdown.js'
+import { renderMarkdown, renderMarkdownInline } from '../chat/markdown.js'
 import { useMessages } from '../chat/useMessages.js'
 import type { PendingMessage } from '../chat/types.js'
+import { useAllServerEmoji } from '../emoji/api.js'
 
 interface DmBubbleListProps {
   channelId: string
@@ -86,6 +87,7 @@ interface DmBubbleProps {
   pendingStatus?: 'sending' | 'error'
   memberMap: ReadonlyMap<string, MemberPublic>
   channelMap: ReadonlyMap<string, Channel>
+  emojiMap?: ReadonlyMap<string, CustomEmoji>
   onMention?: (userId: string) => void
   onEdit: (id: string, content: string) => void
   onDelete: (id: string) => void
@@ -97,7 +99,7 @@ interface DmBubbleProps {
 
 function DmBubble({
   message, member, isOwn, currentUserId, pendingStatus,
-  memberMap, channelMap, onMention,
+  memberMap, channelMap, emojiMap, onMention,
   onEdit, onDelete, onRetry, onReply, onAddReaction, onRemoveReaction,
 }: DmBubbleProps) {
   const [editing, setEditing] = useState(false)
@@ -109,9 +111,16 @@ function DmBubble({
   }, [editing, message.content])
 
   const html = useMemo(
-    () => renderMarkdown(message.content, { members: memberMap, channels: channelMap }),
-    [message.content, memberMap, channelMap],
+    () => renderMarkdown(message.content, { members: memberMap, channels: channelMap, emoji: emojiMap }),
+    [message.content, memberMap, channelMap, emojiMap],
   )
+  // Цитата ответа — инлайном: эмодзи и базовое форматирование, без блочной вёрстки.
+  const replyHtml = useMemo(() => {
+    const r = (message as IMessage).replyTo
+    return r && !r.deleted
+      ? renderMarkdownInline(r.content, { members: memberMap, channels: channelMap, emoji: emojiMap })
+      : null
+  }, [message, memberMap, channelMap, emojiMap])
 
   const messageReactions = 'reactions' in message ? (message.reactions ?? []) : []
   const msgReplyTo = 'replyTo' in message ? (message.replyTo ?? null) : null
@@ -231,7 +240,7 @@ function DmBubble({
                 <span className="font-mono font-bold text-kd-text-soft shrink-0">
                   ↳ {msgReplyTo.authorName}
                 </span>
-                <span className="opacity-80 truncate min-w-0">{msgReplyTo.content}</span>
+                <span className="kd-md opacity-80 truncate min-w-0" dangerouslySetInnerHTML={{ __html: replyHtml ?? '' }} />
               </>
             )}
           </button>
@@ -296,12 +305,21 @@ export function DmBubbleList({
   onMention, onEdit, onDelete, onRetry, onReply, onAddReaction, onRemoveReaction,
 }: DmBubbleListProps) {
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage } = useMessages(channelId)
+  // В личке нет привязки к серверу — берём emoji со всех серверов пользователя,
+  // чтобы `:name:` резолвился и в DM (и в баблах, и в цитатах ответов).
+  const emojiMap = useAllServerEmoji()
 
   // Клики внутри markdown: @упоминание → профиль, внешняя ссылка → системный
   // браузер (тот же контракт, что у chat/MessageList).
   function handleContentClick(e: MouseEvent<HTMLDivElement>) {
     let node = e.target as HTMLElement | null
     while (node && node !== e.currentTarget) {
+      if (node.dataset.spoiler) {
+        // Спойлер: первый клик раскрывает, повторный — прячет (как в чате).
+        e.preventDefault()
+        node.classList.toggle('kd-spoiler-open')
+        return
+      }
       if (node.dataset.mention === 'user') {
         e.preventDefault()
         const id = node.dataset.id
@@ -508,6 +526,7 @@ export function DmBubbleList({
             pendingStatus={row.isPending ? (m as PendingMessage)._pending : undefined}
             memberMap={memberMap}
             channelMap={channelMap}
+            emojiMap={emojiMap}
             onMention={onMention}
             onEdit={onEdit}
             onDelete={onDelete}

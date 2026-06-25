@@ -160,11 +160,44 @@ md.inline.ruler.before('emphasis', 'spoiler', (state, silent) => {
   return true
 })
 
-export function renderMarkdown(text: string, env?: RenderEnv): string {
-  const html = md.render(text, env ?? {})
+// Inline-правило `text` в markdown-it сканирует до ближайшего «терминатора»,
+// чтобы остальные inline-правила получили свой ход. `|` в дефолтный набор не
+// входит — из-за этого spoiler `||...||` срабатывал только в начале строки, а
+// в середине текста `|` поглощался как обычный символ. Переопределяем `text`,
+// добавив `|` к терминаторам (остальное — дефолтный набор markdown-it).
+const TEXT_TERMINATORS = new Set<number>([
+  0x0a, 0x21, 0x23, 0x24, 0x25, 0x26, 0x2a, 0x2b, 0x2d, 0x3a, 0x3c, 0x3d,
+  0x40, 0x5b, 0x5c, 0x5d, 0x5e, 0x5f, 0x60, 0x7b, 0x7d, 0x7e,
+  0x7c, // | — иначе не доходит до правила spoiler
+])
+md.inline.ruler.at('text', (state, silent) => {
+  let pos = state.pos
+  const max = state.posMax
+  const src = state.src
+  while (pos < max && !TEXT_TERMINATORS.has(src.charCodeAt(pos))) pos++
+  if (pos === state.pos) return false
+  if (!silent) state.pending += src.slice(state.pos, pos)
+  state.pos = pos
+  return true
+})
+
+function sanitize(html: string): string {
   if (typeof window === 'undefined') return html
   return DOMPurify.sanitize(html, {
     ADD_ATTR: ['data-mention', 'data-id', 'data-spoiler', 'target', 'rel', 'draggable'],
     ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|tel|ftp):|[^a-z]|[a-z+.-]+(?:[^a-z+.\-:]|$))/i,
   })
+}
+
+export function renderMarkdown(text: string, env?: RenderEnv): string {
+  return sanitize(md.render(text, env ?? {}))
+}
+
+/**
+ * Однострочный рендер без блочной обёртки (`<p>`): для превью, цитат ответов
+ * и сниппетов, где нужны только инлайн-штуки — emoji `:name:`, **жирный**,
+ * меншены и т. п. Те же env и санитайзер, что у renderMarkdown.
+ */
+export function renderMarkdownInline(text: string, env?: RenderEnv): string {
+  return sanitize(md.renderInline(text, env ?? {}))
 }
