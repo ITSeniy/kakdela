@@ -24,7 +24,7 @@ import {
   patchChannel,
   type ServerDetail,
 } from '../servers/api.js'
-import { useAppearance } from '../settings/appearance.js'
+import { clampFixed, useAppearance } from '../settings/appearance.js'
 import { useSettingsUi } from '../settings/store.js'
 import { ThreadList } from '../threads/ThreadList.js'
 import { moderateVoice } from '../voice/api.js'
@@ -804,8 +804,8 @@ export function ChannelList({ serverId, activeChannelId }: ChannelListProps) {
           ref={channelMenuRef}
           className="fixed z-50 min-w-[160px] bg-kd-panel border border-kd-border rounded-kd shadow-kd-modal py-1 select-none"
           style={{
-            left: Math.min(channelMenu.x, window.innerWidth - 168),
-            top: Math.min(channelMenu.y, window.innerHeight - 48),
+            left: clampFixed(channelMenu.x, 168, window.innerWidth),
+            top: clampFixed(channelMenu.y, 48, window.innerHeight),
           }}
         >
           <button
@@ -841,8 +841,8 @@ export function ChannelList({ serverId, activeChannelId }: ChannelListProps) {
           ref={catMenuRef}
           className="fixed z-50 min-w-[160px] bg-kd-panel border border-kd-border rounded-kd shadow-kd-modal py-1 select-none"
           style={{
-            left: Math.min(catMenu.x, window.innerWidth - 168),
-            top: Math.min(catMenu.y, window.innerHeight - 48),
+            left: clampFixed(catMenu.x, 168, window.innerWidth),
+            top: clampFixed(catMenu.y, 48, window.innerHeight),
           }}
         >
           <button

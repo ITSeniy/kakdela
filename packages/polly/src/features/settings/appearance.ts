@@ -42,6 +42,33 @@ export const UI_SCALES: Array<{ id: UiScale; label: string; pct: number }> = [
 
 export const DEFAULT_UI_SCALE: UiScale = 'medium'
 
+// CSS `zoom` на <html> масштабирует и слой position:fixed, но clientX/clientY
+// курсора и window.innerWidth остаются в «визуальных» CSS-px. Поэтому любую
+// координату, которую мы кладём в left/top fixed-меню, надо поделить на zoom —
+// иначе на 125/150% меню уезжает от курсора (см. ContextMenu и пр.).
+export function getUiZoom(): number {
+  const { uiScale } = useAppearance.getState()
+  const pct = UI_SCALES.find((s) => s.id === uiScale)?.pct ?? 100
+  return pct / 100
+}
+
+/**
+ * Пересчитывает визуальную координату (clientX/clientY, rect.right…) в
+ * координату для left/top элемента с position:fixed и кламповит её в видимую
+ * область. `size` и `visualViewport` — в CSS-px (innerWidth/innerHeight).
+ */
+export function clampFixed(
+  visualCoord: number,
+  size: number,
+  visualViewport: number,
+  pad = 8,
+): number {
+  const z = getUiZoom()
+  const local = visualCoord / z
+  const max = visualViewport / z - size - pad
+  return Math.max(pad, Math.min(local, max))
+}
+
 interface AppearanceState {
   accentId: string
   radius: number

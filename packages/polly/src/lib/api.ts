@@ -1,6 +1,7 @@
 import type { User } from '@kakdela/ginzu'
 
 import { useAuthStore } from '../features/auth/store.js'
+import { friendlyMessage } from './errorMessages.js'
 
 const SPEEDY_URL = import.meta.env.VITE_SPEEDY_URL ?? 'http://localhost:3001'
 
@@ -31,18 +32,24 @@ async function tryRefresh(): Promise<string | null> {
 }
 
 async function doRequest(path: string, token: string | null, init?: RequestInit): Promise<Response> {
-  return fetch(`${SPEEDY_URL}${path}`, {
-    ...init,
-    headers: {
-      // Content-Type только при наличии тела: Fastify 5 отвергает пустой
-      // body с заголовком application/json (FST_ERR_CTP_EMPTY_JSON_BODY),
-      // что ломало DELETE-запросы (удаление сообщений, снятие реакций).
-      ...(init?.body != null ? { 'Content-Type': 'application/json' } : {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(init?.headers as Record<string, string> ?? {}),
-    },
-    credentials: 'include',
-  })
+  try {
+    return await fetch(`${SPEEDY_URL}${path}`, {
+      ...init,
+      headers: {
+        // Content-Type только при наличии тела: Fastify 5 отвергает пустой
+        // body с заголовком application/json (FST_ERR_CTP_EMPTY_JSON_BODY),
+        // что ломало DELETE-запросы (удаление сообщений, снятие реакций).
+        ...(init?.body != null ? { 'Content-Type': 'application/json' } : {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(init?.headers as Record<string, string> ?? {}),
+      },
+      credentials: 'include',
+    })
+  } catch {
+    // fetch reject = сеть лежит / сервер недоступен (а не HTTP-ошибка).
+    // Даём дружелюбный код вместо «Failed to fetch».
+    throw new ApiError('network-error', friendlyMessage('network-error', 'нет связи с сервером'), 0)
+  }
 }
 
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -67,9 +74,10 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
     try {
       body = await res.json() as typeof body
     } catch { /* ignore parse errors */ }
+    const code = body.error?.code ?? 'unknown-error'
     throw new ApiError(
-      body.error?.code ?? 'unknown-error',
-      body.error?.message ?? res.statusText,
+      code,
+      friendlyMessage(code, body.error?.message ?? res.statusText),
       res.status,
     )
   }

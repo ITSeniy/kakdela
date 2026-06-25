@@ -2,7 +2,7 @@
 // (автор · канал · мета файла · действия), стрелки по бокам, нижняя панель
 // с лентой миниатюр, позицией и подсказками клавиш. Всегда тёмный (сцена).
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
 import type { Attachment } from '@kakdela/ginzu/api-types'
@@ -58,8 +58,22 @@ function BarButton({ title, danger, onClick, children }: {
   )
 }
 
+const MAX_ZOOM = 8
+
 export function Lightbox({ images, startIndex, onClose, context }: LightboxProps) {
   const [idx, setIdx] = useState(startIndex)
+  // Зум маленьких картинок: transform scale поверх object-contain (картинка
+  // не апскейлится сама, но scale тянет её выше натурального размера).
+  const [zoom, setZoom] = useState(1)
+  const [pan, setPan] = useState({ x: 0, y: 0 })
+  const dragRef = useRef<{ x: number; y: number; px: number; py: number } | null>(null)
+  const [dragging, setDragging] = useState(false)
+
+  // Смена кадра — сбрасываем зум и сдвиг.
+  useEffect(() => {
+    setZoom(1)
+    setPan({ x: 0, y: 0 })
+  }, [idx])
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -91,14 +105,52 @@ export function Lightbox({ images, startIndex, onClose, context }: LightboxProps
   if (!current) return null
   const showNav = images.length > 1
 
+  const zoomable = current.kind === 'image'
+
   function nudge(delta: number) {
     setIdx((i) => (i + delta + images.length) % images.length)
   }
 
+  function zoomBy(factor: number) {
+    setZoom((z) => {
+      const next = Math.min(MAX_ZOOM, Math.max(1, z * factor))
+      if (next === 1) setPan({ x: 0, y: 0 })
+      return next
+    })
+  }
+
+  function resetZoom() {
+    setZoom(1)
+    setPan({ x: 0, y: 0 })
+  }
+
   function handleWheel(e: React.WheelEvent) {
+    // На картинке колесо = зум; на видео/в галерее без картинки — листание.
+    if (zoomable) {
+      zoomBy(e.deltaY < 0 ? 1.18 : 1 / 1.18)
+      return
+    }
     if (!showNav) return
     if (Math.abs(e.deltaY) < 24) return
     nudge(e.deltaY > 0 ? 1 : -1)
+  }
+
+  function onDragStart(e: React.MouseEvent) {
+    if (zoom <= 1) return
+    e.preventDefault()
+    dragRef.current = { x: e.clientX, y: e.clientY, px: pan.x, py: pan.y }
+    setDragging(true)
+  }
+
+  function onDragMove(e: React.MouseEvent) {
+    const d = dragRef.current
+    if (!d) return
+    setPan({ x: d.px + (e.clientX - d.x), y: d.py + (e.clientY - d.y) })
+  }
+
+  function onDragEnd() {
+    dragRef.current = null
+    setDragging(false)
   }
 
   async function copyImage() {
@@ -179,6 +231,21 @@ export function Lightbox({ images, startIndex, onClose, context }: LightboxProps
         ) : (
           <div className="flex-1 min-w-0 text-[10px] font-mono opacity-60 truncate">{meta}</div>
         )}
+        {zoomable && (
+          <div className="flex items-center gap-1 shrink-0">
+            <BarButton title="отдалить · колесо вниз" onClick={() => zoomBy(1 / 1.3)}>−</BarButton>
+            <button
+              type="button"
+              onClick={resetZoom}
+              title="сбросить зум · двойной клик"
+              className="px-1.5 h-8 min-w-[46px] rounded text-[11px] font-mono text-kd-stage-text hover:bg-white/[0.12] transition-colors"
+            >
+              {Math.round(zoom * 100)}%
+            </button>
+            <BarButton title="приблизить · колесо вверх" onClick={() => zoomBy(1.3)}>+</BarButton>
+            <div className="w-px h-[22px] bg-white/10 mx-1 shrink-0" />
+          </div>
+        )}
         <BarButton title="скачать оригинал" onClick={() => { void openExternal(current.url) }}>⤓</BarButton>
         {current.kind === 'image' && (
           <BarButton title="скопировать картинку" onClick={() => { void copyImage() }}>⧉</BarButton>
@@ -192,8 +259,11 @@ export function Lightbox({ images, startIndex, onClose, context }: LightboxProps
 
       {/* картинка + стрелки */}
       <div
-        className="flex-1 min-h-0 relative flex items-center justify-center p-5"
+        className="flex-1 min-h-0 relative flex items-center justify-center p-5 overflow-hidden"
         onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
+        onMouseMove={onDragMove}
+        onMouseUp={onDragEnd}
+        onMouseLeave={onDragEnd}
       >
         {showNav && (
           <>
@@ -228,6 +298,14 @@ export function Lightbox({ images, startIndex, onClose, context }: LightboxProps
           <img
             src={current.url}
             alt={current.originalName}
+            onMouseDown={onDragStart}
+            onDoubleClick={() => (zoom > 1 ? resetZoom() : zoomBy(2))}
+            draggable={false}
+            style={{
+              transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+              transition: dragging ? 'none' : 'transform 0.12s ease-out',
+              cursor: zoom > 1 ? (dragging ? 'grabbing' : 'grab') : 'zoom-in',
+            }}
             className="max-w-full max-h-full object-contain rounded-lg shadow-kd-modal"
           />
         )}
@@ -274,7 +352,7 @@ export function Lightbox({ images, startIndex, onClose, context }: LightboxProps
           ))}
           <div className="flex-1" />
           <span className="text-[10px] font-mono opacity-40 shrink-0">
-            ← → · esc · space ⏵
+            ← → · esc · space ⏵ · колесо — зум
           </span>
         </div>
       </div>

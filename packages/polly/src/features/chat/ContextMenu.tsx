@@ -1,5 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 
+import { getUiZoom } from '../settings/appearance.js'
+
 interface ContextMenuProps {
   x: number
   y: number
@@ -58,11 +60,21 @@ export function ContextMenu({
   useLayoutEffect(() => {
     const el = ref.current
     if (!el) return
+    // Всё считаем в zoom-локальном пространстве (см. getUiZoom): rect и
+    // innerWidth/Height — визуальные px, делим на z, иначе на 125/150%
+    // меню уезжает от курсора.
+    const z = getUiZoom()
     const rect = el.getBoundingClientRect()
-    const nx = Math.max(8, Math.min(x, window.innerWidth - rect.width - 8))
-    let ny = y
-    if (y + rect.height > window.innerHeight - 8) {
-      ny = Math.max(8, y - rect.height)
+    const w = rect.width / z
+    const h = rect.height / z
+    const vw = window.innerWidth / z
+    const vh = window.innerHeight / z
+    const lx = x / z
+    const ly = y / z
+    const nx = Math.max(8, Math.min(lx, vw - w - 8))
+    let ny = ly
+    if (ly + h > vh - 8) {
+      ny = Math.max(8, ly - h)
     }
     setPos({ x: nx, y: ny })
   }, [x, y])

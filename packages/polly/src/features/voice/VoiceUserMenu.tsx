@@ -9,6 +9,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Icon } from '../../components/Icon.js'
 import { toast } from '../../components/toast/index.js'
 import { applyParticipantVolume, toggleLocalParticipantMute } from '../../lib/livekit.js'
+import { clampFixed } from '../settings/appearance.js'
 import { moderateVoice } from './api.js'
 import { useLocalMute } from './localMute.js'
 import { useVoiceVolumes, volumesFor } from './volumeSettings.js'
@@ -71,8 +72,8 @@ export function VoiceUserMenu({ x, y, target, canManage, onClose }: VoiceUserMen
       ref={ref}
       className="fixed z-50 min-w-[190px] bg-kd-panel border border-kd-border rounded-kd shadow-kd-modal py-1 select-none"
       style={{
-        left: Math.min(x, window.innerWidth - 198),
-        top: Math.min(y, window.innerHeight - 260),
+        left: clampFixed(x, 198, window.innerWidth),
+        top: clampFixed(y, 260, window.innerHeight),
       }}
     >
       <div className="px-3 py-1.5 text-[11px] font-bold text-kd-text truncate border-b border-kd-border mb-1">

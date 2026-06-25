@@ -33,6 +33,8 @@ function DeviceSettings() {
   const [speakers, setSpeakers] = useState<AudioDeviceInfo[]>([])
   const [testing, setTesting] = useState(false)
   const [level, setLevel] = useState(0)
+  // «Слышать себя»: маршрутизируем мик обратно в динамик во время проверки.
+  const [monitor, setMonitor] = useState(false)
   const stopTestRef = useRef<(() => void) | null>(null)
 
   useEffect(() => {
@@ -53,7 +55,8 @@ function DeviceSettings() {
     }
   }, [])
 
-  // Проверка микрофона: живой уровень с выбранного устройства.
+  // Проверка микрофона: живой уровень с выбранного устройства (+ опционально
+  // слышимость себя в выбранный динамик).
   async function startTest() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -64,6 +67,27 @@ function DeviceSettings() {
       const analyser = ctx.createAnalyser()
       analyser.fftSize = 512
       src.connect(analyser)
+
+      // Слышимость себя: src → gain(громкость динамика) → выходной поток,
+      // который играем через <audio> на выбранном speakerId. Отдельный путь
+      // от анализатора, поэтому индикатор уровня работает как прежде.
+      let monitorEl: HTMLAudioElement | null = null
+      if (monitor) {
+        const gain = ctx.createGain()
+        gain.gain.value = speakerVolume
+        const dest = ctx.createMediaStreamDestination()
+        src.connect(gain)
+        gain.connect(dest)
+        monitorEl = new Audio()
+        monitorEl.srcObject = dest.stream
+        monitorEl.autoplay = true
+        const sinkable = monitorEl as unknown as { setSinkId?: (id: string) => Promise<void> }
+        if (speakerId !== 'default' && sinkable.setSinkId) {
+          try { await sinkable.setSinkId(speakerId) } catch { /* выход не выбираем — дефолт */ }
+        }
+        void monitorEl.play().catch(() => { /* ignore */ })
+      }
+
       const data = new Uint8Array(analyser.fftSize)
       let raf = 0
       const loop = () => {
@@ -80,6 +104,7 @@ function DeviceSettings() {
       raf = requestAnimationFrame(loop)
       stopTestRef.current = () => {
         cancelAnimationFrame(raf)
+        if (monitorEl) { monitorEl.pause(); monitorEl.srcObject = null }
         try { src.disconnect() } catch { /* ignore */ }
         void ctx.close().catch(() => { /* ignore */ })
         stream.getTracks().forEach((t) => t.stop())
@@ -96,13 +121,14 @@ function DeviceSettings() {
   }
 
   useEffect(() => () => { stopTestRef.current?.() }, [])
-  // Смена устройства во время теста — перезапускаем на новое.
+  // Смена устройства или тумблера «слышать себя» во время теста —
+  // перезапускаем, чтобы перестроить аудио-граф.
   useEffect(() => {
     if (!testing) return
     stopTestRef.current?.()
     void startTest()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [micId])
+  }, [micId, monitor])
 
   const BAR_COUNT = 24
   const litBars = Math.round(level * BAR_COUNT)
@@ -150,29 +176,37 @@ function DeviceSettings() {
       </div>
 
       <Field label="проверка микрофона" hint="скажи что-нибудь — полоски покажут уровень">
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={() => { testing ? stopTest() : void startTest() }}
-            className={[
-              'px-3 py-1.5 rounded-kd text-[12px] font-semibold transition-colors shrink-0',
-              testing ? 'bg-kd-danger text-white hover:opacity-90' : 'bg-kd-accent text-white hover:bg-kd-accent-deep',
-            ].join(' ')}
-          >
-            {testing ? 'хватит' : 'проверка'}
-          </button>
-          <div className="flex-1 flex items-center gap-[3px] h-7">
-            {Array.from({ length: BAR_COUNT }, (_, i) => (
-              <span
-                key={i}
-                className="flex-1 rounded-sm transition-colors"
-                style={{
-                  height: '100%',
-                  background: i < litBars ? 'var(--kd-accent)' : 'var(--kd-panel-hi)',
-                }}
-              />
-            ))}
+        <div className="flex flex-col gap-2.5">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => { testing ? stopTest() : void startTest() }}
+              className={[
+                'px-3 py-1.5 rounded-kd text-[12px] font-semibold transition-colors shrink-0',
+                testing ? 'bg-kd-danger text-white hover:opacity-90' : 'bg-kd-accent text-white hover:bg-kd-accent-deep',
+              ].join(' ')}
+            >
+              {testing ? 'хватит' : 'проверка'}
+            </button>
+            <div className="flex-1 flex items-center gap-[3px] h-7">
+              {Array.from({ length: BAR_COUNT }, (_, i) => (
+                <span
+                  key={i}
+                  className="flex-1 rounded-sm transition-colors"
+                  style={{
+                    height: '100%',
+                    background: i < litBars ? 'var(--kd-accent)' : 'var(--kd-panel-hi)',
+                  }}
+                />
+              ))}
+            </div>
           </div>
+          <Toggle
+            on={monitor}
+            onChange={setMonitor}
+            label="слышать себя"
+            hint="микрофон играет в динамик — лучше в наушниках, иначе будет эхо"
+          />
         </div>
       </Field>
     </>

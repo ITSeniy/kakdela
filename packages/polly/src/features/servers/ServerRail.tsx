@@ -10,6 +10,7 @@ import { wsClient } from '../../lib/ws.js'
 import { listDms } from '../dm/api.js'
 import { listInboxMentions } from '../inbox/api.js'
 import { useUnreadByServer } from '../notify/unread.js'
+import { getUiZoom } from '../settings/appearance.js'
 import { useSettingsUi } from '../settings/store.js'
 import { listServers } from './api.js'
 import { useServerCreateJoinUi } from './store.js'
@@ -214,10 +215,13 @@ export function ServerRail({
             onClick={(e) => {
               if (addMenuPos) { setAddMenuPos(null); return }
               const rect = e.currentTarget.getBoundingClientRect()
+              // CSS zoom масштабирует и fixed-слой: координаты якоря делим на
+              // zoom, иначе на 125/150% меню уезжает вправо от кнопки.
+              const z = getUiZoom()
               setAddMenuPos({
-                x: rect.right + 8,
+                x: (rect.right + 8) / z,
                 // Не даём меню уехать за нижний край окна.
-                y: Math.min(rect.top, window.innerHeight - 92),
+                y: Math.min(rect.top, window.innerHeight - 92) / z,
               })
             }}
             className="w-9 h-9 rounded-kd border-[1.5px] border-dashed border-kd-text-mute text-kd-text-mute flex items-center justify-center hover:text-kd-text-soft hover:border-kd-text-soft transition-colors"

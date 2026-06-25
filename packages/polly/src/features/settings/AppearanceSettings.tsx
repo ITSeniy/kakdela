@@ -62,7 +62,6 @@ export function AppearanceSettings() {
                 <div className={`text-[12px] font-semibold ${active ? 'text-kd-text' : 'text-kd-text-soft'}`}>
                   {s.label}
                 </div>
-                <div className="text-[10px] font-mono text-kd-text-mute mt-0.5">{s.pct}%</div>
               </button>
             )
           })}
