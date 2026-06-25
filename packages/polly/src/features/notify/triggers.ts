@@ -5,7 +5,7 @@ import { useLocation } from 'wouter'
 import type { Channel, DmSummary } from '@kakdela/ginzu/api-types'
 
 import { useAuthStore } from '../auth/store.js'
-import { focusMainWindow, setTrayBadge } from '../../lib/host/tray.js'
+import { focusMainWindow } from '../../lib/host/tray.js'
 import { notify, primeNotifyPermission } from '../../lib/host/notify.js'
 import { wsClient } from '../../lib/ws.js'
 import { listDms } from '../dm/api.js'
@@ -14,11 +14,24 @@ import { getServerDetail } from '../servers/api.js'
 import { playSound } from '../sounds/sounds.js'
 import { useNotifyPrefs } from './prefs.js'
 
-// Debounce-окно на канал — не больше одной нотификации в этот интервал. Без
-// этого активный mention-poll в чатике типа «@here» мгновенно даёт 10 toast'ов.
-const PER_CHANNEL_NOTIFY_COOLDOWN_MS = 60_000
-// Личка — живой диалог, минутный кулдаун выглядел бы как «не работает».
-const PER_DM_NOTIFY_COOLDOWN_MS = 10_000
+// Срочность важнее тишины: уведомления уходят сразу, без поканального
+// кулдауна. От «пулемёта» защищает не задержка, а tag — ОС заменяет прошлый
+// toast этого канала новым (см. notify() / opts.tag). Троттлим только звук,
+// чтобы пачка сообщений не строчила по динамику.
+const SOUND_THROTTLE_MS = 1_500
+let lastSoundAt = 0
+function playNotifySound(): void {
+  const now = Date.now()
+  if (now - lastSoundAt < SOUND_THROTTLE_MS) return
+  lastSoundAt = now
+  playSound('notification')
+}
+
+/** Инвалидирует оба счётчика непрочитанного: общий и разбивку по серверам. */
+function invalidateUnread(queryClient: ReturnType<typeof useQueryClient>): void {
+  void queryClient.invalidateQueries({ queryKey: ['inbox-unread'] })
+  void queryClient.invalidateQueries({ queryKey: ['inbox-unread-by-server'] })
+}
 
 interface NotifyTriggersUi {
   /** Текущий открытый channelId (server channel) — null если в DM/инбоксе. */
@@ -75,7 +88,6 @@ export function useNotifyTriggers(): void {
   const focusedRef = useRef<boolean>(
     typeof document !== 'undefined' ? document.hasFocus() : true,
   )
-  const lastNotifyAtRef = useRef<Map<string, number>>(new Map())
 
   // Track focus / blur — определяет, считать ли пользователя «отвлёкшимся».
   useEffect(() => {
@@ -89,24 +101,8 @@ export function useNotifyTriggers(): void {
     }
   }, [])
 
-  // Refresh tray badge whenever the inbox-unread query updates. Используем
-  // queryCache observer вместо useQuery, чтобы не дублировать сетевую
-  // подписку с ServerRail (одинаковый queryKey, общий cache).
-  useEffect(() => {
-    function read(): number {
-      const cache = queryClient.getQueryData<{ unreadTotal: number }>(['inbox-unread'])
-      return cache?.unreadTotal ?? 0
-    }
-    void setTrayBadge(read())
-    const unsub = queryClient.getQueryCache().subscribe((event) => {
-      if (event.type !== 'updated') return
-      const key = event.query.queryKey
-      if (Array.isArray(key) && key[0] === 'inbox-unread') {
-        void setTrayBadge(read())
-      }
-    })
-    return () => unsub()
-  }, [queryClient])
+  // Бейдж в трее и заголовок окна ведёт useUnreadIndicators() (см. Shell):
+  // он считает полный unread (упоминания + личка) в одном месте.
 
   // Просим permission заранее (в вебе — по первому клику): запрос из
   // WS-хендлера браузер молча игнорирует, и notify() остаётся вечным no-op.
@@ -121,22 +117,12 @@ export function useNotifyTriggers(): void {
       if (event.t === 'mention') {
         // Нас не должно дёргать на собственные @everyone — но проверим.
         if (event.mentionedUserId !== currentUserId) return
-        if (!useNotifyPrefs.getState().mentions) {
-          // Уведомления об упоминаниях выключены — но badge держим свежим.
-          void queryClient.invalidateQueries({ queryKey: ['inbox-unread'] })
-          return
-        }
+        // Счётчики/бейджи освежаем всегда — даже когда сам toast не нужен.
+        invalidateUnread(queryClient)
+        if (!useNotifyPrefs.getState().mentions) return
+        // Канал открыт и окно в фокусе → toast лишний, хватит обновления badge.
         if (!shouldNotify(event.channelId, uiRef.current, focusedRef.current)) return
-
-        const now = Date.now()
-        const last = lastNotifyAtRef.current.get(event.channelId) ?? 0
-        if (now - last < PER_CHANNEL_NOTIFY_COOLDOWN_MS) {
-          // В окне дебаунса — только обновим badge через инвалидацию.
-          void queryClient.invalidateQueries({ queryKey: ['inbox-unread'] })
-          return
-        }
-        lastNotifyAtRef.current.set(event.channelId, now)
-        playSound('notification')
+        playNotifySound()
         void handleMentionNotification(event.channelId, queryClient)
       }
 
@@ -144,8 +130,6 @@ export function useNotifyTriggers(): void {
       // диалога, всё остальное — `msg.new` в dm-канале.
       if (event.t === 'msg.new') {
         if (event.message.authorId === currentUserId) return
-        if (!useNotifyPrefs.getState().dms) return
-        if (!shouldNotify(event.channelId, uiRef.current, focusedRef.current)) return
         void (async () => {
           // Личка ли это — выясняем по dm-list (кэш, при промахе — один fetch).
           let dms = queryClient.getQueryData<DmSummary[]>(['dm-list'])
@@ -164,12 +148,14 @@ export function useNotifyTriggers(): void {
           const dm = dms.find((d) => d.channelId === event.channelId)
           if (!dm) return // серверный канал — туда уведомляет mention-путь
 
-          const now = Date.now()
-          const last = lastNotifyAtRef.current.get(event.channelId) ?? 0
-          if (now - last < PER_DM_NOTIFY_COOLDOWN_MS) return
-          lastNotifyAtRef.current.set(event.channelId, now)
+          // Бейдж непрочитанной лички (DmList + дом-кнопка) держим живым
+          // всегда — даже если toast'ы про личку выключены в настройках.
+          void queryClient.invalidateQueries({ queryKey: ['dm-list'] })
 
-          playSound('notification')
+          // Дальше — только сам toast: по настройкам и фокусу.
+          if (!useNotifyPrefs.getState().dms) return
+          if (!shouldNotify(event.channelId, uiRef.current, focusedRef.current)) return
+          playNotifySound()
           const trimmed = event.message.content.replace(/\s+/g, ' ').trim()
           const body = trimmed
             ? (trimmed.length > 140 ? trimmed.slice(0, 139) + '…' : trimmed)
@@ -189,9 +175,10 @@ export function useNotifyTriggers(): void {
       }
 
       if (event.t === 'dm.new') {
+        void queryClient.invalidateQueries({ queryKey: ['dm-list'] })
         if (!useNotifyPrefs.getState().dms) return
         if (!shouldNotify(event.channelId, uiRef.current, focusedRef.current)) return
-        playSound('notification')
+        playNotifySound()
         void notify({
           title: 'новое личное сообщение',
           body:  'кто-то начал с вами личный диалог',
@@ -212,7 +199,7 @@ export function useNotifyTriggers(): void {
   // если что-то пропустили во время WS-разрыва).
   useEffect(() => {
     function onFocus() {
-      void queryClient.invalidateQueries({ queryKey: ['inbox-unread'] })
+      invalidateUnread(queryClient)
     }
     window.addEventListener('focus', onFocus)
     return () => window.removeEventListener('focus', onFocus)
@@ -228,8 +215,8 @@ async function handleMentionNotification(
   channelId: string,
   queryClient: ReturnType<typeof useQueryClient>,
 ): Promise<void> {
-  // Инвалидируем счётчик и список (использует InboxScreen + ServerRail badge).
-  void queryClient.invalidateQueries({ queryKey: ['inbox-unread'] })
+  // Инвалидируем счётчики и список (использует InboxScreen + ServerRail badge).
+  invalidateUnread(queryClient)
   void queryClient.invalidateQueries({ queryKey: ['inbox-mentions'] })
 
   let title = 'вас упомянули'

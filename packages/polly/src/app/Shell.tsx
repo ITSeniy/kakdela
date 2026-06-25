@@ -19,6 +19,7 @@ import { getServerDetail, listServers } from '../features/servers/api.js'
 import { ThreadPanel } from '../features/threads/ThreadPanel.js'
 import { useThreadUi } from '../features/threads/store.js'
 import { useNotifyTriggers } from '../features/notify/triggers.js'
+import { useUnreadIndicators } from '../features/notify/unread.js'
 import { VoiceScreen } from '../features/voice/VoiceScreen.js'
 import { useAudioDeviceSync } from '../features/voice/deviceSettings.js'
 import { useNoiseSuppressionSync } from '../features/voice/noiseSettings.js'
@@ -33,6 +34,7 @@ export function Shell() {
   useHotkeys()
   useNoiseSuppressionSync()
   useNotifyTriggers()
+  useUnreadIndicators()
   useVoicePingSampler()
   useAudioDeviceSync()
   const [location, navigate] = useLocation()

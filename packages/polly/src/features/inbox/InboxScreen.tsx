@@ -9,11 +9,14 @@ import { Badge } from '../../components/Badge.js'
 import { EmptyState } from '../../components/EmptyState.js'
 import { Icon } from '../../components/Icon.js'
 import { SectionLabel } from '../../components/SectionLabel.js'
+import { toast } from '../../components/toast/index.js'
 import { wsClient } from '../../lib/ws.js'
 import { UserBar } from '../channels/UserBar.js'
 import { listInboxMentions, markMentionsRead } from './api.js'
 
-const READ_DEBOUNCE_MS = 5_000
+// Короткая задержка — мгновение, чтобы скролл-пролёт не «съедал» упоминания,
+// но не ощутимая пауза. Раньше было 5с — оттуда «долго помечается прочитанным».
+const READ_DEBOUNCE_MS = 800
 
 function fmtWhen(iso: string): string {
   const ms = Date.now() - new Date(iso).getTime()
@@ -210,14 +213,23 @@ export function InboxScreen() {
   const elementsRef = useRef(new Map<HTMLElement, string>())
   const pendingRef = useRef(new Set<string>())
 
+  function invalidateRead() {
+    void queryClient.invalidateQueries({ queryKey: ['inbox-mentions'] })
+    void queryClient.invalidateQueries({ queryKey: ['inbox-unread'] })
+    void queryClient.invalidateQueries({ queryKey: ['inbox-unread-by-server'] })
+  }
+
   function flushRead() {
     const ids = Array.from(pendingRef.current)
     if (ids.length === 0) return
     pendingRef.current.clear()
-    void markMentionsRead(ids).then(() => {
-      void queryClient.invalidateQueries({ queryKey: ['inbox-mentions'] })
-      void queryClient.invalidateQueries({ queryKey: ['inbox-unread'] })
-    })
+    markMentionsRead(ids)
+      .then(invalidateRead)
+      .catch((err) => {
+        // Не потеряли — вернём в очередь, чтобы следующий проход добил.
+        for (const id of ids) pendingRef.current.add(id)
+        console.error('[inbox] mark read failed', err)
+      })
   }
 
   useEffect(() => {
@@ -274,10 +286,12 @@ export function InboxScreen() {
   }
 
   function markOneRead(messageId: string) {
-    void markMentionsRead([messageId]).then(() => {
-      void queryClient.invalidateQueries({ queryKey: ['inbox-mentions'] })
-      void queryClient.invalidateQueries({ queryKey: ['inbox-unread'] })
-    })
+    markMentionsRead([messageId])
+      .then(invalidateRead)
+      .catch((err) => {
+        toast.error('не удалось отметить прочитанным')
+        console.error('[inbox] mark one read failed', err)
+      })
   }
 
   function openMention(m: InboxMention) {
@@ -306,8 +320,13 @@ export function InboxScreen() {
   async function markAllRead() {
     const ids = mentions.filter((m) => m.readAt === null).map((m) => m.messageId)
     if (ids.length === 0) return
-    await markMentionsRead(ids)
-    void queryClient.invalidateQueries({ queryKey: ['inbox-mentions'] })
+    try {
+      await markMentionsRead(ids)
+      invalidateRead()
+    } catch (err) {
+      toast.error('не удалось отметить всё прочитанным')
+      console.error('[inbox] mark all read failed', err)
+    }
   }
 
   return (
@@ -365,7 +384,7 @@ export function InboxScreen() {
           <span>клик — открыть в канале</span>
           <span>✓ — отметить прочитанным</span>
           <div className="flex-1" />
-          <span>5 секунд в viewport — пометится само</span>
+          <span>увидел — пометится прочитанным</span>
         </div>
       </div>
     </>

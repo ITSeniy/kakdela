@@ -135,9 +135,18 @@ export function DmScreen({ channelId }: DmScreenProps) {
 
   useEffect(() => {
     if (!lastMessageId) return
-    void markDmRead(channelId, lastMessageId).then(() => {
-      void queryClient.invalidateQueries({ queryKey: ['dm-list'] })
-    }).catch(() => { /* ignore — не критично */ })
+    // Оптимистично гасим бейдж непрочитанного сразу — не ждём round-trip
+    // POST /read (именно это ожидание и читалось как «долго помечается»).
+    queryClient.setQueryData<DmSummary[]>(['dm-list'], (old) =>
+      old?.map((d) => (d.channelId === channelId ? { ...d, unreadCount: 0 } : d)),
+    )
+    markDmRead(channelId, lastMessageId)
+      .then(() => queryClient.invalidateQueries({ queryKey: ['dm-list'] }))
+      .catch((err) => {
+        // Откатываем оптимизм фактическим состоянием с сервера.
+        console.error('[dm] mark read failed', err)
+        void queryClient.invalidateQueries({ queryKey: ['dm-list'] })
+      })
   }, [channelId, lastMessageId, queryClient])
 
   async function handleSend(content: string, attachments: Attachment[] = []) {

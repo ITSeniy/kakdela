@@ -7,7 +7,9 @@ import { persist } from 'zustand/middleware'
 import { Icon } from '../../components/Icon.js'
 import { ServerIcon } from '../../components/ServerIcon.js'
 import { wsClient } from '../../lib/ws.js'
+import { listDms } from '../dm/api.js'
 import { listInboxMentions } from '../inbox/api.js'
+import { useUnreadByServer } from '../notify/unread.js'
 import { useSettingsUi } from '../settings/store.js'
 import { listServers } from './api.js'
 import { useServerCreateJoinUi } from './store.js'
@@ -111,10 +113,22 @@ export function ServerRail({
   })
   const inboxUnread = inboxData?.unreadTotal ?? 0
 
+  // Непрочитанные упоминания по серверам — для точек-бейджей на иконках.
+  const unreadByServer = useUnreadByServer()
+
+  // Суммарный непрочитанный личных сообщений — бейдж на «кд»-кнопке (дом).
+  const { data: dms } = useQuery({
+    queryKey: ['dm-list'],
+    queryFn: listDms,
+    staleTime: 10_000,
+  })
+  const dmUnread = (dms ?? []).reduce((sum, d) => sum + d.unreadCount, 0)
+
   useEffect(() => {
     return wsClient.on((event) => {
       if (event.t === 'mention') {
         void queryClient.invalidateQueries({ queryKey: ['inbox-unread'] })
+        void queryClient.invalidateQueries({ queryKey: ['inbox-unread-by-server'] })
       }
     })
   }, [queryClient])
@@ -124,9 +138,9 @@ export function ServerRail({
       <button
         type="button"
         onClick={() => navigate('/dm')}
-        title="личные сообщения"
+        title={`личные сообщения${dmUnread > 0 ? ` · ${dmUnread} непрочитанных` : ''}`}
         className={[
-          'w-9 h-9 rounded-kd flex items-center justify-center text-white font-extrabold text-[13px]',
+          'relative w-9 h-9 rounded-kd flex items-center justify-center text-white font-extrabold text-[13px]',
           'tracking-[-0.04em] select-none transition-all shrink-0',
           inDmMode
             ? 'bg-kd-warm shadow-kd-ring-active'
@@ -134,6 +148,11 @@ export function ServerRail({
         ].join(' ')}
       >
         кд
+        {dmUnread > 0 && (
+          <span className="absolute -top-1 -right-1 min-w-[16px] h-[16px] px-1 rounded-full bg-kd-danger text-white text-[9px] font-mono font-bold flex items-center justify-center leading-none ring-2 ring-kd-bg-deep pointer-events-none">
+            {dmUnread > 99 ? '99+' : dmUnread}
+          </span>
+        )}
       </button>
       <div className="w-7 h-px bg-kd-border my-[3px] shrink-0" />
 
@@ -176,6 +195,15 @@ export function ServerRail({
                 title={s.name}
               />
             </span>
+            {(() => {
+              const u = unreadByServer.get(s.id) ?? 0
+              if (u === 0 || dragServerId === s.id) return null
+              return (
+                <span className="absolute -top-1 -right-1 min-w-[16px] h-[16px] px-1 rounded-full bg-kd-warm text-white text-[9px] font-mono font-bold flex items-center justify-center leading-none ring-2 ring-kd-bg-deep pointer-events-none z-10">
+                  {u > 99 ? '99+' : u}
+                </span>
+              )
+            })()}
           </div>
         ))}
 
