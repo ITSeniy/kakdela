@@ -106,7 +106,12 @@ export function ProfileSetupScreen({ onDone }: { onDone(): void }) {
         <div className="flex flex-col gap-[18px]">
           {/* Превью как у карточки профиля: баннер + аватар внахлёст */}
           <Field label="баннер" hint="фото сверху карточки профиля; без него — тёплый градиент">
-            <BannerPicker value={bannerUrl} onChange={setBannerUrl} />
+            <BannerPicker
+              value={bannerUrl}
+              onChange={setBannerUrl}
+              avatarUrl={avatarUrl}
+              displayName={displayName || user.username}
+            />
           </Field>
 
           <Field label="аватар" hint="jpeg / png / webp до 2 МБ">

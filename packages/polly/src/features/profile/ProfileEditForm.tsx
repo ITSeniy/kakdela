@@ -154,7 +154,7 @@ export function ProfileEditForm({ profile, onSaved, onCancel }: ProfileEditFormP
       </Field>
 
       <Field label="баннер" hint="фото сверху карточки профиля; без него — тёплый градиент">
-        <BannerPicker value={bannerUrl} onChange={setBannerUrl} />
+        <BannerPicker value={bannerUrl} onChange={setBannerUrl} avatarUrl={avatarUrl} displayName={displayName} />
       </Field>
 
       <Field label="отображаемое имя">

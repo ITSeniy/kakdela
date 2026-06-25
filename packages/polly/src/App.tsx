@@ -86,13 +86,27 @@ export function App() {
   // Сервер при каждом коннекте принудительно ставит presence=online. Если
   // пользователь выбрал «отошёл»/«не беспокоить» — восстанавливаем после
   // ready (срабатывает и на первом коннекте, и на реконнектах).
+  //
+  // Backfill: пока сокет лежал, мы могли пропустить msg.new и прочие
+  // инвалидации — события не буферизуются. На РЕконнекте (не на первом ready)
+  // перезапрашиваем открытые ленты и счётчики, чтобы «досылать» пропущенное.
+  const hadReadyRef = useRef(false)
   useEffect(() => {
     return wsClient.on((event) => {
       if (event.t !== 'ready') return
       const myStatus = useMyStatus.getState().myStatus
       if (myStatus !== 'online') wsClient.send({ t: 'presence', status: myStatus })
+
+      if (hadReadyRef.current) {
+        void queryClient.invalidateQueries({ queryKey: ['messages'] })
+        void queryClient.invalidateQueries({ queryKey: ['dm-list'] })
+        void queryClient.invalidateQueries({ queryKey: ['inbox-unread'] })
+        void queryClient.invalidateQueries({ queryKey: ['inbox-mentions'] })
+        void queryClient.invalidateQueries({ queryKey: ['inbox-unread-by-server'] })
+      }
+      hadReadyRef.current = true
     })
-  }, [])
+  }, [queryClient])
 
   // Logout / token revocation — гарантируем выход из голоса перед очисткой
   // auth state, чтобы не остался зомби-участник в LiveKit под именем

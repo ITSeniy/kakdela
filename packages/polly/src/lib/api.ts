@@ -16,25 +16,50 @@ export class ApiError extends Error {
   }
 }
 
-async function tryRefresh(): Promise<string | null> {
+// Таймаут запроса: без него зависшее соединение (TCP half-open) держит
+// запрос вечно — отправка сообщения залипает в «sending». Аплоады больших
+// файлов идут НЕ через apiFetch (XHR прямо в MinIO), так что лимит безопасен.
+const REQUEST_TIMEOUT_MS = 25_000
+
+async function performRefresh(): Promise<string | null> {
+  let res: Response
   try {
-    const res = await fetch(`${SPEEDY_URL}/api/auth/refresh`, {
+    res = await fetch(`${SPEEDY_URL}/api/auth/refresh`, {
       method: 'POST',
       credentials: 'include',
     })
-    if (!res.ok) return null
-    const data = await res.json() as { accessToken: string; user: User }
-    useAuthStore.getState().setSession(data.user, data.accessToken)
-    return data.accessToken
   } catch {
-    return null
+    // Сеть моргнула во время рефреша — НЕ разлогиниваем. Бросаем ошибку:
+    // исходный запрос просто упадёт, сессия останется (повторим позже).
+    throw new ApiError('network-error', friendlyMessage('network-error', 'нет связи с сервером'), 0)
   }
+  // Ответ получен, но не ok (401) — refresh-токен истёк/отозван: честный логаут.
+  if (!res.ok) return null
+  const data = await res.json() as { accessToken: string; user: User }
+  useAuthStore.getState().setSession(data.user, data.accessToken)
+  return data.accessToken
+}
+
+// Singleflight: при истечении access-токена сразу несколько запросов ловят
+// 401 и кидаются обновлять токен. Сервер ротирует refresh-токен на ПЕРВОМ
+// /refresh, а остальные получают session-revoked → ложный разлогин. Поэтому
+// все параллельные 401 ждут один общий промис обновления.
+let refreshPromise: Promise<string | null> | null = null
+
+function tryRefresh(): Promise<string | null> {
+  if (!refreshPromise) {
+    refreshPromise = performRefresh().finally(() => { refreshPromise = null })
+  }
+  return refreshPromise
 }
 
 async function doRequest(path: string, token: string | null, init?: RequestInit): Promise<Response> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
   try {
     return await fetch(`${SPEEDY_URL}${path}`, {
       ...init,
+      signal: controller.signal,
       headers: {
         // Content-Type только при наличии тела: Fastify 5 отвергает пустой
         // body с заголовком application/json (FST_ERR_CTP_EMPTY_JSON_BODY),
@@ -46,9 +71,11 @@ async function doRequest(path: string, token: string | null, init?: RequestInit)
       credentials: 'include',
     })
   } catch {
-    // fetch reject = сеть лежит / сервер недоступен (а не HTTP-ошибка).
+    // fetch reject = сеть лежит / таймаут / сервер недоступен (не HTTP-ошибка).
     // Даём дружелюбный код вместо «Failed to fetch».
     throw new ApiError('network-error', friendlyMessage('network-error', 'нет связи с сервером'), 0)
+  } finally {
+    clearTimeout(timer)
   }
 }
 

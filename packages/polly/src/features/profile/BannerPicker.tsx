@@ -4,6 +4,7 @@
 
 import { useState } from 'react'
 
+import { Avatar } from '../../components/Avatar.js'
 import { uploadAttachment } from '../files/upload.js'
 import { AvatarCropper } from './AvatarCropper.js'
 
@@ -14,9 +15,12 @@ interface BannerPickerProps {
   /** null — стандартный градиент. */
   value: string | null
   onChange(url: string | null): void
+  /** Для превью «как карточка профиля»: аватар внахлёст + имя. */
+  avatarUrl?: string | null
+  displayName?: string
 }
 
-export function BannerPicker({ value, onChange }: BannerPickerProps) {
+export function BannerPicker({ value, onChange, avatarUrl, displayName }: BannerPickerProps) {
   const [cropperOpen, setCropperOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -55,10 +59,30 @@ export function BannerPicker({ value, onChange }: BannerPickerProps) {
 
   return (
     <div>
-      <div className="h-20 rounded-kd overflow-hidden border border-kd-border bg-gradient-to-br from-kd-profile-grad-from to-kd-profile-grad-to">
-        {value && (
-          <img src={value} alt="баннер профиля" className="w-full h-full object-cover" draggable={false} />
-        )}
+      {/* Превью повторяет шапку карточки профиля (ProfileModal): баннер h-20,
+          аватар внахлёст на -mt-6, отступ контента px-[18px] — те же числа,
+          чтобы расстояния в превью и на реальной карточке совпадали. */}
+      <div className="rounded-kd border border-kd-border overflow-hidden bg-kd-panel">
+        <div className="h-20 bg-gradient-to-br from-kd-profile-grad-from to-kd-profile-grad-to">
+          {value && (
+            <img src={value} alt="баннер профиля" className="w-full h-full object-cover" draggable={false} />
+          )}
+        </div>
+        <div className="px-[18px] pb-3">
+          <div className="flex items-end gap-3 -mt-6">
+            <Avatar
+              name={displayName ?? ''}
+              avatarUrl={avatarUrl ?? null}
+              size={70}
+              ringColor="var(--kd-panel)"
+            />
+            {displayName && (
+              <div className="flex-1 min-w-0 pb-1 text-[15px] font-bold text-kd-text truncate">
+                {displayName}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
       <div className="flex items-center gap-2 mt-2">
         <button
