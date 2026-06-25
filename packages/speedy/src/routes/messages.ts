@@ -1,14 +1,17 @@
-import { and, desc, eq, inArray, isNull, lt, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNotNull, isNull, lt, sql } from 'drizzle-orm'
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod'
 import { z } from 'zod'
 
 import {
   EditMessageRequestSchema,
   ErrorBodySchema,
+  ForwardMessageRequestSchema,
   MessageSchema,
   MessagesPageSchema,
+  PinnedMessagesResponseSchema,
   SendMessageRequestSchema,
   type Attachment,
+  type ForwardedRef,
   type ReactionAggregate,
   type ReplyRef,
   type ThreadInfo,
@@ -25,13 +28,15 @@ import { broadcastToChannel, broadcastToUser } from '../ws/broadcast.js'
 const EDIT_WINDOW_MS = 30 * 24 * 60 * 60 * 1000
 
 const MSG_COLS = {
-  id:          messages.id,
-  channelId:   messages.channelId,
-  authorId:    messages.authorId,
-  content:     messages.content,
-  replyToId:   messages.replyToId,
-  createdAt:   messages.createdAt,
-  editedAt:    messages.editedAt,
+  id:            messages.id,
+  channelId:     messages.channelId,
+  authorId:      messages.authorId,
+  content:       messages.content,
+  replyToId:     messages.replyToId,
+  createdAt:     messages.createdAt,
+  editedAt:      messages.editedAt,
+  pinnedAt:      messages.pinnedAt,
+  forwardedFrom: messages.forwardedFrom,
 }
 
 async function resolveReplies(ids: string[]): Promise<Map<string, ReplyRef>> {
@@ -151,16 +156,20 @@ async function persistMentions(opts: {
   }
 }
 
+interface MsgRow {
+  id: string
+  channelId: string
+  authorId: string
+  content: string
+  replyToId: string | null
+  createdAt: Date
+  editedAt: Date | null
+  pinnedAt: Date | null
+  forwardedFrom: unknown
+}
+
 function serializeMessage(
-  row: {
-    id: string
-    channelId: string
-    authorId: string
-    content: string
-    replyToId: string | null
-    createdAt: Date
-    editedAt: Date | null
-  },
+  row: MsgRow,
   reactions: ReactionAggregate[] = [],
   replyTo: ReplyRef | null = null,
   attachments: Attachment[] = [],
@@ -178,7 +187,63 @@ function serializeMessage(
     reactions,
     attachments,
     thread,
+    pinned:    row.pinnedAt !== null,
+    pinnedAt:  row.pinnedAt?.toISOString() ?? null,
+    // jsonb-снимок уже в форме ForwardedRef (строковые даты внутри).
+    forwarded: (row.forwardedFrom as ForwardedRef | null) ?? null,
   }
+}
+
+/**
+ * Догидрирует набор строк сообщений до полных DTO: реакции, цитаты ответов,
+ * вложения, тред-инфо. Общий путь для GET-странички, списка пинов и
+ * одиночных операций (pin / forward).
+ */
+async function hydrateMessages(rows: MsgRow[]) {
+  if (rows.length === 0) return []
+  const msgIds = rows.map((r) => r.id)
+
+  const reactionsMap = new Map<string, ReactionAggregate[]>()
+  const reactRows = await db
+    .select({
+      messageId: reactionsTable.messageId,
+      emoji:     reactionsTable.emoji,
+      count:     sql<number>`count(*)::int`,
+      users:     sql<string[]>`array_agg(${reactionsTable.userId}::text)`,
+    })
+    .from(reactionsTable)
+    .where(inArray(reactionsTable.messageId, msgIds))
+    .groupBy(reactionsTable.messageId, reactionsTable.emoji)
+  for (const r of reactRows) {
+    const list = reactionsMap.get(r.messageId) ?? []
+    list.push({ emoji: r.emoji, count: r.count, users: r.users })
+    reactionsMap.set(r.messageId, list)
+  }
+
+  const replyIds = [...new Set(rows.map((r) => r.replyToId).filter((id): id is string => id !== null))]
+  const replyMap = await resolveReplies(replyIds)
+  const attachmentsMap = await loadAttachmentsForMessages(msgIds)
+  const threadMap = await loadThreadInfoForMessages(msgIds)
+
+  return rows.map((r) => serializeMessage(
+    r,
+    reactionsMap.get(r.id) ?? [],
+    r.replyToId ? (replyMap.get(r.replyToId) ?? null) : null,
+    attachmentsMap.get(r.id) ?? [],
+    threadMap.get(r.id) ?? null,
+  ))
+}
+
+/** «#имя» для серверного канала, «личные сообщения» для DM. */
+async function channelLabelFor(channelId: string): Promise<string> {
+  const rows = await db
+    .select({ name: channels.name, kind: channels.kind })
+    .from(channels)
+    .where(eq(channels.id, channelId))
+    .limit(1)
+  const c = rows[0]
+  if (!c) return 'канал'
+  return c.kind === 'dm' ? 'личные сообщения' : `#${c.name}`
 }
 
 /**
@@ -276,45 +341,8 @@ export const messagesRoutes: FastifyPluginAsyncZod = async (app) => {
 
       rows.reverse()
 
-      const reactionsMap = new Map<string, ReactionAggregate[]>()
-      const replyMap = new Map<string, ReplyRef>()
-      let attachmentsMap = new Map<string, Attachment[]>()
-      let threadMap = new Map<string, ThreadInfo>()
-
-      if (rows.length > 0) {
-        const msgIds = rows.map((r) => r.id)
-        const reactRows = await db
-          .select({
-            messageId: reactionsTable.messageId,
-            emoji:     reactionsTable.emoji,
-            count:     sql<number>`count(*)::int`,
-            users:     sql<string[]>`array_agg(${reactionsTable.userId}::text)`,
-          })
-          .from(reactionsTable)
-          .where(inArray(reactionsTable.messageId, msgIds))
-          .groupBy(reactionsTable.messageId, reactionsTable.emoji)
-        for (const r of reactRows) {
-          const list = reactionsMap.get(r.messageId) ?? []
-          list.push({ emoji: r.emoji, count: r.count, users: r.users })
-          reactionsMap.set(r.messageId, list)
-        }
-
-        const replyIds = [...new Set(rows.map((r) => r.replyToId).filter((id): id is string => id !== null))]
-        const resolved = await resolveReplies(replyIds)
-        resolved.forEach((v, k) => replyMap.set(k, v))
-
-        attachmentsMap = await loadAttachmentsForMessages(msgIds)
-        threadMap = await loadThreadInfoForMessages(msgIds)
-      }
-
       return reply.code(200).send({
-        messages: rows.map((r) => serializeMessage(
-          r,
-          reactionsMap.get(r.id) ?? [],
-          r.replyToId ? (replyMap.get(r.replyToId) ?? null) : null,
-          attachmentsMap.get(r.id) ?? [],
-          threadMap.get(r.id) ?? null,
-        )),
+        messages: await hydrateMessages(rows),
         nextCursor,
       })
     },
@@ -560,6 +588,165 @@ export const messagesRoutes: FastifyPluginAsyncZod = async (app) => {
       })
 
       return reply.code(204).send(null)
+    },
+  )
+
+  // ───── загрузка одного сообщения с проверкой доступа (для pin/forward) ─────
+  async function loadAccessibleMessage(userId: string, id: string) {
+    const rows = await db
+      .select({ ...MSG_COLS, deletedAt: messages.deletedAt })
+      .from(messages)
+      .where(eq(messages.id, id))
+      .limit(1)
+    const msg = rows[0]
+    if (!msg || msg.deletedAt !== null) throw notFound('message-not-found', 'message not found')
+    const access = await assertCanAccessChannel(userId, msg.channelId)
+    return { msg, access }
+  }
+
+  // Пин/откреп требует прав: в серверном канале — owner/admin, в DM —
+  // достаточно быть участником (assertCanAccessChannel уже это проверил).
+  async function assertCanPin(userId: string, access: Awaited<ReturnType<typeof assertCanAccessChannel>>) {
+    if (access.kind === 'server') await assertRole(userId, access.serverId, ['owner', 'admin'])
+  }
+
+  async function setPinned(req: { params: { id: string }; authUser?: { id: string } }, pinned: boolean) {
+    const { id } = req.params
+    const userId = req.authUser!.id
+    const { msg, access } = await loadAccessibleMessage(userId, id)
+    await assertCanPin(userId, access)
+
+    const pinnedAt = pinned ? new Date() : null
+    const updated = await db
+      .update(messages)
+      .set({ pinnedAt, pinnedBy: pinned ? userId : null })
+      .where(eq(messages.id, id))
+      .returning(MSG_COLS)
+    const result = updated[0]
+    if (!result) throw new Error('update messages returned no rows')
+
+    void broadcastToChannel(msg.channelId, {
+      t: 'msg.pin',
+      channelId: msg.channelId,
+      messageId: id,
+      pinned,
+      pinnedAt: pinnedAt?.toISOString() ?? null,
+    })
+    const [serialized] = await hydrateMessages([result])
+    return serialized!
+  }
+
+  // ───── POST /api/messages/:id/pin ─────
+  app.post(
+    '/messages/:id/pin',
+    {
+      preHandler: app.authenticate,
+      schema: {
+        params: z.object({ id: z.string().uuid() }),
+        response: { 200: MessageSchema, 401: ErrorBodySchema, 403: ErrorBodySchema, 404: ErrorBodySchema },
+      },
+    },
+    async (req, reply) => reply.code(200).send(await setPinned(req, true)),
+  )
+
+  // ───── DELETE /api/messages/:id/pin ─────
+  app.delete(
+    '/messages/:id/pin',
+    {
+      preHandler: app.authenticate,
+      schema: {
+        params: z.object({ id: z.string().uuid() }),
+        response: { 200: MessageSchema, 401: ErrorBodySchema, 403: ErrorBodySchema, 404: ErrorBodySchema },
+      },
+    },
+    async (req, reply) => reply.code(200).send(await setPinned(req, false)),
+  )
+
+  // ───── GET /api/channels/:channelId/pins ─────
+  app.get(
+    '/channels/:channelId/pins',
+    {
+      preHandler: app.authenticate,
+      schema: {
+        params: z.object({ channelId: z.string().uuid() }),
+        response: { 200: PinnedMessagesResponseSchema, 401: ErrorBodySchema, 403: ErrorBodySchema, 404: ErrorBodySchema },
+      },
+    },
+    async (req, reply) => {
+      const { channelId } = req.params
+      await assertCanAccessChannel(req.authUser!.id, channelId)
+      const rows = await db
+        .select(MSG_COLS)
+        .from(messages)
+        .where(and(eq(messages.channelId, channelId), isNull(messages.deletedAt), isNotNull(messages.pinnedAt)))
+        .orderBy(desc(messages.pinnedAt))
+        .limit(100)
+      return reply.code(200).send({ messages: await hydrateMessages(rows) })
+    },
+  )
+
+  // ───── POST /api/messages/:id/forward ─────
+  app.post(
+    '/messages/:id/forward',
+    {
+      preHandler: app.authenticate,
+      schema: {
+        params: z.object({ id: z.string().uuid() }),
+        body: ForwardMessageRequestSchema,
+        response: { 201: MessageSchema, 401: ErrorBodySchema, 403: ErrorBodySchema, 404: ErrorBodySchema },
+      },
+    },
+    async (req, reply) => {
+      const { id } = req.params
+      const { toChannelId, note } = req.body
+      const userId = req.authUser!.id
+
+      // Доступ и к получателю, и к оригиналу (нельзя переслать то, что не видишь).
+      await assertCanAccessChannel(userId, toChannelId)
+      const { msg: orig } = await loadAccessibleMessage(userId, id)
+
+      const authorRows = await db
+        .select({ displayName: users.displayName })
+        .from(users)
+        .where(eq(users.id, orig.authorId))
+        .limit(1)
+      const origAttachments = (await loadAttachmentsForMessages([orig.id])).get(orig.id) ?? []
+
+      const forwarded: ForwardedRef = {
+        messageId:    orig.id,
+        channelId:    orig.channelId,
+        channelLabel: await channelLabelFor(orig.channelId),
+        authorId:     orig.authorId,
+        authorName:   authorRows[0]?.displayName ?? '—',
+        content:      orig.content,
+        createdAt:    orig.createdAt.toISOString(),
+        attachments:  origAttachments,
+      }
+
+      const noteContent = (note ?? '').trim()
+      const inserted = await db
+        .insert(messages)
+        .values({ channelId: toChannelId, authorId: userId, content: noteContent, forwardedFrom: forwarded })
+        .returning(MSG_COLS)
+      const msg = inserted[0]
+      if (!msg) throw new Error('insert into messages returned no rows')
+
+      // @упоминания в подписи пересыла — как в обычной отправке.
+      if (noteContent) {
+        const ctx = await buildMentionContext(userId, toChannelId)
+        const parsed = extractMentions({
+          text:           noteContent,
+          authorId:       userId,
+          candidates:     ctx.candidates,
+          allowBroadcast: ctx.allowBroadcast,
+          onlineIds:      ctx.onlineIds,
+        })
+        await persistMentions({ messageId: msg.id, channelId: toChannelId, parsed })
+      }
+
+      const [serialized] = await hydrateMessages([msg])
+      void broadcastToChannel(toChannelId, { t: 'msg.new', channelId: toChannelId, message: serialized! })
+      return reply.code(201).send(serialized!)
     },
   )
 }

@@ -4,15 +4,20 @@
 // kd-accent, чужие слева на kd-panel, время под пузырём).
 
 import { type MouseEvent, useEffect, useMemo, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 
 import type { Channel, CustomEmoji, DmSummary, MemberPublic, Message as IMessage } from '@kakdela/ginzu/api-types'
 
 import { Avatar } from '../../components/Avatar.js'
 import { DayDivider } from '../../components/DayDivider.js'
 import { Icon } from '../../components/Icon.js'
+import { toast } from '../../components/toast/index.js'
 import { openExternal } from '../../lib/host/shell.js'
+import { pinMessage, unpinMessage } from '../chat/api.js'
 import { AttachmentList } from '../chat/AttachmentView.js'
 import { ContextMenu } from '../chat/ContextMenu.js'
+import { ForwardedCard } from '../chat/ForwardedCard.js'
+import { useForwardUi } from '../chat/forwardStore.js'
 import { Reactions } from '../chat/Reactions.js'
 import { renderMarkdown, renderMarkdownInline } from '../chat/markdown.js'
 import { useMessages } from '../chat/useMessages.js'
@@ -105,6 +110,19 @@ function DmBubble({
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(message.content)
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null)
+  const openForward = useForwardUi((s) => s.open)
+  const queryClient = useQueryClient()
+
+  // В DM закреплять может любой из двух участников.
+  function handlePinToggle(pin: boolean) {
+    const fn = pin ? pinMessage : unpinMessage
+    fn(message.id)
+      .then(() => queryClient.invalidateQueries({ queryKey: ['pins', message.channelId] }))
+      .catch((err) => {
+        toast.error(pin ? 'не удалось закрепить' : 'не удалось открепить')
+        console.error('[pin] failed', err)
+      })
+  }
 
   useEffect(() => {
     if (editing) setDraft(message.content)
@@ -156,13 +174,22 @@ function DmBubble({
       canDelete={canDelete}
       editDisabled={editDisabled}
       hideStartThread
+      pinned={(message as IMessage).pinned}
+      canPin
       onReply={() => onReply(message as IMessage)}
+      onForward={() => openForward(message as IMessage)}
+      onPin={() => handlePinToggle(true)}
+      onUnpin={() => handlePinToggle(false)}
       onEdit={() => setEditing(true)}
       onDelete={() => onDelete(message.id)}
       onCopyText={copyContent}
       onCopyLink={copyLink}
       onClose={() => setMenuPos(null)}
     />
+  ) : null
+
+  const forwardedEl = (message as IMessage).forwarded ? (
+    <ForwardedCard fwd={(message as IMessage).forwarded!} memberMap={memberMap} channelMap={channelMap} emojiMap={emojiMap} />
   ) : null
 
   if (editing) {
@@ -227,6 +254,9 @@ function DmBubble({
         <div className="w-7 shrink-0" />
       )}
       <div className={`max-w-[70%] flex flex-col min-w-0 ${isOwn ? 'items-end' : 'items-start'}`}>
+        {(message as IMessage).pinned && (
+          <div className="flex items-center gap-1 text-[10px] text-kd-warm font-mono mb-0.5 select-none">📌 закреплено</div>
+        )}
         {msgReplyTo && (
           <button
             type="button"
@@ -257,6 +287,7 @@ function DmBubble({
             <div className="kd-md" dangerouslySetInnerHTML={{ __html: html }} />
           </div>
         )}
+        {forwardedEl}
         {msgAttachments.length > 0 && <AttachmentList attachments={msgAttachments} />}
         <div className="flex items-center gap-1.5 mt-[3px] px-1 text-[10px] font-mono text-kd-text-mute">
           <span>{time}</span>

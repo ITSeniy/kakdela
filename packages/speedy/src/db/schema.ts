@@ -156,6 +156,11 @@ export const messages = pgTable(
     createdAt:   timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     editedAt:    timestamp('edited_at', { withTimezone: true }),
     deletedAt:   timestamp('deleted_at', { withTimezone: true }),
+    // Закрепление: pinnedAt null = не закреплено; pinnedBy — кто закрепил.
+    pinnedAt:    timestamp('pinned_at', { withTimezone: true }),
+    pinnedBy:    uuid('pinned_by').references(() => users.id, { onDelete: 'set null' }),
+    // Пересыл: денормализованный снимок оригинала (ForwardedRef), null = не пересыл.
+    forwardedFrom: jsonb('forwarded_from'),
   },
   (t) => ({
     channelIdIdx:      index('messages_channel_id_id_idx').on(t.channelId, t.id),

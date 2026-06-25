@@ -13,6 +13,7 @@ import { useProfileUi } from '../profile/store.js'
 import { getServerDetail, listMembers } from '../servers/api.js'
 import { Composer } from './Composer.js'
 import { MessageList } from './MessageList.js'
+import { PinnedPanel } from './PinnedPanel.js'
 import { addReaction, deleteMessage, editMessage, removeReaction, sendMessage } from './api.js'
 import type { PendingMessage } from './types.js'
 
@@ -23,7 +24,14 @@ interface ChatScreenProps {
 
 // Шапка канала по designs/final-chrome.jsx (KD_ChannelHeader): panelAlt,
 // иконка + имя + вертикальный разделитель + topic, справа mono-stats и иконки.
-function Header({ channel, memberCount }: { channel: Channel | undefined; memberCount: number }) {
+function Header({ channel, channelId, memberCount, canPin, memberMap }: {
+  channel: Channel | undefined
+  channelId: string
+  memberCount: number
+  canPin: boolean
+  memberMap: ReadonlyMap<string, MemberPublic>
+}) {
+  const [showPins, setShowPins] = useState(false)
   return (
     <div className="px-4 py-2 border-b border-kd-border bg-kd-panel-alt flex items-center gap-2.5 shrink-0">
       <Icon.Hash size={14} className="text-kd-text-soft shrink-0" />
@@ -39,15 +47,24 @@ function Header({ channel, memberCount }: { channel: Channel | undefined; member
         {memberCount} подп.
       </span>
       <div className="flex items-center gap-2.5 text-kd-text-mute shrink-0">
-        <button type="button" title="закреплённые (скоро)" className="hover:text-kd-text-soft transition-colors">
-          <Icon.Pin size={14} />
-        </button>
-        <button type="button" title="входящие (скоро)" className="hover:text-kd-text-soft transition-colors">
-          <Icon.Inbox size={14} />
-        </button>
-        <button type="button" title="поиск (скоро)" className="hover:text-kd-text-soft transition-colors">
-          <Icon.Search size={14} />
-        </button>
+        <div className="relative">
+          <button
+            type="button"
+            title="закреплённые"
+            onClick={() => setShowPins((v) => !v)}
+            className={`transition-colors ${showPins ? 'text-kd-warm' : 'hover:text-kd-text-soft'}`}
+          >
+            <Icon.Pin size={14} />
+          </button>
+          {showPins && (
+            <PinnedPanel
+              channelId={channelId}
+              canPin={canPin}
+              memberMap={memberMap}
+              onClose={() => setShowPins(false)}
+            />
+          )}
+        </div>
       </div>
     </div>
   )
@@ -80,6 +97,10 @@ export function ChatScreen({ serverId, channelId }: ChatScreenProps) {
   })
 
   const channel = serverDetail?.channels.find((c) => c.id === channelId)
+
+  // Закреплять в серверном канале могут owner/admin (T-пин).
+  const myRole = user ? members.find((m) => m.id === user.id)?.role : undefined
+  const canPin = myRole === 'owner' || myRole === 'admin'
 
   const channelMap = useMemo(() => {
     const m = new Map<string, Channel>()
@@ -215,7 +236,13 @@ export function ChatScreen({ serverId, channelId }: ChatScreenProps) {
 
   return (
     <div className="flex-1 min-w-0 min-h-0 flex flex-col bg-kd-bg">
-      <Header channel={channel} memberCount={serverDetail?.memberCount ?? 0} />
+      <Header
+        channel={channel}
+        channelId={channelId}
+        memberCount={serverDetail?.memberCount ?? 0}
+        canPin={canPin}
+        memberMap={memberMap}
+      />
       <MessageList
         serverId={serverId}
         channelId={channelId}
@@ -224,6 +251,7 @@ export function ChatScreen({ serverId, channelId }: ChatScreenProps) {
         channelMap={channelMap}
         emojiMap={emojiMap}
         pending={pending}
+        canPin={canPin}
         onEdit={handleEdit}
         onDelete={handleDelete}
         onRetry={handleRetry}

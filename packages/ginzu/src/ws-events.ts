@@ -10,6 +10,7 @@ export type ServerEvent =
   | { t: 'msg.new'; channelId: string; message: Message }
   | { t: 'msg.edit'; channelId: string; messageId: string; content: string; editedAt: string }
   | { t: 'msg.delete'; channelId: string; messageId: string }
+  | { t: 'msg.pin'; channelId: string; messageId: string; pinned: boolean; pinnedAt: string | null }
   | { t: 'presence'; userId: string; status: User['status'] }
   | { t: 'typing'; channelId: string; userId: string }
   | { t: 'voice.join'; channelId: string; userId: string }
@@ -51,6 +52,7 @@ export const ServerEventSchema = z.discriminatedUnion('t', [
   z.object({ t: z.literal('msg.new'), channelId: uuid, message: MessageSchema }),
   z.object({ t: z.literal('msg.edit'), channelId: uuid, messageId: uuid, content: z.string(), editedAt: z.string() }),
   z.object({ t: z.literal('msg.delete'), channelId: uuid, messageId: uuid }),
+  z.object({ t: z.literal('msg.pin'), channelId: uuid, messageId: uuid, pinned: z.boolean(), pinnedAt: z.string().nullable() }),
   z.object({ t: z.literal('presence'), userId: uuid, status: UserSchema.shape.status }),
   z.object({ t: z.literal('typing'), channelId: uuid, userId: uuid }),
   z.object({ t: z.literal('voice.join'), channelId: uuid, userId: uuid }),

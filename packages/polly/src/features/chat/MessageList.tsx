@@ -21,6 +21,8 @@ interface MessageListProps {
   pending: PendingMessage[]
   /** Когда false — пункт «начать тред» в контекстном меню скрывается. */
   threadsAllowed?: boolean
+  /** Может ли пользователь закреплять (server: admin/owner). */
+  canPin?: boolean
   onEdit: (id: string, content: string) => void
   onDelete: (id: string) => void
   onRetry: (nonce: string) => void
@@ -60,7 +62,7 @@ function UnreadDivider() {
 
 export function MessageList({
   serverId, channelId, currentUserId, memberMap, channelMap, emojiMap,
-  pending, threadsAllowed = true,
+  pending, threadsAllowed = true, canPin = false,
   onEdit, onDelete, onRetry, onMention, onReply, onAddReaction, onRemoveReaction,
 }: MessageListProps) {
   const [, navigate] = useLocation()
@@ -326,6 +328,7 @@ export function MessageList({
             channelMap={channelMap}
             emojiMap={emojiMap}
             threadsAllowed={threadsAllowed}
+            canPin={canPin}
             onEdit={onEdit}
             onDelete={onDelete}
             onRetry={row.isPending ? () => onRetry((m as PendingMessage)._nonce) : undefined}

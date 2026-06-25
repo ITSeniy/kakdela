@@ -16,6 +16,7 @@ import { ProfileModal } from './features/profile/ProfileModal.js'
 import { CreateServerModal } from './features/servers/CreateServerModal.js'
 import { JoinServerModal } from './features/servers/JoinServerModal.js'
 import { SettingsScreen } from './features/settings/SettingsScreen.js'
+import { ForwardDialog } from './features/chat/ForwardDialog.js'
 import { CreateThreadDialog } from './features/threads/CreateThreadDialog.js'
 import { useVoiceModerationSync } from './features/voice/moderationSync.js'
 import { leaveVoiceRoom } from './features/voice/useVoiceRoom.js'
@@ -140,6 +141,7 @@ export function App() {
       <CreateServerModal />
       <JoinServerModal />
       <CreateThreadDialog />
+      <ForwardDialog />
       <Toaster />
       <ConfirmDialogHost />
       <ConnectionBanner />

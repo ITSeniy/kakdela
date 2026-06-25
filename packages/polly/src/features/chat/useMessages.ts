@@ -62,6 +62,21 @@ export function useMessages(channelId: string | null) {
         })
         return
       }
+      if (event.t === 'msg.pin' && event.channelId === channelId) {
+        queryClient.setQueryData<Cache>(['messages', channelId], (old) => {
+          if (!old) return old
+          const pages = old.pages.map((page) => ({
+            ...page,
+            messages: page.messages.map((m) =>
+              m.id === event.messageId ? { ...m, pinned: event.pinned, pinnedAt: event.pinnedAt } : m,
+            ),
+          }))
+          return { ...old, pages }
+        })
+        // Список закреплённых в шапке держим свежим.
+        void queryClient.invalidateQueries({ queryKey: ['pins', channelId] })
+        return
+      }
       if (event.t === 'reaction.add' && event.channelId === channelId) {
         queryClient.setQueryData<Cache>(['messages', channelId], (old) => {
           if (!old) return old

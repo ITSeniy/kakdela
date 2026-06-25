@@ -10,8 +10,15 @@ interface ContextMenuProps {
   editDisabled: boolean
   /** Не отображать «начать тред» — для DM-каналов и для самих тредов. */
   hideStartThread?: boolean
+  /** Закреплено ли сообщение сейчас (для «закрепить» / «открепить»). */
+  pinned?: boolean
+  /** Может ли текущий пользователь закреплять (server: admin/owner; dm: да). */
+  canPin?: boolean
   onReply: () => void
   onStartThread?: () => void
+  onForward?: () => void
+  onPin?: () => void
+  onUnpin?: () => void
   onEdit: () => void
   onDelete: () => void
   onCopyText: () => void
@@ -48,8 +55,8 @@ function Item({
 }
 
 export function ContextMenu({
-  x, y, isOwn, canDelete, editDisabled, hideStartThread,
-  onReply, onStartThread, onEdit, onDelete, onCopyText, onCopyLink, onClose,
+  x, y, isOwn, canDelete, editDisabled, hideStartThread, pinned, canPin,
+  onReply, onStartThread, onForward, onPin, onUnpin, onEdit, onDelete, onCopyText, onCopyLink, onClose,
 }: ContextMenuProps) {
   const ref = useRef<HTMLDivElement>(null)
   // Позиция после измерения реального размера меню: пока null — рендерим
@@ -111,6 +118,13 @@ export function ContextMenu({
       )}
       <Item onClick={() => { onCopyText(); onClose() }}>Копировать текст</Item>
       <Item onClick={() => { onCopyLink(); onClose() }}>Копировать ссылку</Item>
+      {onForward && (
+        <Item onClick={() => { onForward(); onClose() }}>↪ Переслать</Item>
+      )}
+      {canPin && (pinned
+        ? <Item onClick={() => { onUnpin?.(); onClose() }}>Открепить</Item>
+        : <Item onClick={() => { onPin?.(); onClose() }}>📌 Закрепить</Item>
+      )}
       {isOwn && (
         <Item
           onClick={() => { onEdit(); onClose() }}

@@ -1,4 +1,5 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 
 import type { Channel, CustomEmoji, MemberPublic, Message as IMessage } from '@kakdela/ginzu/api-types'
 
@@ -6,12 +7,16 @@ import { Avatar } from '../../components/Avatar.js'
 import { Badge } from '../../components/Badge.js'
 import { confirmDialog } from '../../components/ConfirmDialog.js'
 import { Icon } from '../../components/Icon.js'
+import { toast } from '../../components/toast/index.js'
 import { useProfileUi } from '../profile/store.js'
 import { useAppearance } from '../settings/appearance.js'
 import { useThreadUi } from '../threads/store.js'
+import { pinMessage, unpinMessage } from './api.js'
 import { AttachmentList } from './AttachmentView.js'
 import { useChatDisplaySettings } from './displaySettings.js'
 import { ContextMenu } from './ContextMenu.js'
+import { ForwardedCard } from './ForwardedCard.js'
+import { useForwardUi } from './forwardStore.js'
 import { Reactions } from './Reactions.js'
 import { renderMarkdown, renderMarkdownInline } from './markdown.js'
 import type { PendingMessage } from './types.js'
@@ -30,6 +35,8 @@ interface MessageProps {
   emojiMap?: ReadonlyMap<string, CustomEmoji>
   /** В DM и внутри самого треда «начать тред» прятать. */
   threadsAllowed?: boolean
+  /** Может ли текущий пользователь закреплять (server: admin/owner). */
+  canPin?: boolean
   onEdit: (id: string, content: string) => void
   onDelete: (id: string) => void
   onRetry?: () => void
@@ -159,7 +166,7 @@ function scrollToMessage(id: string) {
 
 export function Message({
   message, prev, member, isOwn, currentUserId, pendingStatus,
-  memberMap, channelMap, emojiMap, threadsAllowed = true,
+  memberMap, channelMap, emojiMap, threadsAllowed = true, canPin = false,
   onEdit, onDelete, onRetry, onReply, onAddReaction, onRemoveReaction,
 }: MessageProps) {
   const [editing, setEditing] = useState(false)
@@ -169,6 +176,20 @@ export function Message({
   const openProfile = useProfileUi((s) => s.open)
   const openThread = useThreadUi((s) => s.open)
   const startCreateThread = useThreadUi((s) => s.startCreate)
+  const openForward = useForwardUi((s) => s.open)
+  const queryClient = useQueryClient()
+
+  // Пин/откреп — self-contained: дергаем API, обновление прилетит по WS msg.pin
+  // (useMessages патчит pinned), список пинов в шапке инвалидируем тут же.
+  function handlePinToggle(pin: boolean) {
+    const fn = pin ? pinMessage : unpinMessage
+    fn(message.id)
+      .then(() => queryClient.invalidateQueries({ queryKey: ['pins', message.channelId] }))
+      .catch((err) => {
+        toast.error(pin ? 'не удалось закрепить' : 'не удалось открепить')
+        console.error('[pin] failed', err)
+      })
+  }
 
   useEffect(() => {
     if (editing) setDraft(message.content)
@@ -278,14 +299,27 @@ export function Message({
       canDelete={canDelete}
       editDisabled={editDisabled}
       hideStartThread={!threadsAllowed || msgThread !== null}
+      pinned={(message as IMessage).pinned}
+      canPin={canPin}
       onReply={() => onReply(message as IMessage)}
       onStartThread={handleStartThread}
+      onForward={() => openForward(message as IMessage)}
+      onPin={() => handlePinToggle(true)}
+      onUnpin={() => handlePinToggle(false)}
       onEdit={() => setEditing(true)}
       onDelete={() => void confirmDelete(false)}
       onCopyText={copyContent}
       onCopyLink={copyLink}
       onClose={() => setMenuPos(null)}
     />
+  ) : null
+
+  const fwd = (message as IMessage).forwarded
+  const forwardedEl = fwd ? (
+    <ForwardedCard fwd={fwd} memberMap={memberMap} channelMap={channelMap} emojiMap={emojiMap} />
+  ) : null
+  const pinnedTag = (message as IMessage).pinned ? (
+    <div className="flex items-center gap-1 text-[10px] text-kd-warm font-mono mb-0.5 select-none">📌 закреплено</div>
   ) : null
 
   function ThreadBadge() {
@@ -433,6 +467,7 @@ export function Message({
             {name}
           </button>
           <div className="flex-1 min-w-0">
+            {pinnedTag}
             {message.content && (
               <span className="text-[13px] text-kd-text leading-snug break-words">
                 <span className="kd-md inline" dangerouslySetInnerHTML={{ __html: html }} />
@@ -441,6 +476,7 @@ export function Message({
                 )}
               </span>
             )}
+            {forwardedEl}
             {pendingStatus === 'error' && onRetry && (
               <button type="button" onClick={onRetry} className="text-[9px] text-kd-danger font-mono hover:underline ml-1">
                 ошибка · повторить?
@@ -472,6 +508,7 @@ export function Message({
           {time}
         </span>
         <div className="flex-1 min-w-0">
+          {pinnedTag}
           {message.content && (
             <div className="text-[13px] text-kd-text leading-relaxed break-words min-w-0">
               <div className="kd-md" dangerouslySetInnerHTML={{ __html: html }} />
@@ -480,6 +517,7 @@ export function Message({
               )}
             </div>
           )}
+          {forwardedEl}
           {pendingStatus === 'error' && onRetry && (
             <button type="button" onClick={onRetry} className="text-[9px] text-kd-danger font-mono hover:underline">
               ошибка · повторить?
@@ -531,6 +569,7 @@ export function Message({
               </button>
             )}
           </div>
+          {pinnedTag}
           {message.content && (
             <div className="text-[13px] text-kd-text leading-relaxed mt-0.5 break-words min-w-0">
               <div className="kd-md" dangerouslySetInnerHTML={{ __html: html }} />
@@ -539,6 +578,7 @@ export function Message({
               )}
             </div>
           )}
+          {forwardedEl}
           {msgAttachments.length > 0 && <AttachmentList attachments={msgAttachments} lightboxContext={lightboxContext} />}
           <ThreadBadge />
           {reactionsEl}

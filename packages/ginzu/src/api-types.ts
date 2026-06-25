@@ -71,6 +71,22 @@ export const ThreadInfoSchema = z.object({
 })
 export type ThreadInfo = z.infer<typeof ThreadInfoSchema>
 
+// Снимок пересланного сообщения: денормализуем автора/текст/вложения на момент
+// пересыла, чтобы карточка рендерилась даже если получатель не имеет доступа к
+// исходному каналу или оригинал потом изменили/удалили. messageId/channelId —
+// для перехода к оригиналу, когда он доступен.
+export const ForwardedRefSchema = z.object({
+  messageId:    z.string().uuid().nullable(),
+  channelId:    z.string().uuid().nullable(),
+  channelLabel: z.string(),
+  authorId:     z.string().uuid(),
+  authorName:   z.string(),
+  content:      z.string(),
+  createdAt:    z.string(),
+  attachments:  z.array(AttachmentSchema).default([]),
+})
+export type ForwardedRef = z.infer<typeof ForwardedRefSchema>
+
 export const MessageSchema = z.object({
   id: z.string().uuid(),
   channelId: z.string().uuid(),
@@ -83,6 +99,11 @@ export const MessageSchema = z.object({
   reactions: z.array(ReactionAggregateSchema).default([]),
   attachments: z.array(AttachmentSchema).default([]),
   thread: ThreadInfoSchema.nullable().optional(),
+  /** Закреплено в канале (pinnedAt — момент закрепления). */
+  pinned: z.boolean().default(false),
+  pinnedAt: z.string().nullable().optional(),
+  /** Пересланное сообщение — снимок оригинала. */
+  forwarded: ForwardedRefSchema.nullable().optional(),
 })
 export type Message = z.infer<typeof MessageSchema>
 
@@ -166,6 +187,18 @@ export const MessagesPageSchema = z.object({
   nextCursor: z.string().uuid().nullable(),
 })
 export type MessagesPage = z.infer<typeof MessagesPageSchema>
+
+export const ForwardMessageRequestSchema = z.object({
+  toChannelId: z.string().uuid(),
+  /** Необязательная подпись от пересылающего над карточкой оригинала. */
+  note: z.string().max(4000).optional(),
+})
+export type ForwardMessageRequest = z.infer<typeof ForwardMessageRequestSchema>
+
+export const PinnedMessagesResponseSchema = z.object({
+  messages: z.array(MessageSchema),
+})
+export type PinnedMessagesResponse = z.infer<typeof PinnedMessagesResponseSchema>
 
 export const MemberPublicSchema = z.object({
   id: z.string().uuid(),

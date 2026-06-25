@@ -1,4 +1,4 @@
-import type { Message, MessagesPage } from '@kakdela/ginzu/api-types'
+import type { Message, MessagesPage, PinnedMessagesResponse } from '@kakdela/ginzu/api-types'
 
 import { apiFetch } from '../../lib/api.js'
 
@@ -49,5 +49,27 @@ export async function addReaction(messageId: string, emoji: string): Promise<voi
 export async function removeReaction(messageId: string, emoji: string): Promise<void> {
   await apiFetch<void>(`/api/messages/${messageId}/reactions/${encodeURIComponent(emoji)}`, {
     method: 'DELETE',
+  })
+}
+
+export async function pinMessage(id: string): Promise<Message> {
+  return apiFetch<Message>(`/api/messages/${id}/pin`, { method: 'POST' })
+}
+
+export async function unpinMessage(id: string): Promise<Message> {
+  return apiFetch<Message>(`/api/messages/${id}/pin`, { method: 'DELETE' })
+}
+
+export async function listPins(channelId: string): Promise<PinnedMessagesResponse> {
+  return apiFetch<PinnedMessagesResponse>(`/api/channels/${channelId}/pins`)
+}
+
+export async function forwardMessage(
+  id: string,
+  body: { toChannelId: string; note?: string },
+): Promise<Message> {
+  return apiFetch<Message>(`/api/messages/${id}/forward`, {
+    method: 'POST',
+    body: JSON.stringify(body),
   })
 }

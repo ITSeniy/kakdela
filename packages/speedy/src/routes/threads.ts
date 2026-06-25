@@ -176,6 +176,9 @@ export const threadsRoutes: FastifyPluginAsyncZod = async (app) => {
             reactions:   [],
             attachments: [],
             thread:      null,
+            pinned:      false,
+            pinnedAt:    null,
+            forwarded:   null,
           }
         }
       }
