@@ -56,6 +56,11 @@ const ERROR_MESSAGES: Record<string, string> = {
   'missing-to-channel':  'Не указан канал назначения',
   'bad-target-channel':  'Переместить можно только в голосовой канал того же сервера',
 
+  // — GIF (GIPHY) —
+  'giphy-disabled':     'GIF-поиск не настроен на сервере',
+  'giphy-rate-limited': 'GIF: слишком много запросов — попробуйте через минуту',
+  'giphy-upstream':     'GIPHY временно недоступен',
+
   // — общее —
   'rate-limited':  'Слишком часто — подождите немного',
   'not_found':     'Не найдено',

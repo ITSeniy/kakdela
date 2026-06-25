@@ -1,11 +1,13 @@
 import React, { type ClipboardEvent, type DragEvent, type KeyboardEvent, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 
-import type { Attachment, CustomEmoji, MemberPublic, Message } from '@kakdela/ginzu/api-types'
+import type { Attachment, CustomEmoji, GiphyGif, MemberPublic, Message } from '@kakdela/ginzu/api-types'
 
 import { Avatar } from '../../components/Avatar.js'
 import { Icon } from '../../components/Icon.js'
 import { wsClient } from '../../lib/ws.js'
 import { useAuthStore } from '../auth/store.js'
+import { getGiphyConfig } from '../giphy/api.js'
 import {
   MAX_ATTACHMENT_SIZE,
   UploadError,
@@ -18,6 +20,7 @@ import {
 import { Attachments, type PendingAttachment } from './Attachments.js'
 
 const LazyEmojiPicker = React.lazy(() => import('./EmojiPicker.js'))
+const LazyGifPicker = React.lazy(() => import('../giphy/GifPicker.js'))
 
 const MAX_ATTACHMENTS = 10
 
@@ -139,6 +142,7 @@ export function Composer({
   const [isDragOver, setIsDragOver] = useState(false)
   const [warning, setWarning] = useState<string | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
+  const [gifOpen, setGifOpen] = useState(false)
   // Всплывашка форматирования — пока в textarea есть выделение.
   const [hasSelection, setHasSelection] = useState(false)
   // @упоминание под курсором: позиция '@' и набранный кусок имени.
@@ -150,9 +154,36 @@ export function Composer({
   const taRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const pickerContainerRef = useRef<HTMLDivElement>(null)
+  const gifContainerRef = useRef<HTMLDivElement>(null)
   const dragCounter = useRef(0)
+
+  // Включён ли GIF-пикер (есть ли GIPHY_API_KEY на сервере). Спрашиваем раз.
+  const { data: gifConfig } = useQuery({
+    queryKey: ['giphy-config'],
+    queryFn: getGiphyConfig,
+    staleTime: Infinity,
+  })
+  const gifEnabled = gifConfig?.enabled ?? false
+
+  function sendGif(gif: GiphyGif) {
+    // Discord-style: гифка уходит сразу отдельным сообщением (CDN-URL GIPHY,
+    // рендерится как markdown-картинка). Текст композера не трогаем.
+    onSend(`![](${gif.url})`, [])
+    setGifOpen(false)
+  }
   const attachmentsRef = useRef<PendingAttachment[]>([])
   attachmentsRef.current = attachments
+
+  useEffect(() => {
+    if (!gifOpen) return
+    function handleMouseDown(e: MouseEvent) {
+      if (gifContainerRef.current && !gifContainerRef.current.contains(e.target as Node)) {
+        setGifOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleMouseDown)
+    return () => document.removeEventListener('mousedown', handleMouseDown)
+  }, [gifOpen])
 
   useEffect(() => {
     if (!pickerOpen) return
@@ -654,11 +685,30 @@ export function Composer({
         />
         <div className="flex items-center gap-2 text-kd-text-mute shrink-0">
           <span className="text-[10px] font-mono opacity-70 select-none">md</span>
+          {gifEnabled && (
+            <div className="relative" ref={gifContainerRef}>
+              <button
+                type="button"
+                title="гифки"
+                onClick={() => { setGifOpen((o) => !o); setPickerOpen(false) }}
+                className={`text-[10px] font-mono font-bold leading-none px-1 py-0.5 rounded border transition-colors ${gifOpen ? 'border-kd-accent text-kd-accent' : 'border-kd-border hover:text-kd-text-soft'}`}
+              >
+                GIF
+              </button>
+              {gifOpen && (
+                <div className="absolute bottom-8 right-0 z-50 shadow-lg">
+                  <Suspense fallback={<div className="p-3 text-[11px] text-kd-text-mute bg-kd-panel rounded-kd border border-kd-border">…</div>}>
+                    <LazyGifPicker onSelect={sendGif} />
+                  </Suspense>
+                </div>
+              )}
+            </div>
+          )}
           <div className="relative" ref={pickerContainerRef}>
             <button
               type="button"
               title="эмодзи"
-              onClick={() => setPickerOpen((o) => !o)}
+              onClick={() => { setPickerOpen((o) => !o); setGifOpen(false) }}
               className="hover:text-kd-text-soft transition-colors"
             >
               <Icon.Smile size={15} />

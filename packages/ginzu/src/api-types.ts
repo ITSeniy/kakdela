@@ -200,6 +200,30 @@ export const PinnedMessagesResponseSchema = z.object({
 })
 export type PinnedMessagesResponse = z.infer<typeof PinnedMessagesResponseSchema>
 
+// ───── GIFs (GIPHY-прокси) ─────
+
+export const GiphyGifSchema = z.object({
+  id: z.string(),
+  /** URL гифки для отправки/показа (downsized с CDN GIPHY — не рехостим). */
+  url: z.string().url(),
+  /** Маленькое превью для грида пикера. */
+  previewUrl: z.string().url(),
+  width: z.number().int().positive(),
+  height: z.number().int().positive(),
+  title: z.string(),
+})
+export type GiphyGif = z.infer<typeof GiphyGifSchema>
+
+export const GiphyResponseSchema = z.object({
+  gifs: z.array(GiphyGifSchema),
+  /** Offset следующей страницы или null, если результаты кончились. */
+  nextOffset: z.number().int().nonnegative().nullable(),
+})
+export type GiphyResponse = z.infer<typeof GiphyResponseSchema>
+
+export const GiphyConfigSchema = z.object({ enabled: z.boolean() })
+export type GiphyConfig = z.infer<typeof GiphyConfigSchema>
+
 export const MemberPublicSchema = z.object({
   id: z.string().uuid(),
   displayName: z.string().max(64),
