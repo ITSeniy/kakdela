@@ -7,7 +7,9 @@ import type { LocalVideoTrack, RemoteVideoTrack } from 'livekit-client'
 import { Badge } from '../../components/Badge.js'
 import { Icon } from '../../components/Icon.js'
 import {
+  getLocalCameraVideoTrack,
   getLocalScreenVideoTrack,
+  getRemoteCameraVideoTrack,
   getRemoteScreenVideoTrack,
   watchScreen,
 } from '../../lib/livekit.js'
@@ -27,6 +29,7 @@ import {
   type ScreenQuality,
 } from './screenShareSettings.js'
 import { snapshotTrack } from './snapshot.js'
+import { useCamera } from './useCamera.js'
 import { useScreenShare } from './useScreenShare.js'
 import { useVoiceRoom } from './useVoiceRoom.js'
 import { useVoiceStore, type ParticipantState } from './store.js'
@@ -53,6 +56,7 @@ interface CardData {
   serverMuted: boolean
   serverDeafened: boolean
   screenTrack: LocalVideoTrack | RemoteVideoTrack | null
+  cameraTrack: LocalVideoTrack | RemoteVideoTrack | null
 }
 
 // Секундомер звонка — чисто локальный (от момента join на этом клиенте).
@@ -276,6 +280,7 @@ function Card({
       isSelf={card.isSelf}
       compact={compact}
       avatarSize={avatarSize}
+      cameraTrack={card.cameraTrack}
       onClick={onClick}
     />
   )
@@ -285,12 +290,14 @@ export function VoiceScreen({ serverId, channel }: VoiceScreenProps) {
   const me = useAuthStore((s) => s.user)
   const { join, leave, toggleMute, toggleDeafen } = useVoiceRoom()
   const { startShare, stopShare, restartShare } = useScreenShare()
+  const { startCamera, stopCamera } = useCamera()
   const setScreenQuality = useScreenShareSettings((s) => s.setScreenQuality)
 
   const activeChannelId = useVoiceStore((s) => s.activeChannelId)
   const status = useVoiceStore((s) => s.status)
   const muted = useVoiceStore((s) => s.muted)
   const screenSharing = useVoiceStore((s) => s.screenSharing)
+  const cameraOn = useVoiceStore((s) => s.cameraOn)
   const participants = useVoiceStore((s) => s.participants)
   const activeSpeakers = useVoiceStore((s) => s.activeSpeakers)
   const selfSpeaking = useVoiceStore((s) => s.selfSpeaking)
@@ -396,6 +403,7 @@ export function VoiceScreen({ serverId, channel }: VoiceScreenProps) {
       serverMuted: false,
       serverDeafened: false,
       screenTrack: screenSharing ? getLocalScreenVideoTrack() : null,
+      cameraTrack: cameraOn ? getLocalCameraVideoTrack() : null,
     }, screenSharing)
     for (const p of participants.values() as IterableIterator<ParticipantState>) {
       if (p.userId === me.id) continue
@@ -412,10 +420,11 @@ export function VoiceScreen({ serverId, channel }: VoiceScreenProps) {
         screenTrack: p.isScreenSharing && watchedScreens.has(p.userId)
           ? getRemoteScreenVideoTrack(p.userId)
           : null,
+        cameraTrack: p.isCameraOn ? getRemoteCameraVideoTrack(p.userId) : null,
       }, p.isScreenSharing)
     }
     return result
-  }, [connectedToThis, me, muted, screenSharing, participants, activeSpeakers, selfSpeaking, watchedScreens, memberMap])
+  }, [connectedToThis, me, muted, screenSharing, cameraOn, participants, activeSpeakers, selfSpeaking, watchedScreens, memberMap])
 
   // Кто смотрит чью демку: для бейджа на карточке стрима.
   const watchersOf = useMemo(() => {
@@ -460,6 +469,11 @@ export function VoiceScreen({ serverId, channel }: VoiceScreenProps) {
       // `withAudio` берётся внутри startShare из useScreenShareSettings.
       void startShare()
     }
+  }
+
+  const onToggleCamera = (): void => {
+    if (cameraOn) void stopCamera()
+    else void startCamera()
   }
 
   const onChangeScreenQuality = (q: ScreenQuality): void => {
@@ -617,6 +631,7 @@ export function VoiceScreen({ serverId, channel }: VoiceScreenProps) {
           <VoiceControls
             onToggleMute={() => { void toggleMute() }}
             onToggleDeafen={() => { void toggleDeafen() }}
+            onToggleCamera={onToggleCamera}
             onToggleScreenShare={onToggleScreenShare}
             onChangeScreenQuality={onChangeScreenQuality}
             onLeave={() => { void leave() }}

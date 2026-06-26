@@ -13,6 +13,7 @@ import { useVoiceStore } from './store.js'
 interface VoiceControlsProps {
   onToggleMute(): void
   onToggleDeafen(): void
+  onToggleCamera(): void
   onToggleScreenShare(): void
   onChangeScreenQuality(q: ScreenQuality): void
   onLeave(): void
@@ -185,12 +186,14 @@ function ScreenShareButton({
 export function VoiceControls({
   onToggleMute,
   onToggleDeafen,
+  onToggleCamera,
   onToggleScreenShare,
   onChangeScreenQuality,
   onLeave,
 }: VoiceControlsProps) {
   const muted = useVoiceStore((s) => s.muted)
   const deafened = useVoiceStore((s) => s.deafened)
+  const cameraOn = useVoiceStore((s) => s.cameraOn)
   const status = useVoiceStore((s) => s.status)
   const error = useVoiceStore((s) => s.error)
   const pttHolding = useVoiceStore((s) => s.pttHolding)
@@ -241,6 +244,16 @@ export function VoiceControls({
         tone={deafened ? 'mute' : 'default'}
       >
         <Icon.Headphones size={13} />
+      </CtrlButton>
+
+      <CtrlButton
+        label={cameraOn ? 'камера' : 'камера (выкл)'}
+        onClick={onToggleCamera}
+        active={cameraOn}
+        tone={cameraOn ? 'hot' : 'default'}
+        title={cameraOn ? 'выключить веб-камеру' : 'включить веб-камеру'}
+      >
+        <Icon.Video size={13} />
       </CtrlButton>
 
       <ScreenShareButton

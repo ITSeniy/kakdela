@@ -169,11 +169,13 @@ export function DmScreen({ channelId }: DmScreenProps) {
     setReplyTo(null)
 
     try {
+      const spoilerIds = attachments.filter((a) => a.spoiler).map((a) => a.id)
       const sent = await sendMessage(channelId, {
         content,
         ...(replyId ? { replyToId: replyId } : {}),
         clientNonce: nonce,
         ...(attachments.length > 0 ? { attachments: attachments.map((a) => a.id) } : {}),
+        ...(spoilerIds.length > 0 ? { spoilerAttachments: spoilerIds } : {}),
       })
       queryClient.setQueryData<MsgCache>(['messages', channelId], (old) => {
         if (!old || old.pages.length === 0) return old

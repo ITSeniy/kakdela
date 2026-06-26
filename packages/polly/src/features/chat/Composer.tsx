@@ -139,6 +139,8 @@ export function Composer({
 }: ComposerProps) {
   const [text, setText] = useState('')
   const [attachments, setAttachments] = useState<PendingAttachment[]>([])
+  // localId вложений, помеченных спойлером (блюр до клика у получателя).
+  const [spoilered, setSpoilered] = useState<Set<string>>(() => new Set())
   const [isDragOver, setIsDragOver] = useState(false)
   const [warning, setWarning] = useState<string | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -435,6 +437,12 @@ export function Composer({
     const item = attachmentsRef.current.find((a) => a.localId === localId)
     if (item && item.status === 'uploading') item.abort.abort()
     setAttachments((arr) => arr.filter((a) => a.localId !== localId))
+    setSpoilered((prev) => {
+      if (!prev.has(localId)) return prev
+      const next = new Set(prev)
+      next.delete(localId)
+      return next
+    })
   }
 
   async function pickFiles() {
@@ -515,14 +523,28 @@ export function Composer({
 
   function send() {
     const trimmed = text.trim()
-    const ready: Attachment[] = attachments.flatMap((a) => (a.status === 'ready' ? [a.attachment] : []))
+    // Спойлер-флаг проставляем прямо на Attachment — он уезжает и в оптимистичный
+    // рендер, и в запрос (ChatScreen достанет spoilerAttachments из этого поля).
+    const ready: Attachment[] = attachments.flatMap((a) =>
+      a.status === 'ready' ? [{ ...a.attachment, spoiler: spoilered.has(a.localId) }] : [],
+    )
     const stillUploading = attachments.some((a) => a.status === 'uploading')
     if (stillUploading) return
     if (!trimmed && ready.length === 0) return
     onSend(trimmed, ready)
     setText('')
     setAttachments([])
+    setSpoilered(new Set())
     setMention(null)
+  }
+
+  function toggleSpoiler(localId: string) {
+    setSpoilered((prev) => {
+      const next = new Set(prev)
+      if (next.has(localId)) next.delete(localId)
+      else next.add(localId)
+      return next
+    })
   }
 
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
@@ -600,7 +622,7 @@ export function Composer({
           </button>
         </div>
       )}
-      <Attachments items={attachments} onRemove={removeAttachment} />
+      <Attachments items={attachments} spoilered={spoilered} onRemove={removeAttachment} onToggleSpoiler={toggleSpoiler} />
       {warning && (
         <div className="mb-1.5 text-[10px] text-kd-danger font-mono">{warning}</div>
       )}

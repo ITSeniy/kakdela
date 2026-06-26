@@ -1,0 +1,1 @@
+ALTER TABLE "files" ADD COLUMN "spoiler" boolean DEFAULT false NOT NULL;

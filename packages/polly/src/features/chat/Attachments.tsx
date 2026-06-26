@@ -11,7 +11,10 @@ export type PendingAttachment =
 
 interface AttachmentsProps {
   items: PendingAttachment[]
+  /** localId вложений, помеченных спойлером. */
+  spoilered: ReadonlySet<string>
   onRemove: (localId: string) => void
+  onToggleSpoiler: (localId: string) => void
 }
 
 function isImage(file: File): boolean {
@@ -40,7 +43,7 @@ function ThumbGeneric({ file }: { file: File }) {
   )
 }
 
-export function Attachments({ items, onRemove }: AttachmentsProps) {
+export function Attachments({ items, spoilered, onRemove, onToggleSpoiler }: AttachmentsProps) {
   if (items.length === 0) return null
   return (
     <div className="mb-2 px-3 py-2 bg-kd-panel rounded-kd border border-kd-border flex gap-2 overflow-x-auto">
@@ -48,6 +51,7 @@ export function Attachments({ items, onRemove }: AttachmentsProps) {
         const failed = item.status === 'error'
         const uploading = item.status === 'uploading'
         const pct = uploading ? item.pct : item.status === 'ready' ? 100 : 0
+        const isSpoiler = spoilered.has(item.localId)
         return (
           <div
             key={item.localId}
@@ -55,7 +59,9 @@ export function Attachments({ items, onRemove }: AttachmentsProps) {
             title={item.file.name}
           >
             <div className="relative aspect-square">
-              {isImage(item.file) ? <ThumbImage file={item.file} /> : <ThumbGeneric file={item.file} />}
+              <div className={isSpoiler ? 'w-full h-full blur-md' : 'w-full h-full'}>
+                {isImage(item.file) ? <ThumbImage file={item.file} /> : <ThumbGeneric file={item.file} />}
+              </div>
               <button
                 type="button"
                 onClick={() => onRemove(item.localId)}
@@ -63,6 +69,17 @@ export function Attachments({ items, onRemove }: AttachmentsProps) {
                 className="absolute top-1 right-1 w-5 h-5 rounded-full bg-kd-bg-deep/85 text-kd-text-soft hover:text-kd-danger flex items-center justify-center font-bold text-[12px] leading-none"
               >
                 ×
+              </button>
+              <button
+                type="button"
+                onClick={() => onToggleSpoiler(item.localId)}
+                title={isSpoiler ? 'снять спойлер' : 'пометить спойлером'}
+                className={[
+                  'absolute top-1 left-1 px-1.5 h-5 rounded flex items-center justify-center text-[9px] font-mono font-bold transition-colors',
+                  isSpoiler ? 'bg-kd-warm text-white' : 'bg-kd-bg-deep/85 text-kd-text-soft hover:text-kd-text',
+                ].join(' ')}
+              >
+                {isSpoiler ? '◉ спойлер' : 'спойлер'}
               </button>
               {failed && (
                 <div className="absolute inset-0 flex items-center justify-center bg-kd-danger/30 text-kd-danger font-mono text-[10px] font-bold">

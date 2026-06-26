@@ -78,6 +78,7 @@ export function toAttachment(row: {
   sizeBytes: number
   width: number | null
   height: number | null
+  spoiler?: boolean
 }): Attachment {
   return {
     id:           row.id,
@@ -89,6 +90,7 @@ export function toAttachment(row: {
     sizeBytes:    row.sizeBytes,
     width:        row.width,
     height:       row.height,
+    spoiler:      row.spoiler ?? false,
   }
 }
 
@@ -375,8 +377,11 @@ export async function attachFilesToMessage(opts: {
   fileIds: string[]
   ownerId: string
   messageId: string
+  /** Подмножество fileIds, помечаемых спойлером. */
+  spoilerFileIds?: string[]
 }): Promise<Attachment[]> {
   const { fileIds, ownerId, messageId } = opts
+  const spoilerSet = new Set(opts.spoilerFileIds ?? [])
   if (fileIds.length === 0) return []
 
   const rows = await db
@@ -411,8 +416,12 @@ export async function attachFilesToMessage(opts: {
   }
 
   await db.update(files).set({ messageId }).where(inArray(files.id, fileIds))
+  const spoilerIds = ordered.map((r) => r.id).filter((id) => spoilerSet.has(id))
+  if (spoilerIds.length > 0) {
+    await db.update(files).set({ spoiler: true }).where(inArray(files.id, spoilerIds))
+  }
 
-  return ordered.map(toAttachment)
+  return ordered.map((r) => toAttachment({ ...r, spoiler: spoilerSet.has(r.id) }))
 }
 
 export async function loadAttachmentsForMessages(messageIds: string[]): Promise<Map<string, Attachment[]>> {

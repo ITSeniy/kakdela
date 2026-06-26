@@ -130,6 +130,27 @@ function FileCard({ attachment }: { attachment: Attachment }) {
   )
 }
 
+/** Пер-вложенный спойлер: элемент скрыт блюром + плашкой до клика. Отдельно
+    от NSFW-блюра (тот гасит весь блок одной кнопкой). */
+function SpoilerWrap({ children }: { children: React.ReactNode }) {
+  const [revealed, setRevealed] = useState(false)
+  if (revealed) return <>{children}</>
+  return (
+    <div className="relative inline-block">
+      <div className="blur-xl pointer-events-none select-none">{children}</div>
+      <button
+        type="button"
+        onClick={() => setRevealed(true)}
+        className="absolute inset-0 flex items-center justify-center rounded-kd bg-kd-overlay-soft"
+      >
+        <span className="px-2 py-0.5 rounded bg-kd-bg-deep/80 text-[10px] font-mono font-bold text-kd-text uppercase tracking-wide">
+          спойлер
+        </span>
+      </button>
+    </div>
+  )
+}
+
 export function AttachmentList({ attachments, lightboxContext, blur = false }: AttachmentListProps) {
   const [lightboxIdx, setLightboxIdx] = useState<number | null>(null)
   // NSFW-канал: медиа скрыто за блюром до первого клика «показать».
@@ -144,23 +165,29 @@ export function AttachmentList({ attachments, lightboxContext, blur = false }: A
     if (idx >= 0) setLightboxIdx(idx)
   }
 
+  function renderItem(att: Attachment) {
+    switch (att.kind) {
+      case 'image':
+        return <ImageThumb attachment={att} onOpen={() => openMedia(att)} />
+      case 'video':
+        return <VideoThumb attachment={att} onOpen={() => openMedia(att)} />
+      case 'audio':
+        return <AudioView attachment={att} />
+      default:
+        return <FileCard attachment={att} />
+    }
+  }
+
   const hideBehindBlur = blur && !revealed
 
   return (
     <div className="mt-1.5 flex flex-col gap-1.5 items-start relative">
       <div className={hideBehindBlur ? 'flex flex-col gap-1.5 items-start blur-xl pointer-events-none select-none' : 'flex flex-col gap-1.5 items-start'}>
-        {attachments.map((att) => {
-          switch (att.kind) {
-            case 'image':
-              return <ImageThumb key={att.id} attachment={att} onOpen={() => openMedia(att)} />
-            case 'video':
-              return <VideoThumb key={att.id} attachment={att} onOpen={() => openMedia(att)} />
-            case 'audio':
-              return <AudioView key={att.id} attachment={att} />
-            default:
-              return <FileCard key={att.id} attachment={att} />
-          }
-        })}
+        {attachments.map((att) => (
+          <div key={att.id}>
+            {att.spoiler ? <SpoilerWrap>{renderItem(att)}</SpoilerWrap> : renderItem(att)}
+          </div>
+        ))}
       </div>
       {hideBehindBlur && (
         <button

@@ -19,6 +19,7 @@ export interface SendMessageBody {
   replyToId?: string
   clientNonce?: string
   attachments?: string[]
+  spoilerAttachments?: string[]
 }
 
 export async function sendMessage(channelId: string, body: SendMessageBody): Promise<Message> {

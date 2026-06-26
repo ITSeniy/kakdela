@@ -5,6 +5,7 @@ import type { Attachment, Channel, MemberPublic, Message, MessagesPage } from '@
 
 type MsgCache = InfiniteData<MessagesPage, string | undefined>
 
+import { Badge } from '../../components/Badge.js'
 import { Icon } from '../../components/Icon.js'
 import { toast } from '../../components/toast/index.js'
 import { ApiError } from '../../lib/api.js'
@@ -42,6 +43,7 @@ function Header({ channel, channelId, memberCount, canPin, memberMap }: {
     <div className="px-4 py-2 border-b border-kd-border bg-kd-panel-alt flex items-center gap-2.5 shrink-0">
       <Icon.Hash size={14} className="text-kd-text-soft shrink-0" />
       <span className="text-[13px] font-bold text-kd-text shrink-0">{channel?.name ?? '—'}</span>
+      {channel?.nsfw && <Badge variant="nsfw">18+</Badge>}
       {channel?.topic && (
         <>
           <div className="w-px h-3.5 bg-kd-border shrink-0" />
@@ -136,11 +138,13 @@ export function ChatScreen({ serverId, channelId }: ChatScreenProps) {
     setReplyTo(null)
 
     try {
+      const spoilerIds = attachments.filter((a) => a.spoiler).map((a) => a.id)
       const sent = await sendMessage(channelId, {
         content,
         ...(replyId ? { replyToId: replyId } : {}),
         clientNonce: nonce,
         ...(attachments.length > 0 ? { attachments: attachments.map((a) => a.id) } : {}),
+        ...(spoilerIds.length > 0 ? { spoilerAttachments: spoilerIds } : {}),
       })
       queryClient.setQueryData<InfiniteData<MessagesPage, string | undefined>>(
         ['messages', channelId],

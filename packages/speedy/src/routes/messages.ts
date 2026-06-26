@@ -444,7 +444,7 @@ export const messagesRoutes: FastifyPluginAsyncZod = async (app) => {
     },
     async (req, reply) => {
       const { channelId } = req.params
-      const { content, replyToId, clientNonce, attachments: attachmentIds } = req.body
+      const { content, replyToId, clientNonce, attachments: attachmentIds, spoilerAttachments } = req.body
       const userId = req.authUser!.id
 
       const access = await assertCanAccessChannel(userId, channelId)
@@ -489,6 +489,7 @@ export const messagesRoutes: FastifyPluginAsyncZod = async (app) => {
           fileIds:   attachmentIds,
           ownerId:   userId,
           messageId: msg.id,
+          spoilerFileIds: spoilerAttachments,
         })
       }
 

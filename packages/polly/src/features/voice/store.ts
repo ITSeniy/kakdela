@@ -10,6 +10,9 @@ export interface ParticipantState {
   displayName: string
   isSpeaking: boolean
   isScreenSharing: boolean
+  // Включена веб-камера (Track.Source.Camera). Состояние чисто из LiveKit —
+  // сервер про камеру не знает.
+  isCameraOn: boolean
   isMuted: boolean
   // Серверная модерация (admin mute/deafen) — приходит по WS voice.mod.
   serverMuted: boolean
@@ -32,6 +35,8 @@ interface VoiceState {
   forcedMuted: boolean
   forcedDeafened: boolean
   screenSharing: boolean
+  // Моя веб-камера включена (зеркалит реальную публикацию Camera-трека).
+  cameraOn: boolean
   // PTT — пользователь сейчас удерживает hotkey. Только в memory: при
   // перезапуске сам по себе не «зажат».
   pttHolding: boolean
@@ -62,6 +67,7 @@ interface VoiceActions {
   setMutedBeforeDeafen(m: boolean): void
   setForced(muted: boolean, deafened: boolean): void
   setScreenSharing(s: boolean): void
+  setCameraOn(on: boolean): void
   setPinnedScreenUserId(id: string | null): void
   setPttHolding(holding: boolean): void
   setSelfSpeaking(speaking: boolean): void
@@ -84,6 +90,7 @@ const initialState: VoiceState = {
   forcedMuted: false,
   forcedDeafened: false,
   screenSharing: false,
+  cameraOn: false,
   pttHolding: false,
   selfSpeaking: false,
   participants: new Map(),
@@ -172,6 +179,10 @@ export const useVoiceStore = create<VoiceState & VoiceActions>()(persist((set) =
     set({ screenSharing: s })
   },
 
+  setCameraOn(on) {
+    set({ cameraOn: on })
+  },
+
   setPinnedScreenUserId(id) {
     set({ pinnedScreenUserId: id })
   },
@@ -242,6 +253,7 @@ export const useVoiceStore = create<VoiceState & VoiceActions>()(persist((set) =
         displayName: p.displayName,
         isSpeaking: p.isSpeaking ?? existing?.isSpeaking ?? false,
         isScreenSharing: p.isScreenSharing ?? existing?.isScreenSharing ?? false,
+        isCameraOn: p.isCameraOn ?? existing?.isCameraOn ?? false,
         isMuted: p.isMuted ?? existing?.isMuted ?? false,
         serverMuted: p.serverMuted ?? existing?.serverMuted ?? false,
         serverDeafened: p.serverDeafened ?? existing?.serverDeafened ?? false,
@@ -293,6 +305,7 @@ export const useVoiceStore = create<VoiceState & VoiceActions>()(persist((set) =
         displayName: item.displayName,
         isSpeaking: false,
         isScreenSharing: item.isScreenSharing,
+        isCameraOn: false,
         isMuted: item.isMuted,
         serverMuted: item.serverMuted,
         serverDeafened: item.serverDeafened,

@@ -1,3 +1,7 @@
+import { useEffect, useRef } from 'react'
+
+import type { LocalVideoTrack, RemoteVideoTrack } from 'livekit-client'
+
 import { Avatar } from '../../components/Avatar.js'
 import { Icon } from '../../components/Icon.js'
 import { useAppearance } from '../settings/appearance.js'
@@ -15,6 +19,8 @@ interface ParticipantTileProps {
   compact?: boolean
   /** Размер аватара, если раскладка знает размер карточки. */
   avatarSize?: number
+  /** Трек веб-камеры участника — если есть, показываем видео вместо аватара. */
+  cameraTrack?: LocalVideoTrack | RemoteVideoTrack | null
   /** Клик по карточке (развернуть/свернуть, как в Discord). */
   onClick?(): void
 }
@@ -35,12 +41,22 @@ export function ParticipantTile({
   isSelf,
   compact,
   avatarSize: avatarSizeProp,
+  cameraTrack,
   onClick,
 }: ParticipantTileProps) {
   const avatarSize = avatarSizeProp ?? (compact ? AVATAR_SIZE_COMPACT : AVATAR_SIZE)
   const hoverCls = useAppearance((s) => s.hoverHighlight)
     ? 'hover:brightness-110 transition-[filter,box-shadow]'
     : ''
+
+  const videoRef = useRef<HTMLVideoElement | null>(null)
+  useEffect(() => {
+    const el = videoRef.current
+    if (!el || !cameraTrack) return
+    cameraTrack.attach(el)
+    return () => { try { cameraTrack.detach(el) } catch { /* already detached */ } }
+  }, [cameraTrack])
+
   return (
     <div
       role={onClick ? 'button' : undefined}
@@ -63,11 +79,23 @@ export function ParticipantTile({
         transition: 'box-shadow 200ms ease-out',
       }}
     >
-      <Avatar
-        name={displayName}
-        avatarUrl={avatarUrl ?? null}
-        size={avatarSize}
-      />
+      {cameraTrack ? (
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          muted
+          // Своё видео зеркалим — привычное «селфи»-поведение, как в Discord.
+          className="absolute inset-0 w-full h-full object-cover"
+          style={isSelf ? { transform: 'scaleX(-1)' } : undefined}
+        />
+      ) : (
+        <Avatar
+          name={displayName}
+          avatarUrl={avatarUrl ?? null}
+          size={avatarSize}
+        />
+      )}
       <div className={`absolute left-1.5 bottom-1.5 flex items-center gap-1 px-1.5 py-0.5 rounded font-mono bg-kd-overlay-strong text-kd-stage-text ${compact ? 'max-w-[85%]' : ''}`}>
         <span className="text-[10px] font-semibold truncate">{displayName}</span>
         {isSelf && !compact && (

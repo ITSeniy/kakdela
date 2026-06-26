@@ -209,6 +209,8 @@ export const files = pgTable(
     width:        integer('width'),
     height:       integer('height'),
     status:       fileStatusEnum('status').notNull().default('pending'),
+    // Спойлер: вложение скрыто блюром до клика (помечается при отправке).
+    spoiler:      boolean('spoiler').notNull().default(false),
     createdAt:    timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({

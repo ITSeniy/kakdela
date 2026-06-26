@@ -102,6 +102,7 @@ function ChannelRow({
     >
       {channel.kind === 'voice' ? <Icon.Speaker size={11} /> : <Icon.Hash size={11} />}
       <span className="flex-1 truncate">{channel.name}</span>
+      {channel.nsfw && <Badge variant="nsfw">18+</Badge>}
       {live && <Badge variant="live">LIVE</Badge>}
     </button>
   )

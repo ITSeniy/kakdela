@@ -66,6 +66,8 @@ export const AttachmentSchema = z.object({
   sizeBytes: z.number().int().nonnegative(),
   width: z.number().int().positive().nullable().optional(),
   height: z.number().int().positive().nullable().optional(),
+  /** Вложение помечено спойлером — клиент блюрит его до клика. */
+  spoiler: z.boolean().default(false),
 })
 export type Attachment = z.infer<typeof AttachmentSchema>
 
@@ -196,6 +198,8 @@ export const SendMessageRequestSchema = z.object({
   replyToId: z.string().uuid().optional(),
   clientNonce: z.string().max(64).optional(),
   attachments: z.array(z.string().uuid()).max(10).optional(),
+  /** Подмножество attachments, которые нужно пометить спойлером. */
+  spoilerAttachments: z.array(z.string().uuid()).max(10).optional(),
 }).refine(
   (v) => v.content.trim().length > 0 || (v.attachments && v.attachments.length > 0),
   { message: 'message must have content or attachments', path: ['content'] },

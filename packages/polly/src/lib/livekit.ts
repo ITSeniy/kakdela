@@ -304,6 +304,25 @@ export function getRemoteScreenVideoTrack(userId: string): RemoteVideoTrack | nu
   return track instanceof RemoteVideoTrack ? track : null
 }
 
+/** Локальный трек веб-камеры (для self-tile), если камера включена. */
+export function getLocalCameraVideoTrack(): LocalVideoTrack | null {
+  if (!currentRoom) return null
+  const pub = currentRoom.localParticipant.getTrackPublication(Track.Source.Camera)
+  const track = pub?.videoTrack
+  return track instanceof LocalVideoTrack ? track : null
+}
+
+/** Remote-трек веб-камеры участника (камера авто-подписывается, в отличие от
+ *  демки). null — камера выключена или ещё не подписана. */
+export function getRemoteCameraVideoTrack(userId: string): RemoteVideoTrack | null {
+  if (!currentRoom) return null
+  const p = currentRoom.remoteParticipants.get(userId)
+  if (!p) return null
+  const pub = p.getTrackPublication(Track.Source.Camera)
+  const track = pub?.videoTrack
+  return track instanceof RemoteVideoTrack ? track : null
+}
+
 /**
  * Создаёт и поднимает соединение с LiveKit. НЕ трогает глобальное state —
  * это «полуготовая» комната. Caller сам решает, делать её активной
@@ -472,6 +491,7 @@ function rebuildParticipantsFromRoom(room: Room): void {
       displayName: p.name ?? p.identity,
       isSpeaking: false,
       isScreenSharing: hasScreenShare(p),
+      isCameraOn: hasCamera(p),
       isMuted: !hasUnmutedMic(p),
     })
   }
@@ -520,6 +540,7 @@ function attachListeners(room: Room): void {
       displayName: p.name ?? p.identity,
       isSpeaking: false,
       isScreenSharing: hasScreenShare(p),
+      isCameraOn: hasCamera(p),
       isMuted: !hasUnmutedMic(p),
     })
     applyVolumeFor(p, useVoiceStore.getState().deafened)
@@ -549,6 +570,10 @@ function attachListeners(room: Room): void {
       store().patchParticipant(p.identity, { isMuted: !hasUnmutedMic(p) })
       return
     }
+    if (pub.source === Track.Source.Camera) {
+      store().patchParticipant(p.identity, { isCameraOn: true })
+      return
+    }
     if (isScreenSource(pub.source)) {
       // Карточка демки появляется сразу, но подписка — только по клику.
       const wasSharing = useVoiceStore.getState().participants.get(p.identity)?.isScreenSharing
@@ -562,6 +587,10 @@ function attachListeners(room: Room): void {
     if (currentRoom !== room) return
     if (pub.source === Track.Source.Microphone) {
       store().patchParticipant(p.identity, { isMuted: !hasUnmutedMic(p) })
+      return
+    }
+    if (pub.source === Track.Source.Camera) {
+      store().patchParticipant(p.identity, { isCameraOn: hasCamera(p) })
       return
     }
     if (isScreenSource(pub.source) && !hasScreenShare(p)) {
@@ -627,6 +656,10 @@ function attachListeners(room: Room): void {
       ) {
         store().patchParticipant(p.identity, { isScreenSharing: true })
       }
+      // Камера подписалась — трек доступен, перерисуем тайл с видео.
+      if (pub.source === Track.Source.Camera) {
+        store().patchParticipant(p.identity, { isCameraOn: true })
+      }
       applyVolumeFor(p, useVoiceStore.getState().deafened)
     },
   )
@@ -641,6 +674,9 @@ function attachListeners(room: Room): void {
         pub.source === Track.Source.ScreenShareAudio
       ) {
         store().patchParticipant(p.identity, { isScreenSharing: hasScreenShare(p) })
+      }
+      if (pub.source === Track.Source.Camera) {
+        store().patchParticipant(p.identity, { isCameraOn: hasCamera(p) })
       }
     },
   )
@@ -660,6 +696,10 @@ function attachListeners(room: Room): void {
         void applyMicGainLive()
         return
       }
+      if (pub.source === Track.Source.Camera) {
+        store().setCameraOn(true)
+        return
+      }
       if (pub.source !== Track.Source.ScreenShare) return
       store().setScreenSharing(true)
       playSound('stream-start')
@@ -675,6 +715,10 @@ function attachListeners(room: Room): void {
         stopLocalSpeakingMeter()
         return
       }
+      if (pub.source === Track.Source.Camera) {
+        store().setCameraOn(false)
+        return
+      }
       if (pub.source !== Track.Source.ScreenShare) return
       store().setScreenSharing(false)
       playSound('stream-end')
@@ -688,6 +732,13 @@ function hasScreenShare(p: Participant): boolean {
   }
   for (const pub of p.audioTrackPublications.values()) {
     if (pub.source === Track.Source.ScreenShareAudio) return true
+  }
+  return false
+}
+
+function hasCamera(p: Participant): boolean {
+  for (const pub of p.videoTrackPublications.values()) {
+    if (pub.source === Track.Source.Camera && !pub.isMuted) return true
   }
   return false
 }
