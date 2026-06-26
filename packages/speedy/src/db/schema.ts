@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto'
 
 import { isNotNull } from 'drizzle-orm'
-import { type AnyPgColumn, pgTable, pgEnum, uuid, text, timestamp, index, uniqueIndex, integer, boolean, jsonb, primaryKey } from 'drizzle-orm/pg-core'
+import { type AnyPgColumn, pgTable, pgEnum, uuid, text, timestamp, index, uniqueIndex, integer, bigint, boolean, jsonb, primaryKey } from 'drizzle-orm/pg-core'
 
 function uuidv7(): string {
   const ms = Date.now()
@@ -131,6 +131,44 @@ export const serverMembers = pgTable(
     pk:          primaryKey({ columns: [t.serverId, t.userId] }),
     serverIdIdx: index('server_members_server_id_idx').on(t.serverId),
     userIdIdx:   index('server_members_user_id_idx').on(t.userId),
+  }),
+)
+
+// Кастомные роли сервера с битовой маской разрешений (система ролей).
+// @everyone — базовая роль (is_everyone=true), создаётся на каждый сервер,
+// position=0, не удаляется. Остальные роли позиционируются выше (иерархия).
+export const serverRoles = pgTable(
+  'server_roles',
+  {
+    id:          uuid('id').primaryKey().defaultRandom(),
+    serverId:    uuid('server_id').notNull().references(() => servers.id, { onDelete: 'cascade' }),
+    name:        text('name').notNull(),
+    color:       text('color'),                                            // #rrggbb или null
+    permissions: bigint('permissions', { mode: 'number' }).notNull().default(0),
+    position:    integer('position').notNull().default(0),
+    hoist:       boolean('hoist').notNull().default(false),
+    mentionable: boolean('mentionable').notNull().default(false),
+    isEveryone:  boolean('is_everyone').notNull().default(false),
+    createdAt:   timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    serverIdIdx: index('server_roles_server_id_idx').on(t.serverId),
+  }),
+)
+
+// Назначения ролей участникам (многие-ко-многим). @everyone не хранится здесь —
+// она применяется ко всем неявно.
+export const memberRoles = pgTable(
+  'member_roles',
+  {
+    serverId:   uuid('server_id').notNull().references(() => servers.id, { onDelete: 'cascade' }),
+    userId:     uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    roleId:     uuid('role_id').notNull().references(() => serverRoles.id, { onDelete: 'cascade' }),
+    assignedAt: timestamp('assigned_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    pk:              primaryKey({ columns: [t.roleId, t.userId] }),
+    serverUserIdx:   index('member_roles_server_user_idx').on(t.serverId, t.userId),
   }),
 )
 

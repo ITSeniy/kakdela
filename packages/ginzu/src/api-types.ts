@@ -142,6 +142,67 @@ export const ServerMemberSchema = z.object({
 })
 export type ServerMember = z.infer<typeof ServerMemberSchema>
 
+// ───── Roles (система ролей с разрешениями) ─────
+
+const roleColorSchema = z.string().regex(/^#[0-9a-fA-F]{6}$/, 'цвет: #rrggbb').nullable()
+const roleNameSchema = z.string().min(1).max(32)
+
+export const RoleSchema = z.object({
+  id:          z.string().uuid(),
+  serverId:    z.string().uuid(),
+  name:        z.string(),
+  color:       z.string().nullable(),
+  /** Битовая маска разрешений (см. @kakdela/ginzu/permissions). */
+  permissions: z.number().int().nonnegative(),
+  /** Чем выше — тем старше; @everyone = 0. Определяет иерархию. */
+  position:    z.number().int(),
+  /** Показывать носителей отдельной группой в списке участников. */
+  hoist:       z.boolean(),
+  mentionable: z.boolean(),
+  /** Базовая роль @everyone — её нельзя удалить/переименовать/переместить. */
+  isEveryone:  z.boolean(),
+})
+export type Role = z.infer<typeof RoleSchema>
+
+/** Краткая роль для бейджей в профиле / списке участников. */
+export const RoleRefSchema = z.object({
+  id:       z.string().uuid(),
+  name:     z.string(),
+  color:    z.string().nullable(),
+  position: z.number().int(),
+  hoist:    z.boolean(),
+})
+export type RoleRef = z.infer<typeof RoleRefSchema>
+
+export const RolesListResponseSchema = z.object({
+  roles: z.array(RoleSchema),
+})
+export type RolesListResponse = z.infer<typeof RolesListResponseSchema>
+
+export const CreateRoleRequestSchema = z.object({
+  name:        roleNameSchema,
+  color:       roleColorSchema.optional(),
+  permissions: z.number().int().nonnegative().optional(),
+  hoist:       z.boolean().optional(),
+  mentionable: z.boolean().optional(),
+})
+export type CreateRoleRequest = z.infer<typeof CreateRoleRequestSchema>
+
+export const PatchRoleRequestSchema = z.object({
+  name:        roleNameSchema.optional(),
+  color:       roleColorSchema.optional(),
+  permissions: z.number().int().nonnegative().optional(),
+  position:    z.number().int().nonnegative().optional(),
+  hoist:       z.boolean().optional(),
+  mentionable: z.boolean().optional(),
+})
+export type PatchRoleRequest = z.infer<typeof PatchRoleRequestSchema>
+
+export const SetMemberRolesRequestSchema = z.object({
+  roleIds: z.array(z.string().uuid()).max(50),
+})
+export type SetMemberRolesRequest = z.infer<typeof SetMemberRolesRequestSchema>
+
 // ───── Auth ─────
 
 const usernameSchema = z
@@ -263,6 +324,10 @@ export const MemberPublicSchema = z.object({
   status: z.enum(['online', 'idle', 'dnd', 'offline']),
   customStatus: z.string().max(128).nullable().optional(),
   role: z.enum(['owner', 'admin', 'member']),
+  // Назначенные кастомные роли (без @everyone), от старшей к младшей.
+  roles: z.array(RoleRefSchema).default([]),
+  // Эффективная маска прав участника (builtin role ∪ @everyone ∪ кастомные).
+  permissions: z.number().int().nonnegative().default(0),
 })
 export type MemberPublic = z.infer<typeof MemberPublicSchema>
 
@@ -431,6 +496,8 @@ export const UserProfileSchema = z.object({
   bannerUrl:    z.string().url().nullable(),
   createdAt:    z.string(),
   sharedServers: z.array(SharedServerSchema),
+  // Кастомные роли по общим с запрашивающим серверам (цветные пилюли).
+  roles:        z.array(RoleRefSchema).default([]),
   isSelf:       z.boolean(),
 })
 export type UserProfile = z.infer<typeof UserProfileSchema>

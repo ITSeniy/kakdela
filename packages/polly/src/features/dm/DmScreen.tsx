@@ -104,6 +104,8 @@ export function DmScreen({ channelId }: DmScreenProps) {
         avatarUrl: user.avatarUrl,
         status: user.status,
         role: 'member',
+        roles: [],
+        permissions: 0,
       })
     }
     if (summary) {
@@ -114,6 +116,8 @@ export function DmScreen({ channelId }: DmScreenProps) {
         avatarUrl: summary.otherUser.avatarUrl,
         status: summary.otherUser.status,
         role: 'member',
+        roles: [],
+        permissions: 0,
       })
     }
     return m

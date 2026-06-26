@@ -132,6 +132,25 @@ function ReadView({ profile }: { profile: UserProfile }) {
         )}
       </div>
 
+      {/* роли — цветные пилюли (designs/final-profile.jsx) */}
+      {profile.roles.length > 0 && (
+        <div className="mb-2.5">
+          <SectionTitle>роли · {profile.roles.length}</SectionTitle>
+          <div className="flex flex-wrap gap-1.5">
+            {profile.roles.map((r) => (
+              <span
+                key={r.id}
+                className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border bg-kd-panel-alt text-[11px] font-mono text-kd-text"
+                style={{ borderColor: r.color ? `${r.color}55` : 'var(--kd-border)' }}
+              >
+                <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: r.color ?? 'var(--kd-text-mute)' }} />
+                {r.name}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* о себе */}
       {profile.about && (
         <div className="p-3 rounded-kd bg-kd-panel-alt border border-kd-border mb-2.5">

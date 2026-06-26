@@ -20,7 +20,7 @@ import {
 import { emoji as emojiTable } from '../db/schema.js'
 import { audit } from '../lib/audit.js'
 import { db } from '../lib/db.js'
-import { assertMember, assertRole, notFound } from '../lib/permissions.js'
+import { assertMember, assertPermission, notFound } from '../lib/permissions.js'
 import { S3_EMOJI_BUCKET, emojiPublicUrl, s3 } from '../lib/s3.js'
 import { env } from '../env.js'
 
@@ -126,7 +126,7 @@ export const emojiRoutes: FastifyPluginAsyncZod = async (app) => {
       const userId = req.authUser!.id
       const { name, contentType, dataBase64 } = req.body
 
-      await assertRole(userId, serverId, ['owner', 'admin'])
+      await assertPermission(userId, serverId, 'MANAGE_EMOJI')
 
       const existingRows = await db
         .select({ c: sql<number>`COUNT(*)::int` })
@@ -314,7 +314,7 @@ export const emojiRoutes: FastifyPluginAsyncZod = async (app) => {
       const row = rows[0]
       if (!row) throw notFound('emoji-not-found', 'emoji not found')
 
-      await assertRole(userId, row.serverId, ['owner', 'admin'])
+      await assertPermission(userId, row.serverId, 'MANAGE_EMOJI')
 
       await db.delete(emojiTable).where(eq(emojiTable.id, id))
       if (row.storageKey) await deleteEmojiObject(row.storageKey)

@@ -15,6 +15,7 @@ import { invites, serverMembers, servers } from '../db/schema.js'
 import { env } from '../env.js'
 import { audit } from '../lib/audit.js'
 import { db } from '../lib/db.js'
+import { assertPermission } from '../lib/permissions.js'
 
 // Ровно 32 символа — каждое 5-битное значение (0..31) обязано попадать в
 // алфавит, иначе charAt(31) вернёт пустую строку и код выйдет 7-значным.
@@ -62,15 +63,7 @@ export const invitesRoutes: FastifyPluginAsyncZod = async (app) => {
       // preHandler: app.authenticate guarantees authUser is set
       const userId = req.authUser!.id
 
-      const memberRows = await db
-        .select({ role: serverMembers.role })
-        .from(serverMembers)
-        .where(and(eq(serverMembers.serverId, serverId), eq(serverMembers.userId, userId)))
-        .limit(1)
-      const member = memberRows[0]
-      if (!member || (member.role !== 'owner' && member.role !== 'admin')) {
-        return reply.code(403).send({ error: { code: 'forbidden', message: 'admin or owner required' } })
-      }
+      await assertPermission(userId, serverId, 'MANAGE_INVITES')
 
       const serverRows = await db
         .select({ id: servers.id })
@@ -149,15 +142,7 @@ export const invitesRoutes: FastifyPluginAsyncZod = async (app) => {
       const { serverId } = req.params
       const userId = req.authUser!.id
 
-      const memberRows = await db
-        .select({ role: serverMembers.role })
-        .from(serverMembers)
-        .where(and(eq(serverMembers.serverId, serverId), eq(serverMembers.userId, userId)))
-        .limit(1)
-      const member = memberRows[0]
-      if (!member || (member.role !== 'owner' && member.role !== 'admin')) {
-        return reply.code(403).send({ error: { code: 'forbidden', message: 'admin or owner required' } })
-      }
+      await assertPermission(userId, serverId, 'MANAGE_INVITES')
 
       const rows = await db
         .select({
@@ -319,15 +304,7 @@ export const invitesRoutes: FastifyPluginAsyncZod = async (app) => {
         return reply.code(404).send({ error: { code: 'invite-not-found', message: 'invite not found' } })
       }
 
-      const memberRows = await db
-        .select({ role: serverMembers.role })
-        .from(serverMembers)
-        .where(and(eq(serverMembers.serverId, invite.serverId), eq(serverMembers.userId, userId)))
-        .limit(1)
-      const member = memberRows[0]
-      if (!member || (member.role !== 'owner' && member.role !== 'admin')) {
-        return reply.code(403).send({ error: { code: 'forbidden', message: 'admin or owner required' } })
-      }
+      await assertPermission(userId, invite.serverId, 'MANAGE_INVITES')
 
       await db.update(invites).set({ revoked: true }).where(eq(invites.code, code))
 

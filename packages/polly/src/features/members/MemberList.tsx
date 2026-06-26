@@ -34,16 +34,31 @@ const STATUS_ORDER: Record<MemberPublic['status'], number> = {
   online: 0, idle: 1, dnd: 2, offline: 3,
 }
 
+/** Самая старшая hoist-роль участника (для группировки в списке). */
+function topHoistRole(m: MemberPublic): MemberPublic['roles'][number] | null {
+  let best: MemberPublic['roles'][number] | null = null
+  for (const r of m.roles) {
+    if (!r.hoist) continue
+    if (!best || r.position > best.position) best = r
+  }
+  return best
+}
+
+/** Цвет имени = самая старшая роль с цветом. */
+export function memberNameColor(m: MemberPublic): string | null {
+  let best: MemberPublic['roles'][number] | null = null
+  for (const r of m.roles) {
+    if (!r.color) continue
+    if (!best || r.position > best.position) best = r
+  }
+  return best?.color ?? null
+}
+
 function groupMembers(members: MemberPublic[], voiceIds: Set<string>): MemberGroup[] {
   const inVoice = members.filter((m) => voiceIds.has(m.id))
   const rest = members.filter((m) => !voiceIds.has(m.id))
   const online = rest.filter((m) => m.status !== 'offline')
   const offline = rest.filter((m) => m.status === 'offline')
-
-  const byRole: Record<'owner' | 'admin' | 'member', MemberPublic[]> = {
-    owner: [], admin: [], member: [],
-  }
-  for (const m of online) byRole[m.role].push(m)
 
   const sortFn = (a: MemberPublic, b: MemberPublic): number => {
     const sa = STATUS_ORDER[a.status] ?? 4
@@ -52,15 +67,34 @@ function groupMembers(members: MemberPublic[], voiceIds: Set<string>): MemberGro
     return a.displayName.localeCompare(b.displayName)
   }
 
+  // Онлайн-участники группируются по старшей hoist-роли; без неё — по
+  // встроенной роли (хозяева/админы/свои). Вес задаёт порядок групп.
+  interface Bucket { title: string; key: string; weight: number; members: MemberPublic[] }
+  const buckets = new Map<string, Bucket>()
+  const bucketFor = (m: MemberPublic): Bucket => {
+    const hoist = topHoistRole(m)
+    if (hoist) {
+      const key = `role:${hoist.id}`
+      return buckets.get(key) ?? { title: hoist.name, key, weight: 1000 + hoist.position, members: [] }
+    }
+    const w = m.role === 'owner' ? 30 : m.role === 'admin' ? 20 : 10
+    const key = `builtin:${m.role}`
+    return buckets.get(key) ?? { title: ROLE_TITLES[m.role], key, weight: w, members: [] }
+  }
+  for (const m of online) {
+    const b = bucketFor(m)
+    b.members.push(m)
+    buckets.set(b.key, b)
+  }
+
   const groups: MemberGroup[] = []
   if (inVoice.length > 0) {
     inVoice.sort(sortFn)
     groups.push({ title: `в голосе · ${inVoice.length}`, key: 'voice', members: inVoice, voice: true })
   }
-  for (const role of ['owner', 'admin', 'member'] as const) {
-    if (byRole[role].length === 0) continue
-    byRole[role].sort(sortFn)
-    groups.push({ title: ROLE_TITLES[role], key: role, members: byRole[role] })
+  for (const b of [...buckets.values()].sort((a, z) => z.weight - a.weight)) {
+    b.members.sort(sortFn)
+    groups.push({ title: b.title, key: b.key, members: b.members })
   }
   if (offline.length > 0) {
     offline.sort((a, b) => a.displayName.localeCompare(b.displayName))
@@ -91,6 +125,7 @@ function MemberRow({
 }) {
   const isOffline = member.status === 'offline'
   const tag = ROLE_TAG[member.role]
+  const nameColor = memberNameColor(member)
   return (
     <button
       type="button"
@@ -110,7 +145,7 @@ function MemberRow({
       />
       <div className="flex-1 min-w-0">
         <div className="text-[12px] font-semibold text-kd-text flex items-center gap-1 truncate">
-          <span className="truncate">{member.displayName}</span>
+          <span className="truncate" style={nameColor ? { color: nameColor } : undefined}>{member.displayName}</span>
           {tag && <Badge variant="role">{tag}</Badge>}
         </div>
         <div className="text-[10px] text-kd-text-soft truncate">
@@ -150,6 +185,12 @@ export function MemberList({ serverId, className }: MemberListProps) {
   useEffect(() => {
     if (!serverId) return undefined
     return wsClient.on((event) => {
+      // Роли изменились (справочник или назначения) — перетянем участников/роли.
+      if ((event.t === 'role.update' || event.t === 'member.roles') && event.serverId === serverId) {
+        void queryClient.invalidateQueries({ queryKey: ['members', serverId] })
+        void queryClient.invalidateQueries({ queryKey: ['roles', serverId] })
+        return
+      }
       if (event.t !== 'presence') return
       queryClient.setQueryData<MemberPublic[]>(['members', serverId], (old) => {
         if (!old) return old

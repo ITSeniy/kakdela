@@ -6,6 +6,7 @@ export type SettingsPage =
   | 'server-overview'
   | 'server-emoji'
   | 'server-members'
+  | 'server-roles'
   | 'server-invites'
   | 'server-audit'
   | 'profile'

@@ -1,4 +1,4 @@
-import { and, eq, inArray, or } from 'drizzle-orm'
+import { and, desc, eq, inArray, or } from 'drizzle-orm'
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod'
 import { z } from 'zod'
 
@@ -11,7 +11,7 @@ import {
 } from '@kakdela/ginzu/api-types'
 
 import { hashPassword, verifyPassword } from '../auth/passwords.js'
-import { dmChannels, serverMembers, servers, sessions, users } from '../db/schema.js'
+import { dmChannels, memberRoles, serverMembers, serverRoles, servers, sessions, users } from '../db/schema.js'
 import { db } from '../lib/db.js'
 import { forbidden, notFound } from '../lib/permissions.js'
 import { presence } from '../presence/store.js'
@@ -118,6 +118,29 @@ export const usersRoutes: FastifyPluginAsyncZod = async (app) => {
         joinedAt: r.joinedAt.toISOString(),
       }))
 
+      // Кастомные роли target'а — только по общим (видимым requester'у) серверам.
+      const visibleServerIds = sharedServers.map((s) => s.id)
+      const roleRows = visibleServerIds.length > 0
+        ? await db
+            .select({
+              id:       serverRoles.id,
+              name:     serverRoles.name,
+              color:    serverRoles.color,
+              position: serverRoles.position,
+              hoist:    serverRoles.hoist,
+            })
+            .from(memberRoles)
+            .innerJoin(serverRoles, eq(memberRoles.roleId, serverRoles.id))
+            .where(and(
+              eq(memberRoles.userId, targetId),
+              inArray(memberRoles.serverId, visibleServerIds),
+            ))
+            .orderBy(desc(serverRoles.position))
+        : []
+      const roles = roleRows.map((r) => ({
+        id: r.id, name: r.name, color: r.color, position: r.position, hoist: r.hoist,
+      }))
+
       // Live presence overlay.
       const liveStatus = (await presence.getStatusBulk([target.id])).get(target.id)?.status ?? target.status
 
@@ -133,6 +156,7 @@ export const usersRoutes: FastifyPluginAsyncZod = async (app) => {
         bannerUrl:     target.bannerUrl ?? null,
         createdAt:     target.createdAt.toISOString(),
         sharedServers,
+        roles,
         isSelf,
       })
     },

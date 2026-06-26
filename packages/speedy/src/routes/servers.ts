@@ -15,11 +15,12 @@ import {
   ServerSchema,
 } from '@kakdela/ginzu/api-types'
 
-import { channelCategories, channels, serverMembers, servers, users } from '../db/schema.js'
+import { channelCategories, channels, serverMembers, serverRoles, servers, users } from '../db/schema.js'
 import { audit } from '../lib/audit.js'
 import { CHANNEL_DTO_COLS } from '../lib/channel-dto.js'
 import { db } from '../lib/db.js'
-import { assertMember, assertRole, notFound } from '../lib/permissions.js'
+import { assertMember, assertPermission, assertRole, notFound } from '../lib/permissions.js'
+import { loadMemberRoleInfo } from '../lib/roles.js'
 import { presence } from '../presence/store.js'
 import { broadcastToServer } from '../ws/broadcast.js'
 import { registry } from '../ws/registry.js'
@@ -97,6 +98,12 @@ export const serversRoutes: FastifyPluginAsyncZod = async (app) => {
           { serverId: row.id, name: 'общее',         kind: 'text',  position: 0 },
           { serverId: row.id, name: 'общая комната', kind: 'voice', position: 1 },
         ])
+
+        // Базовая роль @everyone (position 0, нулевые права) — фундамент
+        // системы ролей; остальные роли позиционируются выше неё.
+        await tx.insert(serverRoles).values({
+          serverId: row.id, name: '@everyone', permissions: 0, position: 0, isEveryone: true,
+        })
 
         return row
       })
@@ -207,9 +214,16 @@ export const serversRoutes: FastifyPluginAsyncZod = async (app) => {
 
       // Overlay live presence from Redis; fall back to DB column when missing.
       const presenceMap = await presence.getStatusBulk(rows.map((r) => r.id))
+
+      // Роли + эффективные права для каждого участника (bulk, без N запросов).
+      const builtinRoles = new Map(rows.map((r) => [r.id, r.role]))
+      const roleInfo = await loadMemberRoleInfo(serverId, builtinRoles)
+
       const enriched = rows.map((r) => ({
         ...r,
         status: presenceMap.get(r.id)?.status ?? r.status,
+        roles: roleInfo.get(r.id)?.roles ?? [],
+        permissions: roleInfo.get(r.id)?.permissions ?? 0,
       }))
 
       enriched.sort((a, b) => {
@@ -243,7 +257,7 @@ export const serversRoutes: FastifyPluginAsyncZod = async (app) => {
       const { serverId } = req.params
       const userId = req.authUser!.id
 
-      await assertRole(userId, serverId, ['owner', 'admin'])
+      await assertPermission(userId, serverId, 'MANAGE_CHANNELS')
 
       const serverExists = await db
         .select({ id: servers.id })
@@ -332,7 +346,7 @@ export const serversRoutes: FastifyPluginAsyncZod = async (app) => {
       const { serverId } = req.params
       const userId = req.authUser!.id
 
-      await assertRole(userId, serverId, ['owner', 'admin'])
+      await assertPermission(userId, serverId, 'MANAGE_CHANNELS')
 
       const serverExists = await db
         .select({ id: servers.id })
@@ -437,7 +451,7 @@ export const serversRoutes: FastifyPluginAsyncZod = async (app) => {
       const userId = req.authUser!.id
       const { name, iconUrl } = req.body
 
-      await assertRole(userId, serverId, ['owner', 'admin'])
+      await assertPermission(userId, serverId, 'MANAGE_SERVER')
 
       const updates: Partial<typeof servers.$inferInsert> = {}
       if (name !== undefined) updates.name = name

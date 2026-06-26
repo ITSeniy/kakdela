@@ -27,6 +27,7 @@ import {
 import { clampFixed, useAppearance } from '../settings/appearance.js'
 import { useSettingsUi } from '../settings/store.js'
 import { ThreadList } from '../threads/ThreadList.js'
+import { useServerPermissions } from '../roles/permissions.js'
 import { moderateVoice } from '../voice/api.js'
 import { ScreenHoverPreview } from '../voice/ScreenHoverPreview.js'
 import { VoiceUserMenu } from '../voice/VoiceUserMenu.js'
@@ -383,7 +384,9 @@ export function ChannelList({ serverId, activeChannelId }: ChannelListProps) {
   const voicePresence = useVoiceChannelPresence(channels)
 
   const myRole = userId ? memberMap.get(userId)?.role : undefined
-  const canManage = myRole === 'owner' || myRole === 'admin'
+  // Управление каналами — по праву MANAGE_CHANNELS (owner/ADMINISTRATOR проходят).
+  const perms = useServerPermissions(serverId)
+  const canManage = perms.can('MANAGE_CHANNELS')
   const isOwner = myRole === 'owner'
   const categoryNames = useMemo(
     () => groups.map((g) => g.name).filter((n): n is string => n !== null),

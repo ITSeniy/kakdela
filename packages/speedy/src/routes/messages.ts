@@ -17,13 +17,14 @@ import {
   type ReplyRef,
   type ThreadInfo,
 } from '@kakdela/ginzu/api-types'
+import { hasPermission } from '@kakdela/ginzu/permissions'
 
 import { channels, dmChannels, mentions as mentionsTable, messages, reactions as reactionsTable, serverMembers, users } from '../db/schema.js'
 import { db } from '../lib/db.js'
 import { env } from '../env.js'
 import { resolvePreviewsForContent } from '../lib/link-preview.js'
 import { extractMentions, type MentionCandidate, type ParsedMention } from '../lib/mention-extractor.js'
-import { assertCanAccessChannel, assertRole, notFound } from '../lib/permissions.js'
+import { assertCanAccessChannel, assertPermission, getMemberPermissions, notFound } from '../lib/permissions.js'
 import { redis } from '../lib/redis.js'
 import { presence } from '../presence/store.js'
 import { attachFilesToMessage, loadAttachmentsForMessages } from './files.js'
@@ -118,8 +119,15 @@ async function buildMentionContext(
     .innerJoin(users, eq(serverMembers.userId, users.id))
     .where(eq(serverMembers.serverId, ch.serverId))
 
-  const author = memberRows.find((m) => m.id === authorId)
-  const allowBroadcast = author?.role === 'owner' || author?.role === 'admin'
+  // @everyone / @here разрешены при праве MENTION_EVERYONE (owner/admin его
+  // имеют через ADMINISTRATOR).
+  let allowBroadcast = false
+  if (ch.serverId) {
+    try {
+      const ctx = await getMemberPermissions(authorId, ch.serverId)
+      allowBroadcast = hasPermission(ctx.permissions, 'MENTION_EVERYONE')
+    } catch { allowBroadcast = false }
+  }
 
   const presenceMap = await presence.getStatusBulk(memberRows.map((m) => m.id))
   const onlineIds = memberRows
@@ -343,13 +351,11 @@ async function enforceSlowMode(userId: string, channelId: string, serverId: stri
   const slow = rows[0]?.slow ?? 0
   if (slow <= 0) return
 
-  const m = await db
-    .select({ role: serverMembers.role })
-    .from(serverMembers)
-    .where(and(eq(serverMembers.serverId, serverId), eq(serverMembers.userId, userId)))
-    .limit(1)
-  const role = m[0]?.role
-  if (role === 'owner' || role === 'admin') return
+  // Управляющие сообщениями/каналами обходят медленный режим (как в Discord).
+  try {
+    const ctx = await getMemberPermissions(userId, serverId)
+    if (hasPermission(ctx.permissions, 'MANAGE_MESSAGES') || hasPermission(ctx.permissions, 'MANAGE_CHANNELS')) return
+  } catch { /* не член — пусть обычная проверка доступа отработает выше */ }
 
   let allowed = false
   let ttl = slow
@@ -662,7 +668,7 @@ export const messagesRoutes: FastifyPluginAsyncZod = async (app) => {
         if (ch.kind === 'dm' || !ch.serverId) {
           return reply.code(403).send({ error: { code: 'forbidden', message: 'only the author can delete this message' } })
         }
-        await assertRole(userId, ch.serverId, ['owner', 'admin'])
+        await assertPermission(userId, ch.serverId, 'MANAGE_MESSAGES')
       }
 
       await db
@@ -696,7 +702,7 @@ export const messagesRoutes: FastifyPluginAsyncZod = async (app) => {
   // Пин/откреп требует прав: в серверном канале — owner/admin, в DM —
   // достаточно быть участником (assertCanAccessChannel уже это проверил).
   async function assertCanPin(userId: string, access: Awaited<ReturnType<typeof assertCanAccessChannel>>) {
-    if (access.kind === 'server') await assertRole(userId, access.serverId, ['owner', 'admin'])
+    if (access.kind === 'server') await assertPermission(userId, access.serverId, 'MANAGE_MESSAGES')
   }
 
   async function setPinned(req: { params: { id: string }; authUser?: { id: string } }, pinned: boolean) {

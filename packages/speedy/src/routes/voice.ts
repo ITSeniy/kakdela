@@ -12,7 +12,7 @@ import {
 
 import { channels, users } from '../db/schema.js'
 import { db } from '../lib/db.js'
-import { assertMember, assertRole, notFound } from '../lib/permissions.js'
+import { assertMember, assertPermission, notFound } from '../lib/permissions.js'
 import { redis } from '../lib/redis.js'
 import { issueToken, listParticipants, muteParticipantMic, revokeUser } from '../media/guido.js'
 import { broadcastToServer } from '../ws/broadcast.js'
@@ -266,7 +266,7 @@ export const voiceRoutes: FastifyPluginAsyncZod = async (app) => {
       }
       const serverId = channel.serverId
 
-      await assertRole(actorId, serverId, ['owner', 'admin'])
+      await assertPermission(actorId, serverId, 'MUTE_MEMBERS')
 
       const inRoom = await redis.sismember(roomUsersKey(channelId), targetId)
       if (!inRoom) {

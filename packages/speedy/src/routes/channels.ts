@@ -12,7 +12,7 @@ import { channelCategories, channels, messages } from '../db/schema.js'
 import { audit } from '../lib/audit.js'
 import { CHANNEL_DTO_COLS } from '../lib/channel-dto.js'
 import { db } from '../lib/db.js'
-import { assertCanAccessChannel, assertMember, assertRole, notFound } from '../lib/permissions.js'
+import { assertCanAccessChannel, assertMember, assertPermission, notFound } from '../lib/permissions.js'
 import { broadcastToServer } from '../ws/broadcast.js'
 
 export const channelsRoutes: FastifyPluginAsyncZod = async (app) => {
@@ -112,7 +112,7 @@ export const channelsRoutes: FastifyPluginAsyncZod = async (app) => {
       if (!existing || !existing.serverId) throw notFound('channel-not-found', 'channel not found')
       const existingServerId = existing.serverId
 
-      await assertRole(userId, existingServerId, ['owner', 'admin'])
+      await assertPermission(userId, existingServerId, 'MANAGE_CHANNELS')
 
       const { name, topic, position, category, kind, slowModeSec, autoDeleteSec, isDefault, friendsOnly, nsfw, threadsAllowed } = req.body
       const updates: Partial<typeof channels.$inferInsert> = {}
@@ -213,7 +213,7 @@ export const channelsRoutes: FastifyPluginAsyncZod = async (app) => {
       if (!existing || !existing.serverId) throw notFound('channel-not-found', 'channel not found')
       const existingServerId = existing.serverId
 
-      await assertRole(userId, existingServerId, ['owner', 'admin'])
+      await assertPermission(userId, existingServerId, 'MANAGE_CHANNELS')
 
       await db.delete(channels).where(eq(channels.id, channelId))
 

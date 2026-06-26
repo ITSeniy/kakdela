@@ -141,6 +141,8 @@ export const dmRoutes: FastifyPluginAsyncZod = async (app) => {
             username:    other.username,
             avatarUrl:   other.avatarUrl,
             status:      presenceMap.get(other.id)?.status ?? other.status,
+            roles:       [],
+            permissions: 0,
           },
           lastMessage: last
             ? {
@@ -220,6 +222,8 @@ export const dmRoutes: FastifyPluginAsyncZod = async (app) => {
         username:    otherUser.username,
         avatarUrl:   otherUser.avatarUrl,
         status:      presenceMap.get(otherUser.id)?.status ?? otherUser.status,
+        roles:       [],
+        permissions: 0,
       }
 
       if (existing[0]) {

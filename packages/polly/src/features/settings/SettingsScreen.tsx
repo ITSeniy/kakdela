@@ -10,7 +10,9 @@ import { useEffect, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useLocation } from 'wouter'
 
-import { useAuthStore } from '../auth/store.js'
+import type { PermissionFlag } from '@kakdela/ginzu/permissions'
+
+import { useServerPermissions } from '../roles/permissions.js'
 import { getServerDetail, listMembers } from '../servers/api.js'
 import { AppearanceSettings } from './AppearanceSettings.js'
 import { AuditLog } from './AuditLog.js'
@@ -20,6 +22,7 @@ import { InviteManagement } from './InviteManagement.js'
 import { MembersSettings } from './MembersSettings.js'
 import { NotificationSettings } from './NotificationSettings.js'
 import { ProfileSettings } from './ProfileSettings.js'
+import { RolesSettings } from './RolesSettings.js'
 import { ShortcutsSettings } from './ShortcutsSettings.js'
 import { SoundSettings } from './SoundSettings.js'
 import { VoiceSettings } from './VoiceSettings.js'
@@ -29,15 +32,17 @@ interface PageDef {
   id: SettingsPage
   label: string
   desc: string
-  adminOnly?: boolean
+  /** Право, без которого вкладка скрыта (owner/ADMINISTRATOR проходят всегда). */
+  perm?: PermissionFlag
 }
 
 const SERVER_PAGES: PageDef[] = [
   { id: 'server-overview', label: 'обзор',          desc: 'имя, иконка и опасная зона' },
   { id: 'server-members',  label: 'участники',      desc: 'кто здесь живёт' },
-  { id: 'server-emoji',    label: 'эмодзи',         desc: 'свои эмодзи этого сервера', adminOnly: true },
-  { id: 'server-invites',  label: 'приглашения',    desc: 'кто и как может присоединиться', adminOnly: true },
-  { id: 'server-audit',    label: 'журнал событий', desc: 'журнал действий админов', adminOnly: true },
+  { id: 'server-roles',    label: 'роли',           desc: 'роли и разрешения сервера', perm: 'MANAGE_ROLES' },
+  { id: 'server-emoji',    label: 'эмодзи',         desc: 'свои эмодзи этого сервера', perm: 'MANAGE_EMOJI' },
+  { id: 'server-invites',  label: 'приглашения',    desc: 'кто и как может присоединиться', perm: 'MANAGE_INVITES' },
+  { id: 'server-audit',    label: 'журнал событий', desc: 'журнал действий админов', perm: 'VIEW_AUDIT_LOG' },
 ]
 
 const ACCOUNT_PAGES: PageDef[] = [
@@ -90,7 +95,7 @@ export function SettingsScreen() {
   const serverId = useSettingsUi((s) => s.serverId)
   const setPage = useSettingsUi((s) => s.setPage)
   const close = useSettingsUi((s) => s.close)
-  const userId = useAuthStore((s) => s.user?.id)
+  const perms = useServerPermissions(serverId)
   const [location] = useLocation()
 
   const { data: serverDetail } = useQuery({
@@ -138,11 +143,8 @@ export function SettingsScreen() {
 
   if (!isOpen) return null
 
-  const role = userId ? members.find((m) => m.id === userId)?.role : undefined
-  const isAdmin = role === 'owner' || role === 'admin'
-
   const pages = serverId
-    ? SERVER_PAGES.filter((p) => isAdmin || !p.adminOnly)
+    ? SERVER_PAGES.filter((p) => !p.perm || perms.can(p.perm))
     : ACCOUNT_PAGES
   const current = pages.find((p) => p.id === page) ?? pages[0]!
   const serverName = serverDetail?.server.name ?? 'сервер'
@@ -197,9 +199,10 @@ export function SettingsScreen() {
           <div className="max-w-[720px] px-7 py-5">
             {current.id === 'server-overview' && serverId && <GeneralSettings serverId={serverId} />}
             {current.id === 'server-members'  && serverId && <MembersSettings serverId={serverId} />}
-            {current.id === 'server-emoji'    && serverId && isAdmin && <EmojiManagement serverId={serverId} />}
-            {current.id === 'server-invites'  && serverId && isAdmin && <InviteManagement serverId={serverId} />}
-            {current.id === 'server-audit'    && serverId && isAdmin && <AuditLog serverId={serverId} />}
+            {current.id === 'server-roles'    && serverId && perms.can('MANAGE_ROLES') && <RolesSettings serverId={serverId} />}
+            {current.id === 'server-emoji'    && serverId && perms.can('MANAGE_EMOJI') && <EmojiManagement serverId={serverId} />}
+            {current.id === 'server-invites'  && serverId && perms.can('MANAGE_INVITES') && <InviteManagement serverId={serverId} />}
+            {current.id === 'server-audit'    && serverId && perms.can('VIEW_AUDIT_LOG') && <AuditLog serverId={serverId} />}
             {current.id === 'profile'       && <ProfileSettings />}
             {current.id === 'notifications' && <NotificationSettings />}
             {current.id === 'appearance'    && <AppearanceSettings />}

@@ -12,7 +12,7 @@ import {
 
 import { auditLog, users } from '../db/schema.js'
 import { db } from '../lib/db.js'
-import { assertRole } from '../lib/permissions.js'
+import { assertPermission } from '../lib/permissions.js'
 
 const MAX_LIMIT = 200
 const DEFAULT_LIMIT = 50
@@ -46,7 +46,7 @@ export const auditRoutes: FastifyPluginAsyncZod = async (app) => {
       const { limit, before } = req.query
       const userId = req.authUser!.id
 
-      await assertRole(userId, serverId, ['owner', 'admin'])
+      await assertPermission(userId, serverId, 'VIEW_AUDIT_LOG')
 
       const beforeDate = before ? new Date(before) : null
 

@@ -10,6 +10,7 @@
     ".": "./src/index.ts",
     "./api-types": "./src/api-types.ts",
     "./ws-events": "./src/ws-events.ts",
+    "./permissions": "./src/permissions.ts",
     "./design-tokens": "./src/design-tokens.ts"
   },
   "scripts": {

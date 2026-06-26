@@ -24,6 +24,7 @@ import { internalRoutes } from './routes/internal.js'
 import { invitesRoutes } from './routes/invites.js'
 import { messagesRoutes } from './routes/messages.js'
 import { reactionsRoutes } from './routes/reactions.js'
+import { rolesRoutes } from './routes/roles.js'
 import { serversRoutes } from './routes/servers.js'
 import { voiceRoutes } from './routes/voice.js'
 import { voiceDebugRoutes } from './routes/voice-debug.js'
@@ -67,6 +68,7 @@ async function main() {
   await app.register(auditRoutes, { prefix: '/api' })
   await app.register(invitesRoutes, { prefix: '/api' })
   await app.register(serversRoutes, { prefix: '/api' })
+  await app.register(rolesRoutes, { prefix: '/api' })
   await app.register(channelsRoutes, { prefix: '/api' })
   await app.register(messagesRoutes, { prefix: '/api' })
   await app.register(reactionsRoutes, { prefix: '/api' })
