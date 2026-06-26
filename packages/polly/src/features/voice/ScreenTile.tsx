@@ -53,6 +53,20 @@ function CameraIcon() {
   )
 }
 
+function PipIcon() {
+  // Картинка-в-картинке: большой прямоугольник + маленький в углу.
+  return (
+    <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="4" width="18" height="14" rx="2" />
+      <rect x="12" y="11" width="7" height="5" rx="1" fill="currentColor" stroke="none" />
+    </svg>
+  )
+}
+
+// PiP поддерживается в WebView2/Chromium; в прочих средах кнопку прячем.
+const PIP_SUPPORTED =
+  typeof document !== 'undefined' && 'pictureInPictureEnabled' in document && document.pictureInPictureEnabled
+
 /**
  * Карточка демки (отдельная от карточки человека, как в Discord). Клик —
  * развернуть на всю область / свернуть обратно; двойной клик — нативный
@@ -113,6 +127,20 @@ export function ScreenTile({
       // requestFullscreen может реджектиться, если вызов не из user gesture
       // или fullscreen уже занят. Не паникуем — просто игнорируем.
       void container.requestFullscreen().catch(() => { /* ignore */ })
+    }
+  }
+
+  // Picture-in-Picture: выносит демку в плавающее всегда-сверху окно — можно
+  // продолжать смотреть, переключаясь на другие каналы/окна.
+  const togglePip = (): void => {
+    const el = videoRef.current
+    if (!el) return
+    const doc = document as Document & { pictureInPictureElement?: Element | null; exitPictureInPicture?: () => Promise<void> }
+    const v = el as HTMLVideoElement & { requestPictureInPicture?: () => Promise<unknown> }
+    if (doc.pictureInPictureElement === el) {
+      void doc.exitPictureInPicture?.().catch(() => { /* ignore */ })
+    } else {
+      void v.requestPictureInPicture?.().catch(() => { /* not allowed / no frames yet */ })
     }
   }
 
@@ -203,6 +231,19 @@ export function ScreenTile({
               className="inline-flex items-center justify-center w-6 h-6 rounded bg-kd-overlay-strong text-kd-stage-text disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <CameraIcon />
+            </button>
+          )}
+          {PIP_SUPPORTED && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                togglePip()
+              }}
+              title="картинка-в-картинке"
+              className="inline-flex items-center justify-center w-6 h-6 rounded bg-kd-overlay-strong text-kd-stage-text"
+            >
+              <PipIcon />
             </button>
           )}
           <button

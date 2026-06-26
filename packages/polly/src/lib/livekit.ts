@@ -171,6 +171,27 @@ function applyScreenSubscription(p: RemoteParticipant): void {
   }
 }
 
+/**
+ * Временная подписка на чужую демку для hover-превью (как в Discord): тянем
+ * ТОЛЬКО видео (без ScreenShareAudio — звук на наведении не нужен), не трогаем
+ * watchedScreens и не рассылаем «кто смотрит». adaptiveStream сам отдаст
+ * низкий layer под маленький <video>. Выключение не снимает подписку, если
+ * пользователь реально смотрит этот стрим.
+ */
+export function setScreenPreview(userId: string, on: boolean): void {
+  const room = currentRoom
+  if (!room) return
+  const p = room.remoteParticipants.get(userId)
+  if (!p) return
+  const watched = useVoiceStore.getState().watchedScreens.has(userId)
+  for (const pub of p.trackPublications.values()) {
+    if (pub.source !== Track.Source.ScreenShare) continue
+    const rp = pub as RemoteTrackPublication
+    if (on) void rp.setSubscribed(true)
+    else if (!watched) void rp.setSubscribed(false)
+  }
+}
+
 /** Смотреть/перестать смотреть демку участника. */
 export function watchScreen(userId: string, watch: boolean): void {
   useVoiceStore.getState().setWatchedScreen(userId, watch)

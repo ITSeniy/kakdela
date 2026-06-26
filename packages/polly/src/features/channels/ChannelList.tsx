@@ -28,6 +28,7 @@ import { clampFixed, useAppearance } from '../settings/appearance.js'
 import { useSettingsUi } from '../settings/store.js'
 import { ThreadList } from '../threads/ThreadList.js'
 import { moderateVoice } from '../voice/api.js'
+import { ScreenHoverPreview } from '../voice/ScreenHoverPreview.js'
 import { VoiceUserMenu } from '../voice/VoiceUserMenu.js'
 import { useVoiceStore } from '../voice/store.js'
 import { useVoiceChannelPresence } from '../voice/useVoiceChannelPresence.js'
@@ -124,6 +125,8 @@ function VoicePresenceTree({
   rows,
   channelId,
   canManage,
+  canPreview,
+  selfUserId,
   onJump,
   onUserMenu,
   onUserDragStart,
@@ -132,6 +135,9 @@ function VoicePresenceTree({
   rows: VoiceUserRow[]
   channelId: string
   canManage: boolean
+  /** Я подключён к этому ГС — можно тянуть hover-превью демки. */
+  canPreview: boolean
+  selfUserId: string | null
   onJump(): void
   onUserMenu(e: React.MouseEvent, channelId: string, row: VoiceUserRow): void
   onUserDragStart(channelId: string, userId: string): void
@@ -139,6 +145,26 @@ function VoicePresenceTree({
 }) {
   // Заливка под курсором — отключаемая в настройках внешнего вида.
   const hoverCls = useAppearance((s) => s.hoverHighlight) ? 'hover:bg-kd-hover' : ''
+  // Hover-превью демки: открываем с задержкой, чтобы не дёргать подписку на
+  // каждый промельк курсора.
+  const [preview, setPreview] = useState<{ row: VoiceUserRow; rect: DOMRect } | null>(null)
+  const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  function clearPreviewTimer() {
+    if (previewTimer.current) { clearTimeout(previewTimer.current); previewTimer.current = null }
+  }
+  function onRowEnter(row: VoiceUserRow, el: HTMLElement) {
+    if (!canPreview || !row.live) return
+    const rect = el.getBoundingClientRect()
+    clearPreviewTimer()
+    previewTimer.current = setTimeout(() => setPreview({ row, rect }), 350)
+  }
+  function onRowLeave() {
+    clearPreviewTimer()
+    setPreview(null)
+  }
+  useEffect(() => clearPreviewTimer, [])
+
   if (rows.length === 0) return null
   return (
     <div className="ml-1 mt-px mb-1 flex flex-col gap-0.5">
@@ -150,6 +176,8 @@ function VoicePresenceTree({
             type="button"
             onClick={onJump}
             onContextMenu={(e) => onUserMenu(e, channelId, row)}
+            onMouseEnter={(e) => onRowEnter(row, e.currentTarget)}
+            onMouseLeave={onRowLeave}
             draggable={canManage}
             onDragStart={(e) => {
               // stopPropagation: иначе bubbling запустит drag самого канала.
@@ -187,6 +215,14 @@ function VoicePresenceTree({
           </button>
         )
       })}
+      {preview && (
+        <ScreenHoverPreview
+          userId={preview.row.userId}
+          displayName={preview.row.name}
+          isSelf={preview.row.userId === selfUserId}
+          anchor={preview.rect}
+        />
+      )}
     </div>
   )
 }
@@ -784,6 +820,8 @@ export function ChannelList({ serverId, activeChannelId }: ChannelListProps) {
                         rows={buildVoiceRows(c.id, presence)}
                         channelId={c.id}
                         canManage={canManage}
+                        canPreview={c.id === activeVoiceChannelId}
+                        selfUserId={userId ?? null}
                         onJump={() => navigate(`/servers/${c.serverId}/channels/${c.id}`)}
                         onUserMenu={openVoiceUserMenu}
                         onUserDragStart={(chId, uid) => setDragUser({ userId: uid, fromChannelId: chId })}
