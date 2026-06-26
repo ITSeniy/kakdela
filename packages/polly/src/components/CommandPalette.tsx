@@ -1,6 +1,7 @@
-// Командная палитра ⌘K. Источник дизайна: designs/final-extras.jsx (FinalPalette).
-// Данные: серверы/каналы из существующих queries (servers/api), действия —
-// существующие сторы и навигация. Никаких новых эндпоинтов.
+// Командная палитра ⌘K (palette · v2). Быстрый переход: недавнее, каналы,
+// люди, серверы, действия. Fuzzy-поиск (подстрока + подпоследовательность).
+// Данные — из существующих queries (servers/channels/dm/members), своих
+// эндпоинтов не вводим. Все queries gated `enabled: open`.
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQueries, useQuery } from '@tanstack/react-query'
@@ -8,8 +9,14 @@ import { createPortal } from 'react-dom'
 import { useLocation } from 'wouter'
 import { create } from 'zustand'
 
-import { getServerDetail, listServers } from '../features/servers/api.js'
+import type { DmSummary, MemberPublic } from '@kakdela/ginzu/api-types'
+
+import { useAuthStore } from '../features/auth/store.js'
+import { listDms } from '../features/dm/api.js'
+import { useRecents } from '../features/navigation/recents.js'
+import { getServerDetail, listMembers, listServers } from '../features/servers/api.js'
 import { useServerCreateJoinUi } from '../features/servers/store.js'
+import { Avatar } from './Avatar.js'
 import { useThemeStore } from '../lib/theme.js'
 import { Icon } from './Icon.js'
 
@@ -31,16 +38,44 @@ interface PaletteRow {
   icon: React.ReactNode
   label: string
   hint?: string
+  /** Доп. вес для сортировки внутри секции (недавнее — по свежести). */
+  weight?: number
   run(): void
+}
+
+const STATUS_LABEL: Record<MemberPublic['status'], string> = {
+  online:  'в сети',
+  idle:    'отошёл',
+  dnd:     'не беспокоить',
+  offline: 'не в сети',
+}
+
+/** Подстрока — приоритетна; иначе подпоследовательность (fuzzy). null = нет. */
+function fuzzyScore(text: string, q: string): number | null {
+  if (q === '') return 0
+  const t = text.toLowerCase()
+  const idx = t.indexOf(q)
+  if (idx >= 0) return 1000 - idx // чем раньше совпадение, тем выше
+  // Подпоследовательность: все буквы q встречаются по порядку.
+  let ti = 0
+  for (let qi = 0; qi < q.length; qi += 1) {
+    const ch = q[qi]!
+    const found = t.indexOf(ch, ti)
+    if (found < 0) return null
+    ti = found + 1
+  }
+  return 100
 }
 
 export function CommandPalette() {
   const open = useCommandPalette((s) => s.open)
   const setOpen = useCommandPalette((s) => s.setOpen)
   const [, navigate] = useLocation()
+  const me = useAuthStore((s) => s.user)
   const openCreate = useServerCreateJoinUi((s) => s.openCreate)
   const openJoin = useServerCreateJoinUi((s) => s.openJoin)
   const cycleTheme = useThemeStore((s) => s.cycleMode)
+  const recents = useRecents((s) => s.entries)
 
   const [query, setQuery] = useState('')
   const [cursor, setCursor] = useState(0)
@@ -63,50 +98,151 @@ export function CommandPalette() {
     })),
   })
 
+  const memberQueries = useQueries({
+    queries: servers.map((s) => ({
+      queryKey: ['members', s.id],
+      queryFn: () => listMembers(s.id),
+      staleTime: 60_000,
+      enabled: open,
+    })),
+  })
+
+  const { data: dms = [] } = useQuery({
+    queryKey: ['dm-list'],
+    queryFn: listDms,
+    staleTime: 10_000,
+    enabled: open,
+  })
+
   useEffect(() => {
     if (open) {
       setQuery('')
       setCursor(0)
-      // Фокус после маунта портала.
       setTimeout(() => inputRef.current?.focus(), 0)
     }
   }, [open])
 
-  const rows = useMemo<PaletteRow[]>(() => {
-    const all: PaletteRow[] = []
-    const q = query.trim().toLowerCase()
-    const matches = (s: string) => q === '' || s.toLowerCase().includes(q)
-
-    for (const s of servers) {
-      if (matches(s.name)) {
-        all.push({
-          key: `srv:${s.id}`,
-          section: 'серверы',
-          icon: <span className="text-[10px] font-bold">{s.name.slice(0, 1).toUpperCase()}</span>,
-          label: s.name,
-          hint: 'сервер',
-          run: () => navigate(`/servers/${s.id}`),
-        })
-      }
-    }
+  // Сводные карты для резолва имён каналов/личек (для «недавнего»).
+  const channelById = useMemo(() => {
+    const m = new Map<string, { name: string; kind: string; serverId: string | null; serverName: string }>()
     for (const dq of detailQueries) {
       const detail = dq.data
       if (!detail) continue
       for (const c of detail.channels) {
         if (c.kind === 'dm') continue
-        if (!matches(c.name)) continue
+        m.set(c.id, { name: c.name, kind: c.kind, serverId: c.serverId, serverName: detail.server.name })
+      }
+    }
+    return m
+  }, [detailQueries])
+
+  const dmByChannel = useMemo(() => {
+    const m = new Map<string, DmSummary>()
+    for (const d of dms) m.set(d.channelId, d)
+    return m
+  }, [dms])
+
+  const rows = useMemo<PaletteRow[]>(() => {
+    const all: PaletteRow[] = []
+    const q = query.trim().toLowerCase()
+
+    // ── недавнее (только без запроса — это быстрый доступ) ──
+    if (q === '') {
+      let w = recents.length
+      for (const r of recents) {
+        if (r.kind === 'channel') {
+          const c = channelById.get(r.id)
+          if (!c) continue
+          all.push({
+            key: `recent:ch:${r.id}`,
+            section: 'недавнее',
+            icon: c.kind === 'voice' ? <Icon.Speaker size={11} /> : <Icon.Hash size={11} />,
+            label: c.name,
+            hint: c.serverName,
+            weight: w--,
+            run: () => navigate(`/servers/${r.serverId ?? c.serverId}/channels/${r.id}`),
+          })
+        } else {
+          const d = dmByChannel.get(r.id)
+          if (!d) continue
+          all.push({
+            key: `recent:dm:${r.id}`,
+            section: 'недавнее',
+            icon: <Avatar name={d.otherUser.displayName} avatarUrl={d.otherUser.avatarUrl} size={18} />,
+            label: d.otherUser.displayName,
+            hint: 'личные сообщения',
+            weight: w--,
+            run: () => navigate(`/dm/${r.id}`),
+          })
+        }
+      }
+    }
+
+    // ── каналы ──
+    for (const dq of detailQueries) {
+      const detail = dq.data
+      if (!detail) continue
+      for (const c of detail.channels) {
+        if (c.kind === 'dm') continue
+        const score = fuzzyScore(c.name, q)
+        if (score === null) continue
         all.push({
           key: `ch:${c.id}`,
           section: 'каналы',
           icon: c.kind === 'voice' ? <Icon.Speaker size={11} /> : <Icon.Hash size={11} />,
           label: c.name,
-          hint: detail.server.name,
+          hint: c.kind === 'voice' ? `${detail.server.name} · голосовой` : detail.server.name,
+          weight: score,
           run: () => navigate(`/servers/${c.serverId}/channels/${c.id}`),
         })
       }
     }
 
-    const actions: PaletteRow[] = [
+    // ── люди (участники всех серверов, дедуп; + личка для last-seen) ──
+    const seenPeople = new Set<string>()
+    for (const mq of memberQueries) {
+      const members = mq.data
+      if (!members) continue
+      for (const member of members) {
+        if (member.id === me?.id) continue
+        if (seenPeople.has(member.id)) continue
+        const score = Math.max(
+          fuzzyScore(member.displayName, q) ?? -1,
+          member.username ? (fuzzyScore(member.username, q) ?? -1) : -1,
+        )
+        if (score < 0) continue
+        seenPeople.add(member.id)
+        const status = STATUS_LABEL[member.status]
+        const hint = member.customStatus ? `${member.customStatus}` : status
+        all.push({
+          key: `ppl:${member.id}`,
+          section: 'люди',
+          icon: <Avatar name={member.displayName} avatarUrl={member.avatarUrl} size={18} />,
+          label: member.displayName,
+          hint,
+          weight: score,
+          run: () => navigate(`/dm/with/${member.id}`),
+        })
+      }
+    }
+
+    // ── серверы ──
+    for (const s of servers) {
+      const score = fuzzyScore(s.name, q)
+      if (score === null) continue
+      all.push({
+        key: `srv:${s.id}`,
+        section: 'серверы',
+        icon: <span className="text-[10px] font-bold">{s.name.slice(0, 1).toUpperCase()}</span>,
+        label: s.name,
+        hint: 'сервер',
+        weight: score,
+        run: () => navigate(`/servers/${s.id}`),
+      })
+    }
+
+    // ── действия ──
+    const actions: Omit<PaletteRow, 'weight'>[] = [
       { key: 'a:dm', section: 'действия', icon: <span className="text-[9px] font-bold font-mono">кд</span>, label: 'личные сообщения', run: () => navigate('/dm') },
       { key: 'a:inbox', section: 'действия', icon: <Icon.Inbox size={11} />, label: 'входящие', run: () => navigate('/inbox') },
       { key: 'a:search', section: 'действия', icon: <Icon.Search size={11} />, label: 'поиск по сообщениям', run: () => navigate('/search') },
@@ -114,14 +250,35 @@ export function CommandPalette() {
       { key: 'a:join', section: 'действия', icon: <span className="text-[11px] font-mono">↪</span>, label: 'принять инвайт', run: openJoin },
       { key: 'a:theme', section: 'действия', icon: <Icon.Sparkle size={11} />, label: 'переключить тему', hint: 'light/dark/system', run: cycleTheme },
     ]
-    for (const a of actions) if (matches(a.label)) all.push(a)
+    for (const a of actions) {
+      const score = fuzzyScore(a.label, q)
+      if (score === null) continue
+      all.push({ ...a, weight: score })
+    }
 
-    return all.slice(0, 30)
-  }, [servers, detailQueries, query, navigate, openCreate, openJoin, cycleTheme])
+    // Сортируем внутри секций по весу, секции — в фиксированном порядке.
+    const SECTION_ORDER = ['недавнее', 'каналы', 'люди', 'серверы', 'действия']
+    all.sort((a, b) => {
+      const sa = SECTION_ORDER.indexOf(a.section)
+      const sb = SECTION_ORDER.indexOf(b.section)
+      if (sa !== sb) return sa - sb
+      return (b.weight ?? 0) - (a.weight ?? 0)
+    })
+
+    return all.slice(0, 40)
+  }, [servers, detailQueries, memberQueries, dms, recents, channelById, dmByChannel, query, navigate, openCreate, openJoin, cycleTheme, me])
 
   useEffect(() => {
     setCursor((c) => Math.min(c, Math.max(0, rows.length - 1)))
   }, [rows.length])
+
+  // Держим выбранную строку в зоне видимости при навигации с клавиатуры.
+  useEffect(() => {
+    const list = listRef.current
+    if (!list) return
+    const el = list.querySelector(`[data-row-index="${cursor}"]`)
+    if (el) (el as HTMLElement).scrollIntoView({ block: 'nearest' })
+  }, [cursor])
 
   if (!open) return null
 
@@ -148,6 +305,7 @@ export function CommandPalette() {
   }
 
   let lastSection = ''
+  const matchCount = rows.length
 
   return createPortal(
     <div
@@ -165,10 +323,15 @@ export function CommandPalette() {
             type="text"
             value={query}
             onChange={(e) => { setQuery(e.target.value); setCursor(0) }}
-            placeholder="канал, сервер или действие…"
+            placeholder="канал, человек, сервер или действие…"
             className="flex-1 bg-transparent outline-none text-[13px] text-kd-text placeholder:text-kd-text-mute"
           />
-          <span className="text-[9px] font-mono text-kd-text-mute shrink-0">esc · закрыть</span>
+          {query && (
+            <span className="text-[10px] font-mono text-kd-text-mute shrink-0">
+              {matchCount} {matchCount === 1 ? 'совпадение' : 'совпадений'}
+            </span>
+          )}
+          <span className="text-[9px] font-mono text-kd-text-mute shrink-0 px-1.5 py-0.5 rounded border border-kd-border">esc</span>
         </div>
 
         <div ref={listRef} className="flex-1 overflow-y-auto py-1.5">
@@ -182,7 +345,7 @@ export function CommandPalette() {
             lastSection = row.section
             const active = i === cursor
             return (
-              <div key={row.key}>
+              <div key={row.key} data-row-index={i}>
                 {showSection && (
                   <div className="px-3.5 pt-2 pb-1 text-[9px] font-mono font-bold uppercase tracking-[0.05em] text-kd-text-mute select-none">
                     — {row.section}
@@ -199,12 +362,12 @@ export function CommandPalette() {
                       : 'border-l-2 border-transparent',
                   ].join(' ')}
                 >
-                  <span className="w-[22px] h-[22px] rounded-kd bg-kd-panel-alt border border-kd-border flex items-center justify-center text-kd-text-soft shrink-0">
+                  <span className="w-[22px] h-[22px] rounded-kd bg-kd-panel-alt border border-kd-border flex items-center justify-center text-kd-text-soft shrink-0 overflow-hidden">
                     {row.icon}
                   </span>
                   <span className="flex-1 min-w-0 truncate text-[12px] text-kd-text">{row.label}</span>
                   {row.hint && (
-                    <span className="text-[10px] font-mono text-kd-text-mute shrink-0">{row.hint}</span>
+                    <span className="text-[10px] font-mono text-kd-text-mute shrink-0 max-w-[220px] truncate">{row.hint}</span>
                   )}
                   {active && <span className="text-[9px] font-mono text-kd-text-mute shrink-0">⏎</span>}
                 </button>
@@ -214,10 +377,10 @@ export function CommandPalette() {
         </div>
 
         <div className="px-3.5 py-1.5 bg-kd-panel-alt border-t border-kd-border flex gap-3 text-[9px] font-mono text-kd-text-mute select-none">
-          <span>↑↓ · выбор</span>
-          <span>⏎ · перейти</span>
+          <span>↑↓ навигация</span>
+          <span>⏎ открыть</span>
           <span className="flex-1" />
-          <span>ctrl+k · палитра</span>
+          <span>palette · v2</span>
         </div>
       </div>
     </div>,

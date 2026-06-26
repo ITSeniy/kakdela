@@ -7,6 +7,7 @@ import type { SearchResultItem, SearchSort } from '@kakdela/ginzu/api-types'
 
 import { EmptyState } from '../../components/EmptyState.js'
 import { Icon } from '../../components/Icon.js'
+import { useViewScope } from '../navigation/viewScope.js'
 import { searchMessages } from './api.js'
 
 const DEBOUNCE_MS = 250
@@ -97,6 +98,10 @@ export function SearchScreen() {
   const [query, setQuery] = useState('')
   const [debounced, setDebounced] = useState('')
   const [sort, setSort] = useState<SearchSort>('rank')
+  // Scope из шапки канала: поиск только по этому серверу. × сбрасывает.
+  const scopeServerId = useViewScope((s) => s.serverId)
+  const scopeServerName = useViewScope((s) => s.serverName)
+  const clearScope = useViewScope((s) => s.clear)
 
   useEffect(() => {
     inputRef.current?.focus()
@@ -108,8 +113,8 @@ export function SearchScreen() {
   }, [query])
 
   const { data, isFetching, error } = useQuery({
-    queryKey: ['search', debounced, sort],
-    queryFn: () => searchMessages({ q: debounced, sort }),
+    queryKey: ['search', debounced, sort, scopeServerId],
+    queryFn: () => searchMessages({ q: debounced, sort, ...(scopeServerId ? { serverId: scopeServerId } : {}) }),
     enabled: debounced.length > 0,
     staleTime: 30_000,
   })
@@ -149,6 +154,19 @@ export function SearchScreen() {
       <div className="px-4 py-2.5 border-b border-kd-border bg-kd-panel-alt shrink-0">
         <div className="bg-kd-panel border border-kd-border rounded-kd px-3 py-2 flex items-center gap-2.5">
           <Icon.Search size={16} className="text-kd-text-mute shrink-0" />
+          {scopeServerId && (
+            <span className="flex items-center gap-1 shrink-0 px-2 py-0.5 rounded bg-kd-accent-soft text-kd-accent-deep text-[11px] font-mono font-semibold">
+              {scopeServerName || 'сервер'}
+              <button
+                type="button"
+                onClick={clearScope}
+                title="искать по всем серверам"
+                className="hover:text-kd-danger leading-none"
+              >
+                ✕
+              </button>
+            </span>
+          )}
           <input
             ref={inputRef}
             type="text"

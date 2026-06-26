@@ -13,6 +13,7 @@ import { toast } from '../../components/toast/index.js'
 import { wsClient } from '../../lib/ws.js'
 import { UserBar } from '../channels/UserBar.js'
 import { useAllServerEmoji } from '../emoji/api.js'
+import { useViewScope } from '../navigation/viewScope.js'
 import { listInboxMentions, markMentionsRead } from './api.js'
 
 // Короткая задержка — мгновение, чтобы скролл-пролёт не «съедал» упоминания,
@@ -204,14 +205,25 @@ export function InboxScreen() {
   const emojiMap = useAllServerEmoji()
   const [filter, setFilter] = useState<'all' | 'unread'>('all')
 
+  // Scope из шапки канала: входящие только этого сервера. Фильтруем клиентом
+  // (на 15-20 друзей лента короткая), DM при scope не показываем.
+  const scopeServerId = useViewScope((s) => s.serverId)
+  const scopeServerName = useViewScope((s) => s.serverName)
+  const clearScope = useViewScope((s) => s.clear)
+
   const { data, refetch } = useQuery({
     queryKey: ['inbox-mentions', filter],
     queryFn: () => listInboxMentions(filter === 'unread' ? { unreadOnly: true } : {}),
     staleTime: 10_000,
   })
 
-  const mentions = data?.mentions ?? []
-  const unreadTotal = data?.unreadTotal ?? 0
+  const allMentions = data?.mentions ?? []
+  const mentions = scopeServerId
+    ? allMentions.filter((m) => m.serverId === scopeServerId)
+    : allMentions
+  const unreadTotal = scopeServerId
+    ? mentions.filter((m) => m.readAt === null).length
+    : data?.unreadTotal ?? 0
 
   // Refetch и тут, и глобальный badge — оба слушают 'mention'.
   useEffect(() => {
@@ -353,8 +365,16 @@ export function InboxScreen() {
           <Icon.Inbox size={14} className="text-kd-warm shrink-0" />
           <span className="text-[13px] font-bold text-kd-text">входящие</span>
           {unreadTotal > 0 && <Badge variant="mention">{unreadTotal}</Badge>}
+          {scopeServerId && (
+            <span className="flex items-center gap-1 px-2 py-0.5 rounded bg-kd-accent-soft text-kd-accent-deep text-[11px] font-mono font-semibold">
+              {scopeServerName || 'сервер'}
+              <button type="button" onClick={clearScope} title="все серверы" className="hover:text-kd-danger leading-none">✕</button>
+            </span>
+          )}
           <div className="w-px h-3.5 bg-kd-border" />
-          <span className="text-[11px] text-kd-text-soft">всё, что просит твоего внимания</span>
+          <span className="text-[11px] text-kd-text-soft">
+            {scopeServerId ? 'упоминания в этом сервере' : 'всё, что просит твоего внимания'}
+          </span>
           <div className="flex-1" />
           <button
             type="button"

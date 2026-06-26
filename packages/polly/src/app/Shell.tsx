@@ -12,6 +12,7 @@ import { DmOpener } from '../features/dm/DmOpener.js'
 import { DmScreen } from '../features/dm/DmScreen.js'
 import { InboxScreen } from '../features/inbox/InboxScreen.js'
 import { MemberList } from '../features/members/MemberList.js'
+import { useRecents } from '../features/navigation/recents.js'
 import { WelcomeScreen } from '../features/onboarding/WelcomeScreen.js'
 import { SearchScreen } from '../features/search/SearchScreen.js'
 import { ServerRail } from '../features/servers/ServerRail.js'
@@ -121,6 +122,16 @@ export function Shell() {
   useEffect(() => {
     if (channelParams || dmChannelParams) localStorage.setItem(LAST_CHANNEL_KEY, location)
   }, [location, channelParams, dmChannelParams])
+
+  // «Недавнее» для палитры: фиксируем посещённые каналы и личные чаты.
+  useEffect(() => {
+    const push = useRecents.getState().push
+    if (channelParams) {
+      push({ kind: 'channel', id: channelParams.channelId, serverId: channelParams.serverId })
+    } else if (dmChannelParams) {
+      push({ kind: 'dm', id: dmChannelParams.channelId })
+    }
+  }, [channelParams, dmChannelParams])
 
   const openThreadId = useThreadUi((s) => s.openThreadId)
   const threadParentId = useThreadUi((s) => s.parentChannelId)

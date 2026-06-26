@@ -458,6 +458,8 @@ export type SearchSort = z.infer<typeof SearchSortSchema>
 export const SearchRequestSchema = z.object({
   q:         z.string().min(1).max(200),
   channelId: z.string().uuid().optional(),
+  /** Ограничить поиск каналами одного сервера (иконка поиска в шапке канала). */
+  serverId:  z.string().uuid().optional(),
   authorId:  z.string().uuid().optional(),
   before:    z.string().datetime().optional(),
   after:     z.string().datetime().optional(),

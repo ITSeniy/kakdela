@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { type InfiniteData, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useLocation } from 'wouter'
 
 import type { Attachment, Channel, MemberPublic, Message, MessagesPage } from '@kakdela/ginzu/api-types'
 
@@ -10,6 +11,7 @@ import { Icon } from '../../components/Icon.js'
 import { toast } from '../../components/toast/index.js'
 import { ApiError } from '../../lib/api.js'
 import { useAuthStore } from '../auth/store.js'
+import { useViewScope } from '../navigation/viewScope.js'
 import { useServerEmoji } from '../emoji/api.js'
 import { useProfileUi } from '../profile/store.js'
 import { getChannelStats, getServerDetail, listMembers } from '../servers/api.js'
@@ -26,19 +28,34 @@ interface ChatScreenProps {
 
 // Шапка канала по designs/final-chrome.jsx (KD_ChannelHeader): panelAlt,
 // иконка + имя + вертикальный разделитель + topic, справа mono-stats и иконки.
-function Header({ channel, channelId, memberCount, canPin, memberMap }: {
+function Header({ channel, channelId, serverId, serverName, memberCount, canPin, memberMap }: {
   channel: Channel | undefined
   channelId: string
+  serverId: string
+  serverName: string
   memberCount: number
   canPin: boolean
   memberMap: ReadonlyMap<string, MemberPublic>
 }) {
+  const [, navigate] = useLocation()
+  const setScope = useViewScope((s) => s.setScope)
   const [showPins, setShowPins] = useState(false)
   const { data: stats } = useQuery({
     queryKey: ['channel-stats', channelId],
     queryFn: () => getChannelStats(channelId),
     staleTime: 30_000,
   })
+
+  // Иконки шапки = серверные версии глобальных: открывают входящие/поиск,
+  // ограниченные этим сервером (scope подхватят InboxScreen/SearchScreen).
+  function openServerInbox() {
+    setScope(serverId, serverName)
+    navigate('/inbox')
+  }
+  function openServerSearch() {
+    setScope(serverId, serverName)
+    navigate('/search')
+  }
   return (
     <div className="px-4 py-2 border-b border-kd-border bg-kd-panel-alt flex items-center gap-2.5 shrink-0">
       <Icon.Hash size={14} className="text-kd-text-soft shrink-0" />
@@ -73,6 +90,22 @@ function Header({ channel, channelId, memberCount, canPin, memberMap }: {
             />
           )}
         </div>
+        <button
+          type="button"
+          title={`входящие · ${serverName}`}
+          onClick={openServerInbox}
+          className="hover:text-kd-text-soft transition-colors"
+        >
+          <Icon.Inbox size={14} />
+        </button>
+        <button
+          type="button"
+          title={`поиск в ${serverName}`}
+          onClick={openServerSearch}
+          className="hover:text-kd-text-soft transition-colors"
+        >
+          <Icon.Search size={14} />
+        </button>
       </div>
     </div>
   )
@@ -256,6 +289,8 @@ export function ChatScreen({ serverId, channelId }: ChatScreenProps) {
       <Header
         channel={channel}
         channelId={channelId}
+        serverId={serverId}
+        serverName={serverDetail?.server.name ?? ''}
         memberCount={serverDetail?.memberCount ?? 0}
         canPin={canPin}
         memberMap={memberMap}

@@ -9,6 +9,7 @@ import { ServerIcon } from '../../components/ServerIcon.js'
 import { wsClient } from '../../lib/ws.js'
 import { listDms } from '../dm/api.js'
 import { listInboxMentions } from '../inbox/api.js'
+import { useViewScope } from '../navigation/viewScope.js'
 import { useUnreadByServer } from '../notify/unread.js'
 import { getUiZoom } from '../settings/appearance.js'
 import { useSettingsUi } from '../settings/store.js'
@@ -42,6 +43,7 @@ export function ServerRail({
 }: ServerRailProps) {
   const [, navigate] = useLocation()
   const queryClient = useQueryClient()
+  const clearScope = useViewScope((s) => s.clear)
   const openCreate = useServerCreateJoinUi((s) => s.openCreate)
   const openJoin = useServerCreateJoinUi((s) => s.openJoin)
   const openSettings = useSettingsUi((s) => s.open)
@@ -258,7 +260,7 @@ export function ServerRail({
       <div className="flex flex-col items-center gap-2 mb-1 text-kd-text-soft shrink-0">
         <button
           type="button"
-          onClick={() => navigate('/inbox')}
+          onClick={() => { clearScope(); navigate('/inbox') }}
           title={`входящие${inboxUnread > 0 ? ` · ${inboxUnread} непрочитанных` : ''}`}
           className={`relative transition-colors ${inInboxMode ? 'text-kd-warm' : 'hover:text-kd-text'}`}
         >
@@ -271,7 +273,7 @@ export function ServerRail({
         </button>
         <button
           type="button"
-          onClick={() => navigate('/search')}
+          onClick={() => { clearScope(); navigate('/search') }}
           title="поиск · Ctrl+K"
           className={`transition-colors ${inSearchMode ? 'text-kd-warm' : 'hover:text-kd-text'}`}
         >

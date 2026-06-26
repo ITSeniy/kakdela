@@ -43,7 +43,7 @@ export const searchRoutes: FastifyPluginAsyncZod = async (app) => {
     },
     async (req, reply) => {
       const userId = req.authUser!.id
-      const { q, channelId, authorId, before, after, limit, sort } = req.query
+      const { q, channelId, serverId, authorId, before, after, limit, sort } = req.query
 
       if (channelId) {
         await assertCanAccessChannel(userId, channelId)
@@ -61,6 +61,18 @@ export const searchRoutes: FastifyPluginAsyncZod = async (app) => {
 
       if (channelId) {
         conditions.push(eq(messages.channelId, channelId))
+      } else if (serverId) {
+        // Поиск в пределах одного сервера: только его каналы И только если
+        // user в нём состоит (членство гарантирует подзапрос). Не-член → пусто.
+        conditions.push(sql`
+          messages.channel_id IN (
+            SELECT c.id FROM channels c
+            WHERE c.server_id = ${serverId}
+              AND c.server_id IN (
+                SELECT sm.server_id FROM server_members sm WHERE sm.user_id = ${userId}
+              )
+          )
+        `)
       } else {
         // Без явного channelId — ограничиваем до доступных user'у каналов.
         // Все server-каналы, где есть его server_members row, плюс все
