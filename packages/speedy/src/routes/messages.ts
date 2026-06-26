@@ -12,6 +12,7 @@ import {
   SendMessageRequestSchema,
   type Attachment,
   type ForwardedRef,
+  type LinkPreview,
   type ReactionAggregate,
   type ReplyRef,
   type ThreadInfo,
@@ -19,6 +20,8 @@ import {
 
 import { channels, dmChannels, mentions as mentionsTable, messages, reactions as reactionsTable, serverMembers, users } from '../db/schema.js'
 import { db } from '../lib/db.js'
+import { env } from '../env.js'
+import { resolvePreviewsForContent } from '../lib/link-preview.js'
 import { extractMentions, type MentionCandidate, type ParsedMention } from '../lib/mention-extractor.js'
 import { assertCanAccessChannel, assertRole, notFound } from '../lib/permissions.js'
 import { presence } from '../presence/store.js'
@@ -37,6 +40,7 @@ const MSG_COLS = {
   editedAt:      messages.editedAt,
   pinnedAt:      messages.pinnedAt,
   forwardedFrom: messages.forwardedFrom,
+  linkPreviews:  messages.linkPreviews,
 }
 
 async function resolveReplies(ids: string[]): Promise<Map<string, ReplyRef>> {
@@ -166,6 +170,7 @@ interface MsgRow {
   editedAt: Date | null
   pinnedAt: Date | null
   forwardedFrom: unknown
+  linkPreviews: unknown
 }
 
 function serializeMessage(
@@ -191,6 +196,39 @@ function serializeMessage(
     pinnedAt:  row.pinnedAt?.toISOString() ?? null,
     // jsonb-снимок уже в форме ForwardedRef (строковые даты внутри).
     forwarded: (row.forwardedFrom as ForwardedRef | null) ?? null,
+    // null (ещё не обрабатывалось) и [] (превью нет) для клиента эквивалентны.
+    linkPreviews: (row.linkPreviews as LinkPreview[] | null) ?? [],
+  }
+}
+
+/**
+ * Асинхронно снимает OG-превью для ссылок из сообщения и, если что-то нашлось
+ * (или нужно очистить после правки), сохраняет снимок в колонку и шлёт WS
+ * msg.embeds. Fire-and-forget: не блокирует ответ на отправку/правку и сам
+ * проглатывает ошибки (сеть/SSRF). clearIfEmpty=true (для edit) затирает старые
+ * превью, если в новом тексте ссылок не осталось.
+ */
+async function resolveAndBroadcastPreviews(
+  messageId: string,
+  channelId: string,
+  content: string,
+  clearIfEmpty: boolean,
+): Promise<void> {
+  if (!env.LINK_PREVIEWS_ENABLED) return
+  try {
+    const previews = await resolvePreviewsForContent(content)
+    if (previews.length === 0 && !clearIfEmpty) return
+
+    const updated = await db
+      .update(messages)
+      .set({ linkPreviews: previews })
+      .where(and(eq(messages.id, messageId), isNull(messages.deletedAt)))
+      .returning({ id: messages.id })
+    if (updated.length === 0) return // сообщение удалили, пока тянули превью
+
+    void broadcastToChannel(channelId, { t: 'msg.embeds', channelId, messageId, linkPreviews: previews })
+  } catch {
+    /* превью — лучшее-усилие, тишина при сбое */
   }
 }
 
@@ -427,6 +465,9 @@ export const messagesRoutes: FastifyPluginAsyncZod = async (app) => {
       const serialized = serializeMessage(msg, [], replyToData, attachedFiles)
       void broadcastToChannel(channelId, { t: 'msg.new', channelId, message: serialized })
 
+      // OG-превью досъезжают асинхронно (WS msg.embeds) — не держим ответ.
+      void resolveAndBroadcastPreviews(msg.id, channelId, content, false)
+
       return reply.code(201).send(serialized)
     },
   )
@@ -521,6 +562,10 @@ export const messagesRoutes: FastifyPluginAsyncZod = async (app) => {
         content: result.content,
         editedAt: serialized.editedAt ?? new Date().toISOString(),
       })
+
+      // Ссылки могли измениться — пересчитываем превью (clearIfEmpty: если в
+      // новом тексте ссылок нет, затираем старую карточку).
+      void resolveAndBroadcastPreviews(result.id, result.channelId, content, true)
 
       return reply.code(200).send(serialized)
     },

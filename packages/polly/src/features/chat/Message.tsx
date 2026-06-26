@@ -16,6 +16,7 @@ import { AttachmentList } from './AttachmentView.js'
 import { useChatDisplaySettings } from './displaySettings.js'
 import { ContextMenu } from './ContextMenu.js'
 import { ForwardedCard } from './ForwardedCard.js'
+import { LinkPreviews } from './LinkPreviewCard.js'
 import { useForwardUi } from './forwardStore.js'
 import { Reactions } from './Reactions.js'
 import { renderMarkdown, renderMarkdownInline } from './markdown.js'
@@ -318,6 +319,7 @@ export function Message({
   const forwardedEl = fwd ? (
     <ForwardedCard fwd={fwd} memberMap={memberMap} channelMap={channelMap} emojiMap={emojiMap} />
   ) : null
+  const linkPreviewsEl = <LinkPreviews previews={(message as IMessage).linkPreviews} />
   const pinnedTag = (message as IMessage).pinned ? (
     <div className="flex items-center gap-1 text-[10px] text-kd-warm font-mono mb-0.5 select-none">📌 закреплено</div>
   ) : null
@@ -477,6 +479,7 @@ export function Message({
               </span>
             )}
             {forwardedEl}
+            {linkPreviewsEl}
             {pendingStatus === 'error' && onRetry && (
               <button type="button" onClick={onRetry} className="text-[9px] text-kd-danger font-mono hover:underline ml-1">
                 ошибка · повторить?
@@ -518,6 +521,7 @@ export function Message({
             </div>
           )}
           {forwardedEl}
+          {linkPreviewsEl}
           {pendingStatus === 'error' && onRetry && (
             <button type="button" onClick={onRetry} className="text-[9px] text-kd-danger font-mono hover:underline">
               ошибка · повторить?
@@ -579,6 +583,7 @@ export function Message({
             </div>
           )}
           {forwardedEl}
+          {linkPreviewsEl}
           {msgAttachments.length > 0 && <AttachmentList attachments={msgAttachments} lightboxContext={lightboxContext} />}
           <ThreadBadge />
           {reactionsEl}

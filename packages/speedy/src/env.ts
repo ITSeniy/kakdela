@@ -45,6 +45,11 @@ const EnvSchema = z.object({
   // Рейтинг отдаваемых гифок: g / pg / pg-13 / r. По умолчанию — мягкий.
   GIPHY_RATING: z.enum(['g', 'pg', 'pg-13', 'r']).default('pg-13'),
 
+  // Превью ссылок (OG-метаданные). Сервер делает исходящие HTTP-запросы к
+  // доменам из сообщений — кому это не нужно (приватность/закрытый периметр),
+  // ставит 'false', и фича выключается целиком.
+  LINK_PREVIEWS_ENABLED: z.enum(['true', 'false']).default('true').transform((v) => v === 'true'),
+
   PUBLIC_ORIGIN: z.string().url().default('http://localhost:1420'),
 })
 

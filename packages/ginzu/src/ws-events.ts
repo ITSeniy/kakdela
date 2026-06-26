@@ -1,7 +1,7 @@
 import { z } from 'zod'
 
-import { UserSchema, ServerSchema, MessageSchema, ServerMemberSchema, ChannelSchema } from './api-types.js'
-import type { User, Server, Message, ServerMember, Channel } from './api-types.js'
+import { UserSchema, ServerSchema, MessageSchema, ServerMemberSchema, ChannelSchema, LinkPreviewSchema } from './api-types.js'
+import type { User, Server, Message, ServerMember, Channel, LinkPreview } from './api-types.js'
 
 export type ServerEvent =
   | { t: 'ready'; user: User; servers: Server[] }
@@ -11,6 +11,8 @@ export type ServerEvent =
   | { t: 'msg.edit'; channelId: string; messageId: string; content: string; editedAt: string }
   | { t: 'msg.delete'; channelId: string; messageId: string }
   | { t: 'msg.pin'; channelId: string; messageId: string; pinned: boolean; pinnedAt: string | null }
+  // OG-превью ссылок досняты сервером — клиент патчит linkPreviews у сообщения.
+  | { t: 'msg.embeds'; channelId: string; messageId: string; linkPreviews: LinkPreview[] }
   | { t: 'presence'; userId: string; status: User['status'] }
   | { t: 'typing'; channelId: string; userId: string }
   | { t: 'voice.join'; channelId: string; userId: string }
@@ -53,6 +55,7 @@ export const ServerEventSchema = z.discriminatedUnion('t', [
   z.object({ t: z.literal('msg.edit'), channelId: uuid, messageId: uuid, content: z.string(), editedAt: z.string() }),
   z.object({ t: z.literal('msg.delete'), channelId: uuid, messageId: uuid }),
   z.object({ t: z.literal('msg.pin'), channelId: uuid, messageId: uuid, pinned: z.boolean(), pinnedAt: z.string().nullable() }),
+  z.object({ t: z.literal('msg.embeds'), channelId: uuid, messageId: uuid, linkPreviews: z.array(LinkPreviewSchema) }),
   z.object({ t: z.literal('presence'), userId: uuid, status: UserSchema.shape.status }),
   z.object({ t: z.literal('typing'), channelId: uuid, userId: uuid }),
   z.object({ t: z.literal('voice.join'), channelId: uuid, userId: uuid }),

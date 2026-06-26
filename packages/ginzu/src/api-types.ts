@@ -87,6 +87,22 @@ export const ForwardedRefSchema = z.object({
 })
 export type ForwardedRef = z.infer<typeof ForwardedRefSchema>
 
+// Превью ссылки (Open Graph / oEmbed-метаданные). Снимок снимается сервером
+// асинхронно после отправки и денормализуется в сообщение, поэтому карточка
+// переживает перезагрузку и не зависит от доступности исходного сайта.
+// kind='image' — прямая ссылка на картинку (рендерим только изображение,
+// без «обвязки» карточки). kind='link' — обычная OG-карточка.
+export const LinkPreviewSchema = z.object({
+  /** Канонический URL (og:url или итоговый после редиректов). */
+  url:         z.string().url(),
+  kind:        z.enum(['link', 'image']).default('link'),
+  siteName:    z.string().nullable().optional(),
+  title:       z.string().nullable().optional(),
+  description: z.string().nullable().optional(),
+  imageUrl:    z.string().url().nullable().optional(),
+})
+export type LinkPreview = z.infer<typeof LinkPreviewSchema>
+
 export const MessageSchema = z.object({
   id: z.string().uuid(),
   channelId: z.string().uuid(),
@@ -104,6 +120,8 @@ export const MessageSchema = z.object({
   pinnedAt: z.string().nullable().optional(),
   /** Пересланное сообщение — снимок оригинала. */
   forwarded: ForwardedRefSchema.nullable().optional(),
+  /** OG-превью ссылок из текста. Подъезжают асинхронно (WS msg.embeds). */
+  linkPreviews: z.array(LinkPreviewSchema).default([]),
 })
 export type Message = z.infer<typeof MessageSchema>
 

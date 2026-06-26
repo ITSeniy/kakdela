@@ -77,6 +77,20 @@ export function useMessages(channelId: string | null) {
         void queryClient.invalidateQueries({ queryKey: ['pins', channelId] })
         return
       }
+      // OG-превью досняты сервером — патчим linkPreviews у сообщения.
+      if (event.t === 'msg.embeds' && event.channelId === channelId) {
+        queryClient.setQueryData<Cache>(['messages', channelId], (old) => {
+          if (!old) return old
+          const pages = old.pages.map((page) => ({
+            ...page,
+            messages: page.messages.map((m) =>
+              m.id === event.messageId ? { ...m, linkPreviews: event.linkPreviews } : m,
+            ),
+          }))
+          return { ...old, pages }
+        })
+        return
+      }
       if (event.t === 'reaction.add' && event.channelId === channelId) {
         queryClient.setQueryData<Cache>(['messages', channelId], (old) => {
           if (!old) return old

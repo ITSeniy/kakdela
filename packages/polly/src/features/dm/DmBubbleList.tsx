@@ -17,6 +17,7 @@ import { pinMessage, unpinMessage } from '../chat/api.js'
 import { AttachmentList } from '../chat/AttachmentView.js'
 import { ContextMenu } from '../chat/ContextMenu.js'
 import { ForwardedCard } from '../chat/ForwardedCard.js'
+import { LinkPreviews } from '../chat/LinkPreviewCard.js'
 import { useForwardUi } from '../chat/forwardStore.js'
 import { Reactions } from '../chat/Reactions.js'
 import { renderMarkdown, renderMarkdownInline } from '../chat/markdown.js'
@@ -288,6 +289,7 @@ function DmBubble({
           </div>
         )}
         {forwardedEl}
+        <LinkPreviews previews={(message as IMessage).linkPreviews} />
         {msgAttachments.length > 0 && <AttachmentList attachments={msgAttachments} />}
         <div className="flex items-center gap-1.5 mt-[3px] px-1 text-[10px] font-mono text-kd-text-mute">
           <span>{time}</span>

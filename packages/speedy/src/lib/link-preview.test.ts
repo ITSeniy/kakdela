@@ -1,0 +1,52 @@
+import { describe, expect, it } from 'vitest'
+
+import { extractPreviewableUrls, isBlockedIp } from './link-preview.js'
+
+describe('isBlockedIp — SSRF блок-лист', () => {
+  it('блокирует loopback и приватные IPv4', () => {
+    for (const ip of ['127.0.0.1', '0.0.0.0', '10.0.0.5', '172.16.0.1', '172.31.255.255', '192.168.1.1', '169.254.169.254', '100.64.0.1']) {
+      expect(isBlockedIp(ip), ip).toBe(true)
+    }
+  })
+
+  it('блокирует loopback/ULA/link-local и mapped IPv6', () => {
+    for (const ip of ['::1', '::', 'fc00::1', 'fd12:3456::1', 'fe80::1', '::ffff:127.0.0.1', '::ffff:10.0.0.1']) {
+      expect(isBlockedIp(ip), ip).toBe(true)
+    }
+  })
+
+  it('пропускает публичные адреса', () => {
+    for (const ip of ['8.8.8.8', '1.1.1.1', '93.184.216.34', '2606:2800:220:1:248:1893:25c8:1946']) {
+      expect(isBlockedIp(ip), ip).toBe(false)
+    }
+  })
+
+  it('мусор считает заблокированным (fail-closed)', () => {
+    for (const ip of ['not-an-ip', '', '999.999.999.999', '10']) {
+      expect(isBlockedIp(ip), ip).toBe(true)
+    }
+  })
+})
+
+describe('extractPreviewableUrls', () => {
+  it('находит ссылки и обрезает хвостовую пунктуацию', () => {
+    expect(extractPreviewableUrls('смотри https://example.com/page, круто!')).toEqual(['https://example.com/page'])
+  })
+
+  it('игнорирует markdown-картинки (гифки/скриншоты)', () => {
+    expect(extractPreviewableUrls('![](https://media.giphy.com/x.gif)')).toEqual([])
+  })
+
+  it('уважает подавление <https://…>', () => {
+    expect(extractPreviewableUrls('тихо <https://example.com>')).toEqual([])
+  })
+
+  it('пропускает ссылки внутри кода', () => {
+    expect(extractPreviewableUrls('`https://example.com` и ```\nhttps://b.com\n```')).toEqual([])
+  })
+
+  it('дедуп и лимит в 3 ссылки', () => {
+    const text = 'https://a.com https://a.com https://b.com https://c.com https://d.com'
+    expect(extractPreviewableUrls(text)).toEqual(['https://a.com', 'https://b.com', 'https://c.com'])
+  })
+})

@@ -120,6 +120,13 @@
       "when": 1782407315563,
       "tag": "0016_minor_enchantress",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1782439906133,
+      "tag": "0017_round_ironclad",
+      "breakpoints": true
     }
   ]
 }

@@ -1,0 +1,84 @@
+// Карточки превью ссылок (OG-метаданные). Сервер снимает их асинхронно после
+// отправки и кладёт в message.linkPreviews; здесь только рендер. Клик ведёт во
+// внешний браузер через host/shell (как обычные ссылки в markdown).
+//
+// kind='image' — прямая ссылка на картинку: показываем только изображение.
+// kind='link' — обычная карточка: сайт · заголовок · описание (+ превью-картинка).
+
+import type { LinkPreview } from '@kakdela/ginzu/api-types'
+
+import { openExternal } from '../../lib/host/shell.js'
+
+const MAX_CARDS = 3
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '')
+  } catch {
+    return url
+  }
+}
+
+function PreviewImage({ src, alt, onOpen }: { src: string; alt: string; onOpen: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="block mt-1.5 rounded-kd overflow-hidden border border-kd-border bg-kd-panel-alt max-w-full"
+      style={{ maxWidth: 400 }}
+      title={alt || 'открыть'}
+    >
+      <img
+        src={src}
+        alt={alt}
+        loading="lazy"
+        className="block w-full max-h-[260px] object-cover"
+        // Битые og:image не должны оставлять пустую рамку — прячем сам img.
+        onError={(e) => { (e.currentTarget.parentElement as HTMLElement).style.display = 'none' }}
+      />
+    </button>
+  )
+}
+
+function Card({ preview }: { preview: LinkPreview }) {
+  const open = () => { void openExternal(preview.url) }
+
+  // Прямая картинка — без «обвязки» карточки, только изображение.
+  if (preview.kind === 'image') {
+    return preview.imageUrl ? <PreviewImage src={preview.imageUrl} alt={preview.title ?? ''} onOpen={open} /> : null
+  }
+
+  const site = preview.siteName || hostOf(preview.url)
+  return (
+    <div className="mt-1 border-l-[3px] border-kd-accent/50 bg-kd-panel-alt rounded-r-kd pl-2.5 pr-3 py-2 max-w-[440px] min-w-0">
+      <div className="text-[10px] font-mono text-kd-text-mute truncate">{site}</div>
+      {preview.title && (
+        <button
+          type="button"
+          onClick={open}
+          className="block text-left text-[13px] font-semibold text-kd-accent hover:underline break-words mt-0.5 min-w-0"
+          title={preview.url}
+        >
+          {preview.title}
+        </button>
+      )}
+      {preview.description && (
+        <div className="text-[12px] text-kd-text-soft leading-snug break-words mt-0.5 line-clamp-3">
+          {preview.description}
+        </div>
+      )}
+      {preview.imageUrl && <PreviewImage src={preview.imageUrl} alt={preview.title ?? site} onOpen={open} />}
+    </div>
+  )
+}
+
+export function LinkPreviews({ previews }: { previews: LinkPreview[] | undefined }) {
+  if (!previews || previews.length === 0) return null
+  return (
+    <div className="flex flex-col items-start min-w-0">
+      {previews.slice(0, MAX_CARDS).map((p, i) => (
+        <Card key={`${p.url}-${i}`} preview={p} />
+      ))}
+    </div>
+  )
+}

@@ -161,6 +161,9 @@ export const messages = pgTable(
     pinnedBy:    uuid('pinned_by').references(() => users.id, { onDelete: 'set null' }),
     // Пересыл: денормализованный снимок оригинала (ForwardedRef), null = не пересыл.
     forwardedFrom: jsonb('forwarded_from'),
+    // OG-превью ссылок (LinkPreview[]); снимаются асинхронно после отправки.
+    // null = ещё не обрабатывалось; [] = ссылок без превью / превью нет.
+    linkPreviews: jsonb('link_previews'),
   },
   (t) => ({
     channelIdIdx:      index('messages_channel_id_id_idx').on(t.channelId, t.id),
