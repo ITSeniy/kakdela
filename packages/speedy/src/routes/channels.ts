@@ -1,4 +1,4 @@
-import { eq, sql } from 'drizzle-orm'
+import { and, eq, isNull, ne, sql } from 'drizzle-orm'
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod'
 import { z } from 'zod'
 
@@ -8,10 +8,11 @@ import {
   PatchChannelRequestSchema,
 } from '@kakdela/ginzu/api-types'
 
-import { channelCategories, channels } from '../db/schema.js'
+import { channelCategories, channels, messages } from '../db/schema.js'
 import { audit } from '../lib/audit.js'
+import { CHANNEL_DTO_COLS } from '../lib/channel-dto.js'
 import { db } from '../lib/db.js'
-import { assertMember, assertRole, notFound } from '../lib/permissions.js'
+import { assertCanAccessChannel, assertMember, assertRole, notFound } from '../lib/permissions.js'
 import { broadcastToServer } from '../ws/broadcast.js'
 
 export const channelsRoutes: FastifyPluginAsyncZod = async (app) => {
@@ -35,15 +36,7 @@ export const channelsRoutes: FastifyPluginAsyncZod = async (app) => {
       const userId = req.authUser!.id
 
       const rows = await db
-        .select({
-          id: channels.id,
-          serverId: channels.serverId,
-          name: channels.name,
-          kind: channels.kind,
-          category: channels.category,
-          topic: channels.topic,
-          position: channels.position,
-        })
+        .select(CHANNEL_DTO_COLS)
         .from(channels)
         .where(eq(channels.id, channelId))
         .limit(1)
@@ -54,6 +47,33 @@ export const channelsRoutes: FastifyPluginAsyncZod = async (app) => {
       await assertMember(userId, channel.serverId)
 
       return reply.code(200).send(channel)
+    },
+  )
+
+  // ───── GET /api/channels/:channelId/stats ─────
+  // Лёгкая статистика для шапки канала: число сообщений (без удалённых).
+  app.get(
+    '/channels/:channelId/stats',
+    {
+      preHandler: app.authenticate,
+      schema: {
+        params: z.object({ channelId: z.string().uuid() }),
+        response: {
+          200: z.object({ messageCount: z.number().int().nonnegative() }),
+          401: ErrorBodySchema,
+          403: ErrorBodySchema,
+          404: ErrorBodySchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const { channelId } = req.params
+      await assertCanAccessChannel(req.authUser!.id, channelId)
+      const rows = await db
+        .select({ count: sql<number>`COUNT(*)::int` })
+        .from(messages)
+        .where(and(eq(messages.channelId, channelId), isNull(messages.deletedAt)))
+      return reply.code(200).send({ messageCount: rows[0]?.count ?? 0 })
     },
   )
 
@@ -94,12 +114,28 @@ export const channelsRoutes: FastifyPluginAsyncZod = async (app) => {
 
       await assertRole(userId, existingServerId, ['owner', 'admin'])
 
-      const { name, topic, position, category } = req.body
+      const { name, topic, position, category, kind, slowModeSec, autoDeleteSec, isDefault, friendsOnly, nsfw, threadsAllowed } = req.body
       const updates: Partial<typeof channels.$inferInsert> = {}
       if (name !== undefined) updates.name = name
       if (topic !== undefined) updates.topic = topic ?? null
       if (position !== undefined) updates.position = position
       if (category !== undefined) updates.category = category ?? null
+      if (kind !== undefined) updates.kind = kind
+      if (slowModeSec !== undefined) updates.slowModeSec = slowModeSec
+      if (autoDeleteSec !== undefined) updates.autoDeleteSec = autoDeleteSec
+      if (isDefault !== undefined) updates.isDefault = isDefault
+      if (friendsOnly !== undefined) updates.friendsOnly = friendsOnly
+      if (nsfw !== undefined) updates.nsfw = nsfw
+      if (threadsAllowed !== undefined) updates.threadsAllowed = threadsAllowed
+
+      // «Канал по умолчанию» — ровно один на сервер: при установке снимаем флаг
+      // с остальных каналов до апдейта текущего.
+      if (isDefault === true) {
+        await db
+          .update(channels)
+          .set({ isDefault: false })
+          .where(and(eq(channels.serverId, existingServerId), ne(channels.id, channelId)))
+      }
 
       // Категория — отдельная сущность: если канал двигают в категорию,
       // которой нет в таблице (например, её успели удалить), регистрируем.
@@ -118,15 +154,7 @@ export const channelsRoutes: FastifyPluginAsyncZod = async (app) => {
         .update(channels)
         .set(updates)
         .where(eq(channels.id, channelId))
-        .returning({
-          id: channels.id,
-          serverId: channels.serverId,
-          name: channels.name,
-          kind: channels.kind,
-          category: channels.category,
-          topic: channels.topic,
-          position: channels.position,
-        })
+        .returning(CHANNEL_DTO_COLS)
 
       const channel = updated[0]
       if (!channel) throw new Error('update channels returned no rows')

@@ -87,6 +87,10 @@ export async function deleteChannel(channelId: string): Promise<void> {
   await apiFetch<void>(`/api/channels/${channelId}`, { method: 'DELETE' })
 }
 
+export async function getChannelStats(channelId: string): Promise<{ messageCount: number }> {
+  return apiFetch<{ messageCount: number }>(`/api/channels/${channelId}/stats`)
+}
+
 export async function leaveServer(serverId: string): Promise<void> {
   await apiFetch<void>(`/api/servers/${serverId}/members/me`, { method: 'DELETE' })
 }

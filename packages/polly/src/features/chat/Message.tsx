@@ -38,6 +38,8 @@ interface MessageProps {
   threadsAllowed?: boolean
   /** Может ли текущий пользователь закреплять (server: admin/owner). */
   canPin?: boolean
+  /** NSFW-канал: блюрить медиа до клика. */
+  nsfw?: boolean
   onEdit: (id: string, content: string) => void
   onDelete: (id: string) => void
   onRetry?: () => void
@@ -167,7 +169,7 @@ function scrollToMessage(id: string) {
 
 export function Message({
   message, prev, member, isOwn, currentUserId, pendingStatus,
-  memberMap, channelMap, emojiMap, threadsAllowed = true, canPin = false,
+  memberMap, channelMap, emojiMap, threadsAllowed = true, canPin = false, nsfw = false,
   onEdit, onDelete, onRetry, onReply, onAddReaction, onRemoveReaction,
 }: MessageProps) {
   const [editing, setEditing] = useState(false)
@@ -490,7 +492,7 @@ export function Message({
         </div>
         {(msgAttachments.length > 0 || msgThread !== null || reactionsEl !== null) && (
           <div className="pl-11">
-            {msgAttachments.length > 0 && <AttachmentList attachments={msgAttachments} lightboxContext={lightboxContext} />}
+            {msgAttachments.length > 0 && <AttachmentList attachments={msgAttachments} lightboxContext={lightboxContext} blur={nsfw} />}
             <ThreadBadge />
             {reactionsEl}
           </div>
@@ -527,7 +529,7 @@ export function Message({
               ошибка · повторить?
             </button>
           )}
-          {msgAttachments.length > 0 && <AttachmentList attachments={msgAttachments} lightboxContext={lightboxContext} />}
+          {msgAttachments.length > 0 && <AttachmentList attachments={msgAttachments} lightboxContext={lightboxContext} blur={nsfw} />}
           <ThreadBadge />
           {reactionsEl}
         </div>
@@ -584,7 +586,7 @@ export function Message({
           )}
           {forwardedEl}
           {linkPreviewsEl}
-          {msgAttachments.length > 0 && <AttachmentList attachments={msgAttachments} lightboxContext={lightboxContext} />}
+          {msgAttachments.length > 0 && <AttachmentList attachments={msgAttachments} lightboxContext={lightboxContext} blur={nsfw} />}
           <ThreadBadge />
           {reactionsEl}
         </div>

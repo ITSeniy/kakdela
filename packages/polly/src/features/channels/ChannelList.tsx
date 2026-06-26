@@ -31,6 +31,7 @@ import { moderateVoice } from '../voice/api.js'
 import { VoiceUserMenu } from '../voice/VoiceUserMenu.js'
 import { useVoiceStore } from '../voice/store.js'
 import { useVoiceChannelPresence } from '../voice/useVoiceChannelPresence.js'
+import { ChannelSettingsModal } from './ChannelSettingsModal.js'
 import { CreateChannelModal, type CreateChannelMode } from './CreateChannelModal.js'
 import { UserBar } from './UserBar.js'
 
@@ -232,6 +233,7 @@ export function ChannelList({ serverId, activeChannelId }: ChannelListProps) {
   // Контекстные меню: ПКМ по строке канала / по заголовку категории.
   const [channelMenu, setChannelMenu] = useState<{ x: number; y: number; channel: Channel } | null>(null)
   const channelMenuRef = useRef<HTMLDivElement>(null)
+  const [settingsChannel, setSettingsChannel] = useState<Channel | null>(null)
   const [catMenu, setCatMenu] = useState<{ x: number; y: number; name: string } | null>(null)
   const catMenuRef = useRef<HTMLDivElement>(null)
 
@@ -810,6 +812,15 @@ export function ChannelList({ serverId, activeChannelId }: ChannelListProps) {
         >
           <button
             type="button"
+            onClick={() => { setSettingsChannel(channelMenu.channel); setChannelMenu(null) }}
+            className="w-full text-left px-3 py-1.5 text-[12px] flex items-center gap-2 text-kd-text-soft hover:bg-kd-panel-hi hover:text-kd-text transition-colors"
+          >
+            <Icon.Settings size={12} />
+            настройки канала
+          </button>
+          <div className="h-px bg-kd-border my-1" />
+          <button
+            type="button"
             onClick={() => void confirmDeleteChannel(channelMenu.channel)}
             className="w-full text-left px-3 py-1.5 text-[12px] flex items-center gap-2 text-kd-danger hover:bg-kd-danger/10 transition-colors"
           >
@@ -817,6 +828,13 @@ export function ChannelList({ serverId, activeChannelId }: ChannelListProps) {
             удалить канал
           </button>
         </div>
+      )}
+
+      {settingsChannel && (
+        <ChannelSettingsModal
+          channel={settingsChannel}
+          onClose={() => setSettingsChannel(null)}
+        />
       )}
 
       {voiceUserMenu && (

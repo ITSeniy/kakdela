@@ -40,6 +40,12 @@ function channelRowToApi(row: typeof channels.$inferSelect) {
     parentChannelId: row.parentChannelId,
     parentMessageId: row.parentMessageId,
     archivedAt:      row.archivedAt?.toISOString() ?? null,
+    slowModeSec:     row.slowModeSec,
+    autoDeleteSec:   row.autoDeleteSec,
+    isDefault:       row.isDefault,
+    friendsOnly:     row.friendsOnly,
+    nsfw:            row.nsfw,
+    threadsAllowed:  row.threadsAllowed,
   }
 }
 
@@ -89,6 +95,9 @@ export const threadsRoutes: FastifyPluginAsyncZod = async (app) => {
       }
       if (!parentChannel.serverId) {
         return reply.code(400).send({ error: { code: 'channel-without-server', message: 'cannot create thread on this channel' } })
+      }
+      if (!parentChannel.threadsAllowed) {
+        return reply.code(403).send({ error: { code: 'threads-disabled', message: 'в этом канале треды выключены' } })
       }
 
       await assertCanAccessChannel(userId, channelId)

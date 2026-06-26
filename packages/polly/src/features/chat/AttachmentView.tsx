@@ -11,6 +11,8 @@ interface AttachmentListProps {
   attachments: Attachment[]
   /** Контекст сообщения для шапки лайтбокса (автор, канал, дата, jump). */
   lightboxContext?: LightboxContext
+  /** NSFW-канал: скрыть медиа за блюром до клика «показать». */
+  blur?: boolean
 }
 
 /** EXT для плашки карточки файла: расширение из имени, максимум 4 символа. */
@@ -128,8 +130,10 @@ function FileCard({ attachment }: { attachment: Attachment }) {
   )
 }
 
-export function AttachmentList({ attachments, lightboxContext }: AttachmentListProps) {
+export function AttachmentList({ attachments, lightboxContext, blur = false }: AttachmentListProps) {
   const [lightboxIdx, setLightboxIdx] = useState<number | null>(null)
+  // NSFW-канал: медиа скрыто за блюром до первого клика «показать».
+  const [revealed, setRevealed] = useState(false)
   if (attachments.length === 0) return null
 
   // В лайтбокс идут и фото, и видео — единая лента просмотра.
@@ -140,20 +144,34 @@ export function AttachmentList({ attachments, lightboxContext }: AttachmentListP
     if (idx >= 0) setLightboxIdx(idx)
   }
 
+  const hideBehindBlur = blur && !revealed
+
   return (
-    <div className="mt-1.5 flex flex-col gap-1.5 items-start">
-      {attachments.map((att) => {
-        switch (att.kind) {
-          case 'image':
-            return <ImageThumb key={att.id} attachment={att} onOpen={() => openMedia(att)} />
-          case 'video':
-            return <VideoThumb key={att.id} attachment={att} onOpen={() => openMedia(att)} />
-          case 'audio':
-            return <AudioView key={att.id} attachment={att} />
-          default:
-            return <FileCard key={att.id} attachment={att} />
-        }
-      })}
+    <div className="mt-1.5 flex flex-col gap-1.5 items-start relative">
+      <div className={hideBehindBlur ? 'flex flex-col gap-1.5 items-start blur-xl pointer-events-none select-none' : 'flex flex-col gap-1.5 items-start'}>
+        {attachments.map((att) => {
+          switch (att.kind) {
+            case 'image':
+              return <ImageThumb key={att.id} attachment={att} onOpen={() => openMedia(att)} />
+            case 'video':
+              return <VideoThumb key={att.id} attachment={att} onOpen={() => openMedia(att)} />
+            case 'audio':
+              return <AudioView key={att.id} attachment={att} />
+            default:
+              return <FileCard key={att.id} attachment={att} />
+          }
+        })}
+      </div>
+      {hideBehindBlur && (
+        <button
+          type="button"
+          onClick={() => setRevealed(true)}
+          className="absolute inset-0 flex flex-col items-center justify-center gap-1 rounded-kd bg-kd-overlay-soft text-center"
+        >
+          <span className="text-[13px]">🔞</span>
+          <span className="text-[11px] font-mono text-kd-text font-semibold">NSFW · показать</span>
+        </button>
+      )}
       {lightboxIdx !== null && (
         <Lightbox
           images={media}

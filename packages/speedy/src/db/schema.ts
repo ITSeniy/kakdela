@@ -85,6 +85,13 @@ export const channels = pgTable('channels', {
   parentChannelId:  uuid('parent_channel_id').references((): AnyPgColumn => channels.id, { onDelete: 'cascade' }),
   parentMessageId:  uuid('parent_message_id').references((): AnyPgColumn => messages.id, { onDelete: 'set null' }),
   archivedAt:       timestamp('archived_at', { withTimezone: true }),
+  // Настройки канала (эталон «настройки канала · обзор»):
+  slowModeSec:      integer('slow_mode_sec').notNull().default(0),       // 0 = выкл
+  autoDeleteSec:    integer('auto_delete_sec'),                           // null = выкл
+  isDefault:        boolean('is_default').notNull().default(false),       // новички попадают сюда
+  friendsOnly:      boolean('friends_only').notNull().default(false),     // недоступен по инвайту «друг» (флаг)
+  nsfw:             boolean('nsfw').notNull().default(false),             // блюрить медиа
+  threadsAllowed:   boolean('threads_allowed').notNull().default(true),   // можно отвечать веткой
   createdAt:        timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 },
 (t) => ({

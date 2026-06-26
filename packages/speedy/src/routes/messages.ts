@@ -24,6 +24,7 @@ import { env } from '../env.js'
 import { resolvePreviewsForContent } from '../lib/link-preview.js'
 import { extractMentions, type MentionCandidate, type ParsedMention } from '../lib/mention-extractor.js'
 import { assertCanAccessChannel, assertRole, notFound } from '../lib/permissions.js'
+import { redis } from '../lib/redis.js'
 import { presence } from '../presence/store.js'
 import { attachFilesToMessage, loadAttachmentsForMessages } from './files.js'
 import { broadcastToChannel, broadcastToUser } from '../ws/broadcast.js'
@@ -332,6 +333,45 @@ async function loadThreadInfoForMessages(messageIds: string[]): Promise<Map<stri
   return out
 }
 
+/**
+ * Медленный режим: если у канала slowModeSec > 0 и автор — не owner/admin,
+ * разрешаем не чаще раза в slowModeSec секунд (счётчик в Redis, NX+EX). При
+ * срабатывании — 429 slow-mode с остатком ожидания.
+ */
+async function enforceSlowMode(userId: string, channelId: string, serverId: string): Promise<void> {
+  const rows = await db.select({ slow: channels.slowModeSec }).from(channels).where(eq(channels.id, channelId)).limit(1)
+  const slow = rows[0]?.slow ?? 0
+  if (slow <= 0) return
+
+  const m = await db
+    .select({ role: serverMembers.role })
+    .from(serverMembers)
+    .where(and(eq(serverMembers.serverId, serverId), eq(serverMembers.userId, userId)))
+    .limit(1)
+  const role = m[0]?.role
+  if (role === 'owner' || role === 'admin') return
+
+  let allowed = false
+  let ttl = slow
+  try {
+    const set = await redis.set(`sm:${channelId}:${userId}`, '1', 'EX', slow, 'NX')
+    allowed = set !== null
+    if (!allowed) {
+      const t = await redis.ttl(`sm:${channelId}:${userId}`)
+      if (t > 0) ttl = t
+    }
+  } catch {
+    // Redis недоступен — не блокируем отправку (медленный режим best-effort).
+    return
+  }
+  if (!allowed) {
+    const e = new Error(`медленный режим: подождите ${ttl} с`) as Error & { statusCode: number; code: string }
+    e.statusCode = 429
+    e.code = 'slow-mode'
+    throw e
+  }
+}
+
 export const messagesRoutes: FastifyPluginAsyncZod = async (app) => {
   // ───── GET /api/channels/:channelId/messages ─────
   app.get(
@@ -407,7 +447,7 @@ export const messagesRoutes: FastifyPluginAsyncZod = async (app) => {
       const { content, replyToId, clientNonce, attachments: attachmentIds } = req.body
       const userId = req.authUser!.id
 
-      await assertCanAccessChannel(userId, channelId)
+      const access = await assertCanAccessChannel(userId, channelId)
 
       // Idempotency: return existing message if same nonce+author
       if (clientNonce) {
@@ -425,6 +465,9 @@ export const messagesRoutes: FastifyPluginAsyncZod = async (app) => {
           return reply.code(201).send(serializeMessage(ex, [], exReplyTo, exAttachments))
         }
       }
+
+      // Медленный режим (только серверные каналы; DM не троттлим).
+      if (access.kind === 'server') await enforceSlowMode(userId, channelId, access.serverId)
 
       const inserted = await db
         .insert(messages)

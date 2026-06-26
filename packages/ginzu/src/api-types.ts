@@ -28,6 +28,13 @@ export const ChannelSchema = z.object({
   parentChannelId: z.string().uuid().nullable().optional(),
   parentMessageId: z.string().uuid().nullable().optional(),
   archivedAt: z.string().nullable().optional(),
+  // Настройки канала («обзор»). Дефолты совпадают с колонками БД.
+  slowModeSec:    z.number().int().nonnegative().default(0),
+  autoDeleteSec:  z.number().int().positive().nullable().optional(),
+  isDefault:      z.boolean().default(false),
+  friendsOnly:    z.boolean().default(false),
+  nsfw:           z.boolean().default(false),
+  threadsAllowed: z.boolean().default(true),
 })
 export type Channel = z.infer<typeof ChannelSchema>
 
@@ -313,12 +320,25 @@ export const CreateCategoryRequestSchema = z.object({
 })
 export type CreateCategoryRequest = z.infer<typeof CreateCategoryRequestSchema>
 
+// Допустимые значения для селектов «обзора» (значения — секунды).
+export const SLOW_MODE_MAX_SEC = 6 * 60 * 60        // 6 часов
+export const AUTO_DELETE_MAX_SEC = 365 * 24 * 60 * 60 // год
+
 export const PatchChannelRequestSchema = z.object({
   name: z.string().min(1).max(64).optional(),
   topic: z.string().max(256).nullable().optional(),
   position: z.number().int().nonnegative().optional(),
   // null = убрать канал из категории (категория — просто метка на канале).
   category: z.string().max(64).nullable().optional(),
+  // text↔voice: смена типа уже созданного канала.
+  kind: z.enum(['text', 'voice']).optional(),
+  // Настройки «обзора». null у autoDeleteSec = выключить автоудаление.
+  slowModeSec:    z.number().int().min(0).max(SLOW_MODE_MAX_SEC).optional(),
+  autoDeleteSec:  z.number().int().positive().max(AUTO_DELETE_MAX_SEC).nullable().optional(),
+  isDefault:      z.boolean().optional(),
+  friendsOnly:    z.boolean().optional(),
+  nsfw:           z.boolean().optional(),
+  threadsAllowed: z.boolean().optional(),
 })
 export type PatchChannelRequest = z.infer<typeof PatchChannelRequestSchema>
 

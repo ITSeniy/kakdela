@@ -7,10 +7,11 @@ type MsgCache = InfiniteData<MessagesPage, string | undefined>
 
 import { Icon } from '../../components/Icon.js'
 import { toast } from '../../components/toast/index.js'
+import { ApiError } from '../../lib/api.js'
 import { useAuthStore } from '../auth/store.js'
 import { useServerEmoji } from '../emoji/api.js'
 import { useProfileUi } from '../profile/store.js'
-import { getServerDetail, listMembers } from '../servers/api.js'
+import { getChannelStats, getServerDetail, listMembers } from '../servers/api.js'
 import { Composer } from './Composer.js'
 import { MessageList } from './MessageList.js'
 import { PinnedPanel } from './PinnedPanel.js'
@@ -32,6 +33,11 @@ function Header({ channel, channelId, memberCount, canPin, memberMap }: {
   memberMap: ReadonlyMap<string, MemberPublic>
 }) {
   const [showPins, setShowPins] = useState(false)
+  const { data: stats } = useQuery({
+    queryKey: ['channel-stats', channelId],
+    queryFn: () => getChannelStats(channelId),
+    staleTime: 30_000,
+  })
   return (
     <div className="px-4 py-2 border-b border-kd-border bg-kd-panel-alt flex items-center gap-2.5 shrink-0">
       <Icon.Hash size={14} className="text-kd-text-soft shrink-0" />
@@ -44,7 +50,7 @@ function Header({ channel, channelId, memberCount, canPin, memberMap }: {
       )}
       <div className="flex-1" />
       <span className="text-[10px] text-kd-text-mute font-mono shrink-0">
-        {memberCount} подп.
+        {stats ? `${stats.messageCount.toLocaleString('ru-RU')} сообщ. · ` : ''}{memberCount} подп.
       </span>
       <div className="flex items-center gap-2.5 text-kd-text-mute shrink-0">
         <div className="relative">
@@ -148,7 +154,14 @@ export function ChatScreen({ serverId, channelId }: ChatScreenProps) {
         },
       )
       setPending((p) => p.filter((x) => x._nonce !== nonce))
-    } catch {
+    } catch (err) {
+      // Медленный режим (429) и прочие отказы сервера — показываем причину,
+      // а оптимистичное сообщение убираем (оно не отправилось).
+      if (err instanceof ApiError && err.code === 'slow-mode') {
+        toast.info(err.message)
+        setPending((p) => p.filter((x) => x._nonce !== nonce))
+        return
+      }
       setPending((p) =>
         p.map((x) => (x._nonce === nonce ? { ...x, _pending: 'error' as const } : x)),
       )
@@ -252,6 +265,8 @@ export function ChatScreen({ serverId, channelId }: ChatScreenProps) {
         emojiMap={emojiMap}
         pending={pending}
         canPin={canPin}
+        threadsAllowed={channel?.threadsAllowed ?? true}
+        nsfw={channel?.nsfw ?? false}
         onEdit={handleEdit}
         onDelete={handleDelete}
         onRetry={handleRetry}

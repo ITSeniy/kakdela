@@ -23,6 +23,8 @@ interface MessageListProps {
   threadsAllowed?: boolean
   /** Может ли пользователь закреплять (server: admin/owner). */
   canPin?: boolean
+  /** NSFW-канал: блюрить медиа в сообщениях. */
+  nsfw?: boolean
   onEdit: (id: string, content: string) => void
   onDelete: (id: string) => void
   onRetry: (nonce: string) => void
@@ -62,7 +64,7 @@ function UnreadDivider() {
 
 export function MessageList({
   serverId, channelId, currentUserId, memberMap, channelMap, emojiMap,
-  pending, threadsAllowed = true, canPin = false,
+  pending, threadsAllowed = true, canPin = false, nsfw = false,
   onEdit, onDelete, onRetry, onMention, onReply, onAddReaction, onRemoveReaction,
 }: MessageListProps) {
   const [, navigate] = useLocation()
@@ -329,6 +331,7 @@ export function MessageList({
             emojiMap={emojiMap}
             threadsAllowed={threadsAllowed}
             canPin={canPin}
+            nsfw={nsfw}
             onEdit={onEdit}
             onDelete={onDelete}
             onRetry={row.isPending ? () => onRetry((m as PendingMessage)._nonce) : undefined}

@@ -107,9 +107,13 @@ export function Shell() {
   useEffect(() => {
     if (!serverParams || channelParams) return
     if (!serverDetail) return
-    const firstText = serverDetail.channels.find((c) => c.kind === 'text')
-    if (firstText) {
-      navigate(`/servers/${serverDetail.server.id}/channels/${firstText.id}`, { replace: true })
+    // «Канал по умолчанию» (настройки канала) имеет приоритет; иначе — первый
+    // текстовый по позиции.
+    const target =
+      serverDetail.channels.find((c) => c.kind === 'text' && c.isDefault)
+      ?? serverDetail.channels.find((c) => c.kind === 'text')
+    if (target) {
+      navigate(`/servers/${serverDetail.server.id}/channels/${target.id}`, { replace: true })
     }
   }, [serverParams, channelParams, serverDetail, navigate])
 

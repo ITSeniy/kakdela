@@ -17,6 +17,7 @@ import {
 
 import { channelCategories, channels, serverMembers, servers, users } from '../db/schema.js'
 import { audit } from '../lib/audit.js'
+import { CHANNEL_DTO_COLS } from '../lib/channel-dto.js'
 import { db } from '../lib/db.js'
 import { assertMember, assertRole, notFound } from '../lib/permissions.js'
 import { presence } from '../presence/store.js'
@@ -134,16 +135,7 @@ export const serversRoutes: FastifyPluginAsyncZod = async (app) => {
       if (!server) throw notFound('server-not-found', 'server not found')
 
       const channelRows = await db
-        .select({
-          id: channels.id,
-          serverId: channels.serverId,
-          name: channels.name,
-          kind: channels.kind,
-          category: channels.category,
-          topic: channels.topic,
-          position: channels.position,
-          parentChannelId: channels.parentChannelId,
-        })
+        .select(CHANNEL_DTO_COLS)
         .from(channels)
         .where(eq(channels.serverId, serverId))
         .orderBy(channels.position)
@@ -285,15 +277,7 @@ export const serversRoutes: FastifyPluginAsyncZod = async (app) => {
       const inserted = await db
         .insert(channels)
         .values({ serverId, name, kind, category: category ?? null, topic: topic ?? null, position })
-        .returning({
-          id: channels.id,
-          serverId: channels.serverId,
-          name: channels.name,
-          kind: channels.kind,
-          category: channels.category,
-          topic: channels.topic,
-          position: channels.position,
-        })
+        .returning(CHANNEL_DTO_COLS)
 
       const channel = inserted[0]
       if (!channel) throw new Error('insert into channels returned no rows')

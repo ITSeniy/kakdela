@@ -5,6 +5,7 @@ import cors from '@fastify/cors'
 import rateLimit from '@fastify/rate-limit'
 
 import { env } from './env.js'
+import { startAutoDeleteSweeper } from './lib/auto-delete.js'
 import { makeLoggerOptions } from './lib/logger.js'
 import { redis } from './lib/redis.js'
 import { healthRoutes } from './routes/health.js'
@@ -93,6 +94,9 @@ async function main() {
   process.on('SIGINT', () => { void shutdown() })
 
   await app.listen({ host: env.SPEEDY_HOST, port: env.SPEEDY_PORT })
+
+  // Автоудаление сообщений в каналах с заданным сроком (настройки канала).
+  startAutoDeleteSweeper(app.log)
 }
 
 main().catch((err) => {
