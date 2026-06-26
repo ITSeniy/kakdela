@@ -104,11 +104,15 @@ export type ForwardedRef = z.infer<typeof ForwardedRefSchema>
 export const LinkPreviewSchema = z.object({
   /** Канонический URL (og:url или итоговый после редиректов). */
   url:         z.string().url(),
-  kind:        z.enum(['link', 'image']).default('link'),
+  // 'link' — обычная OG-карточка, 'image' — прямая картинка,
+  // 'video' — встраиваемый плеер (YouTube и т.п.; см. embedUrl).
+  kind:        z.enum(['link', 'image', 'video']).default('link'),
   siteName:    z.string().nullable().optional(),
   title:       z.string().nullable().optional(),
   description: z.string().nullable().optional(),
   imageUrl:    z.string().url().nullable().optional(),
+  /** Для kind='video': URL для <iframe> (например, youtube-nocookie embed). */
+  embedUrl:    z.string().url().nullable().optional(),
 })
 export type LinkPreview = z.infer<typeof LinkPreviewSchema>
 

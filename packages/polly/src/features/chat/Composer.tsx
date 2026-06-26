@@ -713,7 +713,7 @@ export function Composer({
                 type="button"
                 title="гифки"
                 onClick={() => { setGifOpen((o) => !o); setPickerOpen(false) }}
-                className={`text-[10px] font-mono font-bold leading-none px-1 py-0.5 rounded border transition-colors ${gifOpen ? 'border-kd-accent text-kd-accent' : 'border-kd-border hover:text-kd-text-soft'}`}
+                className={`inline-flex items-center justify-center h-5 px-1.5 text-[10px] font-mono font-bold leading-none rounded border transition-colors ${gifOpen ? 'border-kd-accent text-kd-accent' : 'border-kd-border hover:text-kd-text-soft'}`}
               >
                 GIF
               </button>

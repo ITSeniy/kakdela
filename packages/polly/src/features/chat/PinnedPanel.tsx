@@ -6,10 +6,11 @@
 import { useEffect, useRef } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
-import type { MemberPublic } from '@kakdela/ginzu/api-types'
+import type { CustomEmoji, MemberPublic } from '@kakdela/ginzu/api-types'
 
 import { Avatar } from '../../components/Avatar.js'
 import { toast } from '../../components/toast/index.js'
+import { MessagePreview } from './MessagePreview.js'
 import { listPins, unpinMessage } from './api.js'
 
 function jumpToMessage(id: string) {
@@ -29,10 +30,11 @@ interface PinnedPanelProps {
   channelId: string
   canPin: boolean
   memberMap: ReadonlyMap<string, MemberPublic>
+  emojiMap?: ReadonlyMap<string, CustomEmoji>
   onClose(): void
 }
 
-export function PinnedPanel({ channelId, canPin, memberMap, onClose }: PinnedPanelProps) {
+export function PinnedPanel({ channelId, canPin, memberMap, emojiMap, onClose }: PinnedPanelProps) {
   const ref = useRef<HTMLDivElement>(null)
   const queryClient = useQueryClient()
 
@@ -84,7 +86,6 @@ export function PinnedPanel({ channelId, canPin, memberMap, onClose }: PinnedPan
         )}
         {pins.map((m) => {
           const author = memberMap.get(m.authorId)
-          const preview = m.content.trim() || (m.forwarded ? 'пересланное сообщение' : 'вложение')
           return (
             <div
               key={m.id}
@@ -99,7 +100,7 @@ export function PinnedPanel({ channelId, canPin, memberMap, onClose }: PinnedPan
                 <div className="text-[12px] font-semibold text-kd-text truncate">
                   {author?.displayName ?? 'неизвестно'}
                 </div>
-                <div className="text-[11px] text-kd-text-soft line-clamp-2 break-words">{preview}</div>
+                <MessagePreview message={m} memberMap={memberMap} emojiMap={emojiMap} clampLines={2} />
               </div>
               {canPin && (
                 <button

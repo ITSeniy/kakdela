@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { type InfiniteData, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useLocation } from 'wouter'
 
-import type { Attachment, Channel, MemberPublic, Message, MessagesPage } from '@kakdela/ginzu/api-types'
+import type { Attachment, Channel, CustomEmoji, MemberPublic, Message, MessagesPage } from '@kakdela/ginzu/api-types'
 
 type MsgCache = InfiniteData<MessagesPage, string | undefined>
 
@@ -28,7 +28,7 @@ interface ChatScreenProps {
 
 // Шапка канала по designs/final-chrome.jsx (KD_ChannelHeader): panelAlt,
 // иконка + имя + вертикальный разделитель + topic, справа mono-stats и иконки.
-function Header({ channel, channelId, serverId, serverName, memberCount, canPin, memberMap }: {
+function Header({ channel, channelId, serverId, serverName, memberCount, canPin, memberMap, emojiMap }: {
   channel: Channel | undefined
   channelId: string
   serverId: string
@@ -36,6 +36,7 @@ function Header({ channel, channelId, serverId, serverName, memberCount, canPin,
   memberCount: number
   canPin: boolean
   memberMap: ReadonlyMap<string, MemberPublic>
+  emojiMap?: ReadonlyMap<string, CustomEmoji>
 }) {
   const [, navigate] = useLocation()
   const setScope = useViewScope((s) => s.setScope)
@@ -86,6 +87,7 @@ function Header({ channel, channelId, serverId, serverName, memberCount, canPin,
               channelId={channelId}
               canPin={canPin}
               memberMap={memberMap}
+              emojiMap={emojiMap}
               onClose={() => setShowPins(false)}
             />
           )}
@@ -294,6 +296,7 @@ export function ChatScreen({ serverId, channelId }: ChatScreenProps) {
         memberCount={serverDetail?.memberCount ?? 0}
         canPin={canPin}
         memberMap={memberMap}
+        emojiMap={emojiMap}
       />
       <MessageList
         serverId={serverId}

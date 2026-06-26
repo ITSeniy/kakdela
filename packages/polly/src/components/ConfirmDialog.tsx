@@ -9,6 +9,8 @@ import { Modal, ModalHeader } from './Modal.js'
 interface ConfirmRequest {
   title: string
   body?: string
+  /** Богатое превью под текстом (например, рендер удаляемого сообщения). */
+  preview?: React.ReactNode
   confirmLabel?: string
   cancelLabel?: string
   danger?: boolean
@@ -62,6 +64,11 @@ export function ConfirmDialogHost() {
       <div className="px-5 py-4 flex flex-col gap-4">
         {current.body && (
           <div className="text-[12px] text-kd-text-soft leading-relaxed">{current.body}</div>
+        )}
+        {current.preview && (
+          <div className="px-3 py-2 rounded-kd bg-kd-panel-alt border border-kd-border max-h-[180px] overflow-y-auto">
+            {current.preview}
+          </div>
         )}
         {current.requireText && (
           <div className="flex flex-col gap-1.5">

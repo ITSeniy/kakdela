@@ -17,6 +17,7 @@ import { useChatDisplaySettings } from './displaySettings.js'
 import { ContextMenu } from './ContextMenu.js'
 import { ForwardedCard } from './ForwardedCard.js'
 import { LinkPreviews } from './LinkPreviewCard.js'
+import { MessagePreview } from './MessagePreview.js'
 import { useForwardUi } from './forwardStore.js'
 import { Reactions } from './Reactions.js'
 import { renderMarkdown, renderMarkdownInline } from './markdown.js'
@@ -232,11 +233,17 @@ export function Message({
 
   async function confirmDelete(skipConfirm: boolean) {
     if (!skipConfirm) {
-      const preview =
-        message.content.length > 120 ? message.content.slice(0, 117) + '…' : message.content
       const ok = await confirmDialog({
         title: 'удалить сообщение?',
-        body: preview || 'сообщение без текста — вложения тоже удалятся.',
+        body: 'это действие необратимо — вложения тоже удалятся.',
+        preview: (
+          <MessagePreview
+            message={message as IMessage}
+            memberMap={memberMap}
+            channelMap={channelMap}
+            emojiMap={emojiMap}
+          />
+        ),
         confirmLabel: 'удалить',
         danger: true,
       })

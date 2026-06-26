@@ -22,9 +22,13 @@ const MAX_PREVIEWS = 3              // не больше 3 карточек на
 const MAX_BYTES = 512 * 1024       // читаем максимум 512 КБ HTML (нам нужен <head>)
 const TIMEOUT_MS = 6_000           // на каждый хоп
 const MAX_REDIRECTS = 4
-const UA = 'KakDelaBot/1.0 (+link-preview)'
+// Браузероподобный UA: часть сайтов (в т.ч. YouTube) отдают пустую/консентную
+// страницу без OG-тегов «голым» ботам. Имитируем десктопный Chrome.
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
 
-const CACHE_PREFIX = 'lp:v1:'
+// Кэш бампаем до v2 — поменялась логика (YouTube-embed, новый UA), старые
+// записи v1 не должны «залипнуть» негативным результатом по YouTube.
+const CACHE_PREFIX = 'lp:v2:'
 const CACHE_TTL_OK_S = 24 * 3_600  // успешное превью — сутки
 const CACHE_TTL_MISS_S = 3_600     // «превью нет» — час (чтобы не долбить впустую)
 
@@ -279,6 +283,58 @@ function buildPreview(finalUrl: string, parsed: ParsedMeta): LinkPreview | null 
   }
 }
 
+// ───────────────────────── YouTube (встраиваемый плеер) ─────────────────────
+
+/** Извлекает videoId из ссылки YouTube (watch, youtu.be, shorts, embed). */
+function youtubeId(url: string): string | null {
+  let u: URL
+  try { u = new URL(url) } catch { return null }
+  const host = u.hostname.replace(/^www\./, '').toLowerCase()
+  if (host === 'youtu.be') {
+    const id = u.pathname.slice(1).split('/')[0]
+    return /^[\w-]{11}$/.test(id ?? '') ? id! : null
+  }
+  if (host === 'youtube.com' || host === 'm.youtube.com' || host === 'youtube-nocookie.com') {
+    const v = u.searchParams.get('v')
+    if (v && /^[\w-]{11}$/.test(v)) return v
+    const m = /^\/(?:shorts|embed|v)\/([\w-]{11})/.exec(u.pathname)
+    if (m?.[1]) return m[1]
+  }
+  return null
+}
+
+/**
+ * Превью YouTube через oEmbed (без скрейпинга — надёжно, не блокируется
+ * консентом). Возвращает video-карточку со встраиваемым плеером.
+ */
+async function youtubePreview(url: string, videoId: string): Promise<LinkPreview | null> {
+  const watchUrl = `https://www.youtube.com/watch?v=${videoId}`
+  const thumb = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`
+  let title: string | null = null
+  let author: string | null = null
+  try {
+    const res = await fetch(
+      `https://www.youtube.com/oembed?url=${encodeURIComponent(watchUrl)}&format=json`,
+      { signal: AbortSignal.timeout(TIMEOUT_MS), headers: { 'user-agent': UA } },
+    )
+    if (res.ok) {
+      const data = await res.json() as { title?: string; author_name?: string }
+      title = data.title ?? null
+      author = data.author_name ?? null
+    }
+  } catch { /* oEmbed недоступен — отдадим карточку без названия */ }
+
+  return {
+    url:         watchUrl,
+    kind:        'video',
+    siteName:    'YouTube',
+    title:       title ? clamp(title, 200) : 'YouTube',
+    description: author ? clamp(author, 100) : null,
+    imageUrl:    thumb,
+    embedUrl:    `https://www.youtube-nocookie.com/embed/${videoId}`,
+  }
+}
+
 // ───────────────────────── публичный API ────────────────────────────────────
 
 /**
@@ -317,12 +373,19 @@ export async function fetchLinkPreview(url: string): Promise<LinkPreview | null>
 
   let preview: LinkPreview | null = null
   try {
-    const r = await fetchFollowing(url)
-    if (r) {
-      if (r.res.status === 200 && r.res.contentType.startsWith('image/')) {
-        preview = { url: r.finalUrl, kind: 'image', siteName: null, title: null, description: null, imageUrl: r.finalUrl }
-      } else if (r.res.body.length > 0) {
-        preview = buildPreview(r.finalUrl, parseHead(r.res.body.toString('utf8')))
+    // YouTube — особый путь: встраиваемый плеер через oEmbed (скрейпинг
+    // watch-страницы часто упирается в консент-редирект и даёт пустоту).
+    const ytId = youtubeId(url)
+    if (ytId) {
+      preview = await youtubePreview(url, ytId)
+    } else {
+      const r = await fetchFollowing(url)
+      if (r) {
+        if (r.res.status === 200 && r.res.contentType.startsWith('image/')) {
+          preview = { url: r.finalUrl, kind: 'image', siteName: null, title: null, description: null, imageUrl: r.finalUrl }
+        } else if (r.res.body.length > 0) {
+          preview = buildPreview(r.finalUrl, parseHead(r.res.body.toString('utf8')))
+        }
       }
     }
   } catch { /* сетевые/SSRF-ошибки → негативный кэш */ }
