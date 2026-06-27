@@ -768,3 +768,94 @@ export const ErrorBodySchema = z.object({
   }),
 })
 export type ErrorBody = z.infer<typeof ErrorBodySchema>
+
+// ───── Secret chats: ключи (T-101) и транспорт (T-102) ─────
+//
+// Сервер видит ТОЛЬКО публичные ключи и непрозрачный шифртекст: расшифровать
+// он не может ничего (слепой каталог prekey'ев + слепой релей). Все base64-поля
+// валидируем как непустые строки — формат задаёт libsignal на клиенте.
+
+const base64Key = z.string().min(1).max(8192)
+
+// --- Prekey directory (T-101) ---
+
+export const SignedPrekeySchema = z.object({
+  keyId:     z.number().int().nonnegative(),
+  pubKey:    base64Key,
+  signature: base64Key,
+})
+export type SignedPrekey = z.infer<typeof SignedPrekeySchema>
+
+export const OneTimePrekeySchema = z.object({
+  keyId:  z.number().int().nonnegative(),
+  pubKey: base64Key,
+})
+export type OneTimePrekey = z.infer<typeof OneTimePrekeySchema>
+
+export const PublishKeysRequestSchema = z.object({
+  identityKey:    base64Key,
+  registrationId: z.number().int().nonnegative(),
+  signedPrekey:   SignedPrekeySchema,
+  oneTimePrekeys: z.array(OneTimePrekeySchema).max(200),
+})
+export type PublishKeysRequest = z.infer<typeof PublishKeysRequestSchema>
+
+export const TopupPrekeysRequestSchema = z.object({
+  oneTimePrekeys: z.array(OneTimePrekeySchema).min(1).max(200),
+})
+export type TopupPrekeysRequest = z.infer<typeof TopupPrekeysRequestSchema>
+
+// Бандл для старта X3DH-сессии. oneTimePrekey = null, если у адресата кончились
+// одноразовые ключи (libsignal допускает сессию и без него, с меньшим FS).
+export const PrekeyBundleResponseSchema = z.object({
+  userId:         z.string().uuid(),
+  identityKey:    base64Key,
+  registrationId: z.number().int().nonnegative(),
+  signedPrekey:   SignedPrekeySchema,
+  oneTimePrekey:  OneTimePrekeySchema.nullable(),
+})
+export type PrekeyBundleResponse = z.infer<typeof PrekeyBundleResponseSchema>
+
+export const PrekeyCountResponseSchema = z.object({
+  oneTimePrekeys: z.number().int().nonnegative(),
+})
+export type PrekeyCountResponse = z.infer<typeof PrekeyCountResponseSchema>
+
+// --- Envelope queue (T-102) ---
+
+// Тип конверта = тип ciphertext'а libsignal. Прикладные read/typing зашифрованы
+// ВНУТРИ и серверу не видны (это не значения этого enum).
+export const SecretMsgTypeSchema = z.enum(['prekey', 'message'])
+export type SecretMsgType = z.infer<typeof SecretMsgTypeSchema>
+
+export const SecretSendRequestSchema = z.object({
+  toUserId:   z.string().uuid(),
+  // base64 шифртекста (полезная нагрузка + ratchet-заголовок). Сервер не парсит.
+  ciphertext: z.string().min(1).max(64 * 1024),
+  msgType:    SecretMsgTypeSchema,
+})
+export type SecretSendRequest = z.infer<typeof SecretSendRequestSchema>
+
+export const SecretSendResponseSchema = z.object({
+  id: z.string().uuid(),
+})
+export type SecretSendResponse = z.infer<typeof SecretSendResponseSchema>
+
+export const SecretEnvelopeSchema = z.object({
+  id:         z.string().uuid(),
+  fromUserId: z.string().uuid(),
+  ciphertext: z.string(),
+  msgType:    SecretMsgTypeSchema,
+  createdAt:  z.string(),
+})
+export type SecretEnvelope = z.infer<typeof SecretEnvelopeSchema>
+
+export const SecretInboxResponseSchema = z.object({
+  envelopes: z.array(SecretEnvelopeSchema),
+})
+export type SecretInboxResponse = z.infer<typeof SecretInboxResponseSchema>
+
+export const SecretAckRequestSchema = z.object({
+  ids: z.array(z.string().uuid()).min(1).max(500),
+})
+export type SecretAckRequest = z.infer<typeof SecretAckRequestSchema>

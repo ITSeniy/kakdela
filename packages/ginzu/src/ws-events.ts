@@ -40,6 +40,9 @@ export type ServerEvent =
   // Админ перенёс участника в другой голосовой канал — клиент сам пере-джойнится.
   | { t: 'voice.moved'; userId: string; fromChannelId: string; toChannelId: string }
   | { t: 'voice.kicked'; channelId: string; userId: string }
+  // Секретные чаты (Фаза 6): «тебе пришёл шифр-конверт». БЕЗ контента — клиент
+  // идёт за ним в GET /api/secret/inbox и расшифровывает локально.
+  | { t: 'secret.envelope'; id: string; fromUserId: string }
 
 export type ClientEvent =
   | { t: 'hello'; token: string }
@@ -106,6 +109,7 @@ export const ServerEventSchema = z.discriminatedUnion('t', [
   z.object({ t: z.literal('voice.mod'), channelId: uuid, userId: uuid, muted: z.boolean(), deafened: z.boolean() }),
   z.object({ t: z.literal('voice.moved'), userId: uuid, fromChannelId: uuid, toChannelId: uuid }),
   z.object({ t: z.literal('voice.kicked'), channelId: uuid, userId: uuid }),
+  z.object({ t: z.literal('secret.envelope'), id: uuid, fromUserId: uuid }),
 ])
 
 export const ClientEventSchema = z.discriminatedUnion('t', [
