@@ -27,7 +27,16 @@ impl CmdError {
 
 impl From<libsignal_protocol::SignalProtocolError> for CmdError {
     fn from(e: libsignal_protocol::SignalProtocolError) -> Self {
-        // e.to_string() описывает ТИП ошибки протокола, а не байты ключей.
-        CmdError::new("crypto-failure", &e.to_string())
+        use libsignal_protocol::SignalProtocolError;
+        // Смена identity-ключа собеседника (переустановка приложения) — это
+        // СИГНАЛ БЕЗОПАСНОСТИ, а не рядовая ошибка: UI должен показать «ключ
+        // изменился» и заблокировать отправку. Выделяем отдельным кодом.
+        match e {
+            SignalProtocolError::UntrustedIdentity(_) => {
+                CmdError::new("untrusted-identity", "peer identity key changed")
+            }
+            // e.to_string() описывает ТИП ошибки протокола, а не байты ключей.
+            other => CmdError::new("crypto-failure", &other.to_string()),
+        }
     }
 }

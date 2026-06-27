@@ -459,6 +459,15 @@ impl CryptoCore {
         self.store.has_session(user_id)
     }
 
+    /// Забыть сессию и сохранённый identity собеседника (после смены его ключа).
+    /// Следующая отправка возьмёт свежий бандл и поднимет новую сессию.
+    pub fn clear_session(&mut self, user_id: &str) -> Result<(), CmdError> {
+        if self.store.clear_session(user_id) {
+            self.persist()?;
+        }
+        Ok(())
+    }
+
     /// Детерминированный симметричный safety number (одинаков у обеих сторон).
     /// Требует уже известного identity собеседника (после process_bundle/decrypt).
     pub fn safety_number(&self, peer_user_id: &str) -> Result<String, CmdError> {

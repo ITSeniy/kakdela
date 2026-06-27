@@ -145,6 +145,17 @@ impl KdProtocolStore {
     pub fn has_session(&self, user_id: &str) -> bool {
         self.sessions.sessions.contains_key(&format!("{user_id}.1"))
     }
+
+    /// Забыть сессию И сохранённый identity-ключ собеседника. Нужно, когда у
+    /// собеседника сменился ключ (переустановка): после очистки следующий
+    /// `process_bundle` примет новый identity (TOFU заново) и поднимет свежую
+    /// сессию. Возвращает true, если что-то удалили.
+    pub fn clear_session(&mut self, user_id: &str) -> bool {
+        let key = format!("{user_id}.1");
+        let had_session = self.sessions.sessions.remove(&key).is_some();
+        let had_identity = self.identity.known.remove(&key).is_some();
+        had_session || had_identity
+    }
 }
 
 // ───────── трейты libsignal поверх байтовых map'ов ─────────

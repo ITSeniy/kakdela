@@ -24,6 +24,7 @@ import {
   cryptoDecrypt,
   cryptoEncrypt,
   cryptoInit,
+  cryptoProcessBundle,
   cryptoPublishKeys,
   cryptoSessionExists,
   cryptoTopup,
@@ -38,6 +39,7 @@ import {
   type StoredSecretMessage,
 } from '../../lib/host/secret-store.js'
 import { wsClient } from '../../lib/ws.js'
+import { useSecretSession } from './sessionStore.js'
 
 // Долить one-time prekey'и, когда на сервере осталось меньше этого порога.
 const PREKEY_LOW_WATERMARK = 20
@@ -101,6 +103,16 @@ function fetchBundle(userId: string): Promise<PrekeyBundleResponse> {
 }
 
 /**
+ * Убедиться, что с собеседником есть сессия. Если нет — тянем его бандл и
+ * стартуем PQXDH (для StartSecretChat: «устанавливаем защищённое соединение»).
+ */
+export async function ensureSecretSession(peerUserId: string): Promise<void> {
+  if (await cryptoSessionExists(peerUserId)) return
+  const bundle = await fetchBundle(peerUserId)
+  await cryptoProcessBundle(peerUserId, bundle)
+}
+
+/**
  * Зашифровать frame для собеседника. Если сессии ещё нет — тянем его бандл и
  * стартуем PQXDH (первое сообщение будет msgType='prekey').
  */
@@ -149,11 +161,6 @@ export async function sendTyping(peerUserId: string): Promise<void> {
 
 // ───────── приём ─────────
 
-export interface DrainCallbacks {
-  /** Собеседник «печатает» (эфемерно — UI показывает индикатор). */
-  onTyping?: (peerUserId: string) => void
-}
-
 interface DrainResult {
   /** Собеседники, чья история изменилась (для точечной инвалидации). */
   touchedPeers: Set<string>
@@ -164,7 +171,7 @@ interface DrainResult {
  * разложить по локальной истории, заack'ать обработанные. Конверты, которые не
  * удалось расшифровать, НЕ ack'аются (останутся до следующего раза / retention).
  */
-async function drainOnce(cb: DrainCallbacks): Promise<DrainResult> {
+async function drainOnce(): Promise<DrainResult> {
   const { envelopes } = await apiFetch<SecretInboxResponse>('/api/secret/inbox')
   const touchedPeers = new Set<string>()
   const ackIds: string[] = []
@@ -181,11 +188,16 @@ async function drainOnce(cb: DrainCallbacks): Promise<DrainResult> {
         const changed = await markRead(env.fromUserId, frame.ts)
         if (changed > 0) touchedPeers.add(env.fromUserId)
       } else {
-        cb.onTyping?.(env.fromUserId)
+        useSecretSession.getState().setTyping(env.fromUserId, frame.ts)
       }
       ackIds.push(env.id)
     } catch (err) {
-      // Не смогли расшифровать/распарсить — оставляем в очереди (не ack'аем).
+      // untrusted-identity = у собеседника сменился ключ (переустановка). Это
+      // сигнал безопасности: помечаем чат, НЕ ack'аем (конверт переобработается
+      // после re-verify → clear_session). Прочие ошибки — тоже оставляем в очереди.
+      if ((err as { code?: string })?.code === 'untrusted-identity') {
+        useSecretSession.getState().flagKeyChanged(env.fromUserId)
+      }
       // Не логируем содержимое: только факт. retention-sweeper уберёт зависшее.
       console.warn('[secret] failed to process envelope', env.id)
     }
@@ -202,8 +214,9 @@ async function drainOnce(cb: DrainCallbacks): Promise<DrainResult> {
 // слива — ставим ровно один повтор после него (новый конверт не потеряется).
 let draining = false
 let rerunQueued = false
+let activeQueryClient: QueryClient | null = null
 
-function triggerDrain(queryClient: QueryClient, cb: DrainCallbacks): void {
+function triggerDrain(queryClient: QueryClient): void {
   if (draining) {
     rerunQueued = true
     return
@@ -211,7 +224,7 @@ function triggerDrain(queryClient: QueryClient, cb: DrainCallbacks): void {
   draining = true
   void (async () => {
     try {
-      const { touchedPeers } = await drainOnce(cb)
+      const { touchedPeers } = await drainOnce()
       if (touchedPeers.size > 0) {
         void queryClient.invalidateQueries({ queryKey: secretPeersKey })
         for (const peer of touchedPeers) {
@@ -224,7 +237,7 @@ function triggerDrain(queryClient: QueryClient, cb: DrainCallbacks): void {
       draining = false
       if (rerunQueued) {
         rerunQueued = false
-        triggerDrain(queryClient, cb)
+        triggerDrain(queryClient)
       }
     }
   })()
@@ -235,10 +248,23 @@ function triggerDrain(queryClient: QueryClient, cb: DrainCallbacks): void {
  * ready/reconnect — тоже слить (backfill оффлайн-конвертов). Возвращает
  * функцию отписки. Вызывается на mobile из app-bootstrap (T-103).
  */
-export function startSecretChatListener(queryClient: QueryClient, cb: DrainCallbacks = {}): () => void {
-  return wsClient.on((event) => {
+export function startSecretChatListener(queryClient: QueryClient): () => void {
+  activeQueryClient = queryClient
+  const off = wsClient.on((event) => {
     if (event.t === 'secret.envelope' || event.t === 'ready') {
-      triggerDrain(queryClient, cb)
+      triggerDrain(queryClient)
     }
   })
+  return () => {
+    off()
+    activeQueryClient = null
+  }
+}
+
+/**
+ * Вручную пнуть слив (после re-verify/clear_session — переобработать зависшие
+ * prekey-конверты с новым identity). No-op, если слушатель не запущен.
+ */
+export function requestSecretDrain(): void {
+  if (activeQueryClient) triggerDrain(activeQueryClient)
 }

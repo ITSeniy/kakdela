@@ -12,6 +12,7 @@ import { ApiError } from '../../lib/api.js'
 import { Avatar } from '../../components/Avatar.js'
 import { Modal } from '../../components/Modal.js'
 import { useSettingsUi } from '../settings/store.js'
+import { StartSecretChat } from '../secret/StartSecretChat.js'
 import { getUserProfile } from './api.js'
 import { useProfileUi } from './store.js'
 
@@ -131,6 +132,9 @@ function ReadView({ profile }: { profile: UserProfile }) {
           </button>
         )}
       </div>
+
+      {/* секретный чат — только на мобиле, только для чужого профиля (T-103) */}
+      {!profile.isSelf && <StartSecretChat userId={profile.id} />}
 
       {/* роли — цветные пилюли (designs/final-profile.jsx) */}
       {profile.roles.length > 0 && (

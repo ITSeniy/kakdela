@@ -158,6 +158,16 @@ pub fn crypto_safety_number(
     with_core(&app, &state, |core| core.safety_number(&user_id))
 }
 
+/// Забыть сессию + identity собеседника после смены его ключа (re-verify, T-103).
+#[tauri::command]
+pub fn crypto_clear_session(
+    app: AppHandle,
+    state: State<CryptoState>,
+    user_id: String,
+) -> Result<(), CmdError> {
+    with_core(&app, &state, |core| core.clear_session(&user_id))
+}
+
 // ───────── локальная история (T-102) ─────────
 
 /// Выполнить операцию над историей. Лениво открывает (пустая история валидна,

@@ -41,6 +41,7 @@ pub fn run() {
             commands::crypto_decrypt,
             commands::crypto_session_exists,
             commands::crypto_safety_number,
+            commands::crypto_clear_session,
             commands::secret_history_append_outgoing,
             commands::secret_history_append_incoming,
             commands::secret_history_mark_read,

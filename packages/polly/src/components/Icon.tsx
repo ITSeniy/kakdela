@@ -192,4 +192,27 @@ export const Icon = {
       <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
     </>,
   ),
+  // Замочек — индикатор секретного (E2EE) чата (T-103).
+  Lock: makeIcon(
+    <>
+      <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+    </>,
+  ),
+  // Щит с галочкой — бейдж «ключ проверен».
+  ShieldCheck: makeIcon(
+    <>
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+      <polyline points="9 12 11 14 15 10" />
+    </>,
+  ),
+  // Одиночная галочка — отправлено/доставлено.
+  Check: makeIcon(<polyline points="20 6 9 17 4 12" />),
+  // Двойная галочка — прочитано (✓✓ по read-конверту, T-102).
+  CheckCheck: makeIcon(
+    <>
+      <polyline points="18 6 8.5 17 5 13.5" />
+      <polyline points="22 7 13 17.5" />
+    </>,
+  ),
 }

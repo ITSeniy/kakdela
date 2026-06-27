@@ -106,6 +106,15 @@ export async function cryptoSessionExists(userId: string): Promise<boolean> {
 }
 
 /**
+ * Забыть сессию и сохранённый identity собеседника (после смены его ключа).
+ * Следующая отправка возьмёт свежий бандл и поднимет новую сессию (T-103
+ * re-verify). Идемпотентно.
+ */
+export async function cryptoClearSession(userId: string): Promise<void> {
+  await call('crypto_clear_session', { userId })
+}
+
+/**
  * Детерминированный симметричный safety number (для верификации, T-103).
  * Одинаков у обеих сторон сессии. Требует уже известного identity собеседника.
  */
