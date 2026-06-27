@@ -74,7 +74,31 @@ MSYS_NO_PATHCONV=1 "$ADB" install -r .../app-universal-debug.apk
 "$ADB" shell monkey -p com.kakdela.polly -c android.intent.category.LAUNCHER 1
 ```
 
+### Адрес backend'а с эмулятора
+
+Клиент берёт базовый URL из `lib/serverUrl.ts`: явный `VITE_SPEEDY_URL` побеждает
+всегда; иначе на Android (детект по userAgent) — `http://10.0.2.2:3001` (alias
+loopback хоста изнутри эмулятора), на desktop/web — `http://localhost:3001`.
+**Реальный телефон** не видит `10.0.2.2` — там адрес сервера задаётся через
+`VITE_SPEEDY_URL` (LAN-IP/домен) при сборке APK. Backend должен слушать так,
+чтобы быть достижимым с хоста (на `127.0.0.1`/`0.0.0.0` — ок, `10.0.2.2` → хостовый
+loopback). Cleartext HTTP разрешён только в debug (`usesCleartextTraffic=true`).
+
 ### Грабли (наступили — записано, чтобы не повторять)
+
+- **JAVA_HOME должен быть в Windows-форме.** `tauri android build` зовёт
+  `gradlew.bat` (cmd), который НЕ понимает MSYS-путь `/c/Program Files/...` →
+  «JAVA_HOME is set to an invalid directory». Экспортируй
+  `JAVA_HOME="C:/Program Files/Eclipse Adoptium/jdk-17.0.19.10-hotspot"` (с `C:/`,
+  не `/c/`). Прямой `./gradlew` (bash-скрипт) `/c/...` понимает — отсюда разное
+  поведение. Если уже есть живой gradle-демон, `gradlew.bat` подключается к нему
+  и ошибку не показывает; после `gradlew --stop` — всплывает.
+- **`pnpm.bat` не найден в rustBuild-таске.** Gradle RustPlugin (`BuildTask.kt`)
+  зовёт `pnpm`→`pnpm.exe`→`pnpm.cmd`→`pnpm.bat`; на Windows с pnpm-standalone есть
+  только `pnpm.CMD`, и Java ProcessBuilder его не подхватывает. Воркэраунд: положить
+  `pnpm.bat`-шим в каталог на PATH (напр. `~/bin`), форвардящий на
+  `%LOCALAPPDATA%\pnpm\bin\pnpm.CMD`. Нужен только когда gradle собирает не-целевые
+  ABI; при `--target x86_64` обычно не вызывается.
 
 - **ABI должен совпадать с устройством.** Эмулятор на Windows — `x86_64` (даже если
   в `abilist` есть `arm64-v8a` через трансляцию). Собирай `--target x86_64` под

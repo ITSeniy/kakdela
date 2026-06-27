@@ -2,8 +2,8 @@ import { ServerEventSchema, type ClientEvent, type ServerEvent } from '@kakdela/
 
 import { useAuthStore } from '../features/auth/store.js'
 import { useRealtimeStore } from '../features/realtime/store.js'
+import { SPEEDY_URL } from './serverUrl.js'
 
-const SPEEDY_URL = import.meta.env.VITE_SPEEDY_URL ?? 'http://localhost:3001'
 const WS_URL = SPEEDY_URL.replace(/^http/, 'ws') + '/ws'
 
 const RECONNECT_BASE_MS = 1_000

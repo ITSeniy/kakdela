@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { Avatar } from '../../components/Avatar.js'
 import { ThemeToggle } from '../../components/ThemeToggle.js'
 import { ApiError } from '../../lib/api.js'
+import { speedyHost } from '../../lib/serverUrl.js'
 import { login, register } from './api.js'
 import { PROFILE_SETUP_FLAG } from './ProfileSetupScreen.js'
 
@@ -10,16 +11,7 @@ type Mode = 'login' | 'register'
 
 const APP_VERSION = 'v0.0.1'
 
-function getServerHost(): string {
-  const url = import.meta.env.VITE_SPEEDY_URL ?? 'http://localhost:3001'
-  try {
-    return new URL(url).host
-  } catch {
-    return url
-  }
-}
-
-const SERVER_HOST = getServerHost()
+const SERVER_HOST = speedyHost()
 
 function ServerDisplay({ mode }: { mode: Mode }) {
   return (

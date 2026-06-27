@@ -2,9 +2,8 @@ import type { User } from '@kakdela/ginzu'
 
 import { ApiError, apiFetch } from '../../lib/api.js'
 import { secrets } from '../../lib/host/secrets.js'
+import { SPEEDY_URL } from '../../lib/serverUrl.js'
 import { useAuthStore } from './store.js'
-
-const SPEEDY_URL = import.meta.env.VITE_SPEEDY_URL ?? 'http://localhost:3001'
 
 export type InviteInfo = { serverName: string; serverIcon: string | null; expiresAt: string | null }
 
