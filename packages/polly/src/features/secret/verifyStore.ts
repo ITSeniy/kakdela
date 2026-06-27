@@ -8,6 +8,7 @@
 import { secrets } from '../../lib/host/secrets.js'
 
 const verifiedKey = (peerUserId: string) => `kd:secret-verified:${peerUserId}`
+const seenKey = (peerUserId: string) => `kd:secret-seen:${peerUserId}`
 const ONBOARDING_KEY = 'kd:secret-onboarding-seen'
 
 /** Проверенный ранее safety number собеседника (или null). */
@@ -23,6 +24,17 @@ export function setVerifiedSafetyNumber(peerUserId: string, safetyNumber: string
 /** Снять отметку «проверено» (например, после смены ключа). */
 export function clearVerified(peerUserId: string): Promise<void> {
   return secrets.delete(verifiedKey(peerUserId))
+}
+
+/** Время (epoch ms) последнего входящего, которое пользователь уже видел. */
+export async function getSeenTs(peerUserId: string): Promise<number> {
+  const raw = await secrets.get(seenKey(peerUserId))
+  return raw ? Number(raw) || 0 : 0
+}
+
+/** Запомнить, что входящие вплоть до ts просмотрены (гашение unread). */
+export function setSeenTs(peerUserId: string, ts: number): Promise<void> {
+  return secrets.set(seenKey(peerUserId), String(ts))
 }
 
 /** Показывали ли уже device-bound онбординг секретных чатов. */
