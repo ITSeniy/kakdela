@@ -48,6 +48,16 @@ export PATH="$JAVA_HOME/bin:$PATH"
    rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android
    ```
 4. **cargo-ndk** (`cargo install cargo-ndk`).
+5. **protoc** (protobuf-компилятор) — нужен build-скриптам `libsignal-protocol`
+   (секретные чаты, T-101). Без него `cargo check`/сборка падают с «Could not find
+   `protoc`». Поставить: бинарь с github.com/protocolbuffers/protobuf/releases в
+   каталог на PATH (напр. `~/bin/protoc.exe`), либо `choco install protoc`. Проверка:
+   `protoc --version`.
+
+Кросс-компиляция Rust под Android (sanity, без полной сборки APK):
+```bash
+cargo ndk -t x86_64 --platform 24 check   # NB: --platform, не -p (это --package)
+```
 
 ---
 
