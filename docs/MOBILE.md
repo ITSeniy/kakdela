@@ -26,57 +26,86 @@ pnpm dev:web        # http://localhost:1420
 
 ## Нативная сборка — требования к окружению
 
-> На текущей машине этот тулчейн **не установлен** (нет `ANDROID_HOME`, rust
-> android-таргетов, `cargo-ndk`; JDK 25 вместо 17). До установки `tauri android
-> init`/`build` запускать нельзя.
+> **Статус: проверено 2026-06-27.** Тулчейн установлен, APK собран и запущен на
+> эмуляторе Pixel 10 Pro (x86_64). Конкретные пути ниже — с машины разработки.
 
-1. **JDK 17** (Temurin/Microsoft OpenJDK). Tauri/Gradle с JDK 25 не дружат —
-   поставь именно 17 и проверь `java -version`.
-2. **Android SDK + NDK** (через Android Studio или command-line tools). Выставь:
-   - `ANDROID_HOME` (или `ANDROID_SDK_ROOT`) → путь к SDK,
-   - `NDK_HOME` → `.../ndk/<version>`.
+Окружение, на котором собралось (важно: Gradle хочет JDK 17, а системный
+`JAVA_HOME` может указывать на новее — выставляй инлайн при сборке):
+
+```bash
+export ANDROID_HOME="$LOCALAPPDATA/Android/Sdk"
+export ANDROID_SDK_ROOT="$ANDROID_HOME"
+export NDK_HOME="$ANDROID_HOME/ndk/30.0.14904198"
+export JAVA_HOME="/c/Program Files/Eclipse Adoptium/jdk-17.0.19.10-hotspot"
+export PATH="$JAVA_HOME/bin:$PATH"
+```
+
+1. **JDK 17** (Temurin/Adoptium). Tauri/Gradle с JDK 21/25 спотыкаются — собирай
+   именно под 17 (`java -version` должен показать 17 в той же оболочке).
+2. **Android SDK + NDK** (Android Studio). NDK тут — `30.0.14904198`.
 3. **Rust android-таргеты**:
    ```bash
    rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android
    ```
-4. **cargo-ndk**:
-   ```bash
-   cargo install cargo-ndk
-   ```
+4. **cargo-ndk** (`cargo install cargo-ndk`).
 
 ---
 
 ## Инициализация и сборка
 
+`gen/android` уже сгенерирован и закоммичен — `init` повторно не нужен.
+
 ```bash
-# один раз — генерит packages/polly/src-tauri/gen/android/
-pnpm --filter @kakdela/polly tauri android init
+# сборка под архитектуру эмулятора/устройства.
+# ЭМУЛЯТОР на Windows x86 → x86_64; ФИЗ. устройство (телефон) → aarch64.
+pnpm --filter @kakdela/polly exec tauri android build --debug --target x86_64
+# APK → src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk
 
-# dev (горячая перезагрузка на эмуляторе/устройстве)
-pnpm --filter @kakdela/polly tauri android dev
-
-# сборка APK
-pnpm --filter @kakdela/polly tauri android build
-# → src-tauri/gen/android/app/build/outputs/apk/...
+# dev (горячая перезагрузка)
+pnpm --filter @kakdela/polly exec tauri android dev
 ```
 
-### Что нужно поправить в нативном коде при `init`
+Установка/запуск на эмуляторе (проверенный путь):
 
-- **`src-tauri/src/lib.rs`** — точка входа `#[cfg_attr(mobile, tauri::mobile_entry_point)]`
-  уже есть. Но блок `.setup()` с `TrayIconBuilder` и close-to-tray — **desktop-only**.
-  Заверни его в `#[cfg(desktop)]`, иначе mobile-сборка не слинкуется (трея и
-  именованного окна `main` на Android нет). Плагин `global-shortcut` уже под
-  `#[cfg(desktop)]`.
-- **`gen/android/.../AndroidManifest.xml`** — добавить permissions:
-  `INTERNET`, `RECORD_AUDIO`, `CAMERA` (под голос/видео в DM, T-087).
+```bash
+ADB="$ANDROID_HOME/platform-tools/adb.exe"
+"$ANDROID_HOME/emulator/emulator.exe" -avd Pixel_10_Pro -no-snapshot &   # подождать boot
+MSYS_NO_PATHCONV=1 "$ADB" install -r .../app-universal-debug.apk
+"$ADB" shell monkey -p com.kakdela.polly -c android.intent.category.LAUNCHER 1
+```
+
+### Грабли (наступили — записано, чтобы не повторять)
+
+- **ABI должен совпадать с устройством.** Эмулятор на Windows — `x86_64` (даже если
+  в `abilist` есть `arm64-v8a` через трансляцию). Собирай `--target x86_64` под
+  эмулятор; arm64 APK либо не встанет, либо будет медленным. `ro.product.cpu.abi`
+  показывает реальную ABI.
+- **Debug-`.so` огромная (~150 МБ).** Unstripped Rust debug = весь вес APK. Если
+  раздел `/data` эмулятора переполнен → `INSTALL_FAILED_INSUFFICIENT_STORAGE`.
+  Лечится `-wipe-data` при старте эмулятора (сброс userdata, сам AVD цел) или
+  release-сборкой (стрипает символы, но требует подписи). TODO: при желании
+  ужать debug-`.so` через `strip`-профиль в Cargo.toml.
+- **MSYS коверкает пути.** `adb shell df /data` и `adb install <path>` в Git Bash —
+  с `MSYS_NO_PATHCONV=1`, иначе `/data` превращается в `C:/Program Files/...`.
+- **JDK.** Системный `JAVA_HOME` может быть 21/25 — Gradle падает; экспортируй 17
+  в оболочке сборки (см. блок выше).
+
+### Сделано при `init` (зафиксировано в репо)
+
+- **`src-tauri/src/lib.rs`** — десктопная обвязка (трей, меню, close-to-tray,
+  global-shortcut) вынесена в `setup_desktop()` под `#[cfg(desktop)]`; команды
+  `focus_main_window`/`set_tray_badge` на mobile — no-op. Иначе Android не
+  линкуется (нет tray-icon и окна `main`). `cargo check` (desktop) — зелёный.
+- **`AndroidManifest.xml`** — добавлены `RECORD_AUDIO`, `CAMERA` (+`uses-feature`
+  необязательными) к уже бывшему `INTERNET`. Под голос/видео в DM (T-087).
 - **getUserMedia в WebView** — главный риск голоса: Android System WebView требует
-  обработки `onPermissionRequest` на нативной стороне. Проверить рано (DoD T-100).
+  обработки `onPermissionRequest` на нативной стороне. Проверить при T-087.
 
 ### `gen/android` в git
 
-Рекомендация: **закоммитить** `gen/android` (как и `gen/apple` у других Tauri-проектов) —
-правки манифеста/Gradle тогда ревьюятся в diff'е. Альтернатива — `.gitignore` +
-регенерация на CI; тогда патчи манифеста надо накатывать скриптом.
+`gen/android` **закоммичен** (как `gen/apple` у других Tauri-проектов) — правки
+манифеста/Gradle ревьюятся в diff'е. Вложенные `.gitignore` исключают `build/`,
+`.gradle`, `local.properties`, `gen/.../generated/` — в репо только скаффолд (~42 файла).
 
 ---
 
