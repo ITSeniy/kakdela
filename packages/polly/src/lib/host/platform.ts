@@ -1,7 +1,15 @@
 // Тонкая обёртка над `@tauri-apps/plugin-os` с web-fallback'ом для
 // `pnpm dev:web` (когда Tauri-обвязки нет в принципе).
 
-export type HostPlatform = 'windows' | 'linux' | 'macos' | 'web'
+export type HostPlatform = 'windows' | 'linux' | 'macos' | 'android' | 'ios' | 'web'
+
+/** Мобильные таргеты (Tauri mobile). */
+const MOBILE_PLATFORMS: ReadonlySet<HostPlatform> = new Set(['android', 'ios'])
+
+/** true для android/ios — используется для выбора мобильного shell (T-100). */
+export function isMobilePlatform(p: HostPlatform): boolean {
+  return MOBILE_PLATFORMS.has(p)
+}
 
 let cached: HostPlatform | null = null
 
@@ -19,7 +27,10 @@ export async function getPlatform(): Promise<HostPlatform> {
   try {
     const mod = await import('@tauri-apps/plugin-os')
     const p = mod.platform()
-    if (p === 'macos' || p === 'windows' || p === 'linux') {
+    if (
+      p === 'macos' || p === 'windows' || p === 'linux'
+      || p === 'android' || p === 'ios'
+    ) {
       cached = p
       return p
     }

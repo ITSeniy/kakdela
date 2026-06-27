@@ -67,6 +67,11 @@
   --kd-font-sans: 'Inter', -apple-system, system-ui, sans-serif;
   --kd-font-mono: 'JetBrains Mono', ui-monospace, monospace;
   --kd-radius: 6px;
+  /* Safe-area insets (мобильный клиент, T-100). На desktop env(...) = 0. */
+  --kd-safe-top:    env(safe-area-inset-top, 0px);
+  --kd-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --kd-safe-left:   env(safe-area-inset-left, 0px);
+  --kd-safe-right:  env(safe-area-inset-right, 0px);
   /* Overlay над видео-tile'ами и модалками — всегда тёмный, не меняется по теме */
   --kd-overlay-strong: rgba(10, 8, 4, 0.85);
   --kd-overlay-soft:   rgba(10, 8, 4, 0.55);

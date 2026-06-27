@@ -11,6 +11,7 @@ import type {
 } from '@kakdela/ginzu/api-types'
 
 import { Avatar } from '../../components/Avatar.js'
+import { Icon } from '../../components/Icon.js'
 import { toast } from '../../components/toast/index.js'
 import { useAuthStore } from '../auth/store.js'
 import { useProfileUi } from '../profile/store.js'
@@ -25,6 +26,8 @@ type MsgCache = InfiniteData<MessagesPage, string | undefined>
 
 interface DmScreenProps {
   channelId: string
+  /** Мобильный shell передаёт «назад» → в шапке рендерится стрелка (T-100). */
+  onBack?: () => void
 }
 
 const STATUS_LABEL: Record<MemberPublic['status'], string> = {
@@ -41,15 +44,28 @@ const STATUS_COLOR: Record<MemberPublic['status'], string> = {
   offline: 'text-kd-text-mute',
 }
 
-function Header({ summary, onOpenProfile }: { summary: DmSummary | undefined; onOpenProfile: (id: string) => void }) {
+function Header({ summary, onOpenProfile, onBack }: { summary: DmSummary | undefined; onOpenProfile: (id: string) => void; onBack?: () => void }) {
+  const back = onBack ? (
+    <button
+      type="button"
+      onClick={onBack}
+      title="назад"
+      className="-ml-1 shrink-0 text-kd-text-soft hover:text-kd-text transition-colors"
+    >
+      <Icon.ArrowLeft size={22} />
+    </button>
+  ) : null
   if (!summary) {
     return (
-      <div className="px-4 py-2.5 border-b border-kd-border bg-kd-panel-alt h-[49px] shrink-0" />
+      <div className="px-4 py-2.5 border-b border-kd-border bg-kd-panel-alt h-[49px] shrink-0 flex items-center gap-2">
+        {back}
+      </div>
     )
   }
   const status = summary.otherUser.status
   return (
     <div className="px-4 py-2 border-b border-kd-border bg-kd-panel-alt flex items-center gap-3 shrink-0">
+      {back}
       <button
         type="button"
         onClick={() => onOpenProfile(summary.otherUser.id)}
@@ -75,7 +91,7 @@ function Header({ summary, onOpenProfile }: { summary: DmSummary | undefined; on
   )
 }
 
-export function DmScreen({ channelId }: DmScreenProps) {
+export function DmScreen({ channelId, onBack }: DmScreenProps) {
   const queryClient = useQueryClient()
   const user = useAuthStore((s) => s.user)
   const openProfile = useProfileUi((s) => s.open)
@@ -276,7 +292,7 @@ export function DmScreen({ channelId }: DmScreenProps) {
 
   return (
     <div className="flex-1 min-w-0 min-h-0 flex flex-col bg-kd-bg">
-      <Header summary={summary} onOpenProfile={openProfile} />
+      <Header summary={summary} onOpenProfile={openProfile} onBack={onBack} />
       <DmBubbleList
         channelId={channelId}
         currentUserId={user?.id ?? null}

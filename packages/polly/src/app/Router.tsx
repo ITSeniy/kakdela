@@ -4,7 +4,9 @@ import { AuthScreen } from '../features/auth/AuthScreen.js'
 import { OnboardingScreen } from '../features/auth/OnboardingScreen.js'
 import { PROFILE_SETUP_FLAG, ProfileSetupScreen } from '../features/auth/ProfileSetupScreen.js'
 import { useAuthStore } from '../features/auth/store.js'
+import { MobileShell } from './MobileShell.js'
 import { Shell } from './Shell.js'
+import { useIsMobile } from './useIsMobile.js'
 
 type AuthView =
   | { kind: 'onboarding'; code: string }
@@ -31,6 +33,7 @@ export function Router() {
   // Бамп для ре-рендера после завершения шага оформления профиля —
   // сам флаг живёт в localStorage (ставится при регистрации).
   const [, setSetupTick] = useState(0)
+  const isMobile = useIsMobile()
 
   if (status === 'idle' || status === 'loading') {
     return <Splash />
@@ -47,7 +50,7 @@ export function Router() {
         />
       )
     }
-    return <Shell />
+    return isMobile ? <MobileShell /> : <Shell />
   }
 
   // unauthed
