@@ -18,13 +18,9 @@
 // крипто-ядро.
 
 use std::collections::HashMap;
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use aes_gcm::aead::{Aead, KeyInit};
-use aes_gcm::{Aes256Gcm, Key, Nonce};
 use async_trait::async_trait;
-use rand::{RngCore, TryRngCore};
 use serde::{Deserialize, Serialize};
 
 use libsignal_protocol::{
@@ -34,14 +30,10 @@ use libsignal_protocol::{
 };
 use libsignal_protocol::{IdentityKeyStore, KyberPreKeyStore, PreKeyStore, SessionStore, SignedPreKeyStore};
 
-use super::CmdError;
+use crate::error::CmdError;
+use crate::sealed::{self, KeyProvider};
 
 // ───────── helpers ─────────
-
-/// Инфолибельный CSPRNG из rand 0.9 (как делает сам libsignal внутри).
-pub(super) fn os_rng() -> impl RngCore + rand::CryptoRng {
-    rand::rngs::OsRng.unwrap_err()
-}
 
 /// Стабильный строковый ключ для (name, device) адреса. UUID не содержит '.',
 /// device_id числовой — коллизий нет.
@@ -335,66 +327,11 @@ impl SessionStore for KdSessionStore {
     }
 }
 
-// ───────── KeyProvider: получение DEK (ключа шифрования стора) ─────────
-
-/// Источник 32-байтного DEK, которым шифруется снапшот на диске. На Android это
-/// должен быть ключ, запечатанный Keystore (StrongBox если доступен). Seam:
-/// крипто-ядро от провайдера ключа не зависит. `Send + Sync` — ядро живёт в
-/// tauri managed-state за Mutex.
-pub trait KeyProvider: Send + Sync {
-    fn data_key(&self) -> Result<[u8; 32], CmdError>;
-}
-
-/// СОФТВАРНЫЙ провайдер: DEK лежит файлом рядом со стором. Это dev/desktop-уровень
-/// (секретные чаты — мобайл-онли). На Android его подменяет Keystore-провайдер,
-/// который запечатывает DEK железом. Пометка намеренная: без Keystore at-rest
-/// защищает лишь от «прочитал файл глазами», не от рутового доступа.
-pub struct SoftwareKeyProvider {
-    path: PathBuf,
-}
-
-impl SoftwareKeyProvider {
-    pub fn new(dir: &Path) -> Self {
-        Self {
-            path: dir.join("dek.bin"),
-        }
-    }
-}
-
-impl KeyProvider for SoftwareKeyProvider {
-    fn data_key(&self) -> Result<[u8; 32], CmdError> {
-        if let Ok(b) = fs::read(&self.path) {
-            if b.len() == 32 {
-                let mut k = [0u8; 32];
-                k.copy_from_slice(&b);
-                return Ok(k);
-            }
-        }
-        let mut k = [0u8; 32];
-        os_rng().fill_bytes(&mut k);
-        fs::write(&self.path, k)
-            .map_err(|e| CmdError::internal("dek-write", &format!("cannot persist DEK: {e}")))?;
-        Ok(k)
-    }
-}
-
-// ───────── persist / load (AES-256-GCM at-rest) ─────────
+// ───────── persist / load (AES-256-GCM at-rest, через crate::sealed) ─────────
 
 const STORE_FILE: &str = "secret-store.bin";
 
-/// Каталог крипто-данных внутри app data dir. Создаётся при первом обращении.
-pub fn data_dir(app_data_dir: &Path) -> Result<PathBuf, CmdError> {
-    let dir = app_data_dir.join("kd-secret");
-    fs::create_dir_all(&dir)
-        .map_err(|e| CmdError::internal("dir-create", &format!("cannot create store dir: {e}")))?;
-    Ok(dir)
-}
-
-fn cipher(dek: &[u8; 32]) -> Aes256Gcm {
-    Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(dek))
-}
-
-/// Зашифровать и записать снапшот. Формат файла: [12 байт nonce][ciphertext+tag].
+/// Зашифровать (serde_json + AES-256-GCM) и атомарно записать снапшот.
 pub fn persist(
     dir: &Path,
     key_provider: &dyn KeyProvider,
@@ -402,23 +339,7 @@ pub fn persist(
 ) -> Result<(), CmdError> {
     let plaintext = serde_json::to_vec(store)
         .map_err(|e| CmdError::internal("serialize", &format!("snapshot serialize: {e}")))?;
-    let dek = key_provider.data_key()?;
-    let mut nonce = [0u8; 12];
-    os_rng().fill_bytes(&mut nonce);
-    let ct = cipher(&dek)
-        .encrypt(Nonce::from_slice(&nonce), plaintext.as_ref())
-        .map_err(|_| CmdError::internal("encrypt", "store encryption failed"))?;
-    let mut out = Vec::with_capacity(12 + ct.len());
-    out.extend_from_slice(&nonce);
-    out.extend_from_slice(&ct);
-    // Атомарность: пишем во временный файл и переименовываем — иначе обрыв на
-    // записи (ratchet-состояние!) оставил бы битый стор и нерасшифровываемые чаты.
-    let tmp = dir.join(format!("{STORE_FILE}.tmp"));
-    fs::write(&tmp, &out)
-        .map_err(|e| CmdError::internal("store-write", &format!("cannot write store: {e}")))?;
-    fs::rename(&tmp, dir.join(STORE_FILE))
-        .map_err(|e| CmdError::internal("store-rename", &format!("cannot commit store: {e}")))?;
-    Ok(())
+    sealed::write_sealed(&dir.join(STORE_FILE), key_provider, &plaintext)
 }
 
 /// Прочитать и расшифровать снапшот. None — если файла ещё нет (не инициализировано).
@@ -426,21 +347,12 @@ pub fn load(
     dir: &Path,
     key_provider: &dyn KeyProvider,
 ) -> Result<Option<KdProtocolStore>, CmdError> {
-    let path = dir.join(STORE_FILE);
-    let raw = match fs::read(&path) {
-        Ok(b) => b,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(e) => return Err(CmdError::internal("store-read", &format!("cannot read store: {e}"))),
-    };
-    if raw.len() < 12 {
-        return Err(CmdError::internal("store-corrupt", "store file truncated"));
+    match sealed::read_sealed(&dir.join(STORE_FILE), key_provider)? {
+        None => Ok(None),
+        Some(plaintext) => {
+            let store = serde_json::from_slice(&plaintext)
+                .map_err(|e| CmdError::internal("deserialize", &format!("snapshot deserialize: {e}")))?;
+            Ok(Some(store))
+        }
     }
-    let (nonce, ct) = raw.split_at(12);
-    let dek = key_provider.data_key()?;
-    let plaintext = cipher(&dek)
-        .decrypt(Nonce::from_slice(nonce), ct)
-        .map_err(|_| CmdError::internal("decrypt", "store decryption failed"))?;
-    let store = serde_json::from_slice(&plaintext)
-        .map_err(|e| CmdError::internal("deserialize", &format!("snapshot deserialize: {e}")))?;
-    Ok(Some(store))
 }

@@ -870,3 +870,19 @@ export const SecretAckRequestSchema = z.object({
   ids: z.array(z.string().uuid()).min(1).max(500),
 })
 export type SecretAckRequest = z.infer<typeof SecretAckRequestSchema>
+
+// --- Secret control frame (T-102) ---
+//
+// Внутренний plaintext конверта: то, что клиент шифрует крипто-ядром и кладёт в
+// `ciphertext`. Сервер этого НЕ видит (всё внутри E2EE). Прикладной вид сообщения
+// (текст / read-receipt / typing) живёт ЗДЕСЬ, а не в серверном msgType — иначе
+// сервер видел бы характер трафика. JSON этой структуры ↔ crypto_encrypt/decrypt.
+export const SecretFrameSchema = z.discriminatedUnion('kind', [
+  // Текстовое сообщение. `ts` — время отправки (epoch ms) по часам отправителя.
+  z.object({ kind: z.literal('text'), body: z.string().min(1).max(16 * 1024), ts: z.number().int() }),
+  // Read-receipt: «я прочитал твои сообщения вплоть до ts». Двигает галочки ✓✓.
+  z.object({ kind: z.literal('read'), ts: z.number().int() }),
+  // Печатает. Эфемерно, в историю не пишется.
+  z.object({ kind: z.literal('typing'), ts: z.number().int() }),
+])
+export type SecretFrame = z.infer<typeof SecretFrameSchema>

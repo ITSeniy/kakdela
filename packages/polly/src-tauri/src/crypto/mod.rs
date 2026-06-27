@@ -30,7 +30,9 @@ use libsignal_protocol::{
 // Трейты стора должны быть в scope, чтобы вызывать их методы на суб-сторах.
 use libsignal_protocol::{KyberPreKeyStore, PreKeyStore, SignedPreKeyStore};
 
-use store::{KdProtocolStore, KeyProvider, SoftwareKeyProvider};
+use crate::error::CmdError;
+use crate::sealed::{self, KeyProvider, SoftwareKeyProvider};
+use store::KdProtocolStore;
 
 // safety number: и итерации, и id, и ключи должны совпадать у обеих сторон —
 // DisplayableFingerprint сам сортирует половинки, поэтому результат симметричен.
@@ -67,36 +69,7 @@ fn b64d(s: &str) -> Result<Vec<u8>, CmdError> {
         .map_err(|_| CmdError::new("bad-input", "invalid base64"))
 }
 
-// ───────── ошибки, отдаваемые в JS ─────────
-
-/// Ошибка команды: `{ code, message }` — формат как у REST-ошибок проекта.
-/// ВАЖНО: сюда НЕ попадает секретный материал. Сообщения libsignal описывают
-/// тип ошибки (а не байты ключей); base64-ввод не логируем.
-#[derive(Debug, Serialize)]
-pub struct CmdError {
-    pub code: String,
-    pub message: String,
-}
-
-impl CmdError {
-    pub fn new(code: &str, message: &str) -> Self {
-        Self {
-            code: code.to_string(),
-            message: message.to_string(),
-        }
-    }
-
-    /// Внутренняя/инфраструктурная ошибка (I/O, шифрование стора).
-    pub fn internal(code: &str, message: &str) -> Self {
-        Self::new(code, message)
-    }
-}
-
-impl From<libsignal_protocol::SignalProtocolError> for CmdError {
-    fn from(e: libsignal_protocol::SignalProtocolError) -> Self {
-        CmdError::new("crypto-failure", &e.to_string())
-    }
-}
+// CmdError живёт в crate::error (общий для crypto и store/local_db).
 
 // ───────── публичные DTO (camelCase для JS / совпадают с ginzu) ─────────
 
@@ -187,7 +160,7 @@ pub struct CryptoCore {
 
 /// Открыть существующий стор. None — если устройство ещё не инициализировано.
 pub fn open(app_data_dir: &Path) -> Result<Option<CryptoCore>, CmdError> {
-    let dir = store::data_dir(app_data_dir)?;
+    let dir = sealed::data_dir(app_data_dir)?;
     let key_provider: Box<dyn KeyProvider> = Box::new(SoftwareKeyProvider::new(&dir));
     match store::load(&dir, key_provider.as_ref())? {
         Some(store) => Ok(Some(CryptoCore {
@@ -202,9 +175,9 @@ pub fn open(app_data_dir: &Path) -> Result<Option<CryptoCore>, CmdError> {
 /// Создать identity + registrationId при первом запуске (идемпотентность —
 /// на стороне команды crypto_init: создаём только если open() вернул None).
 pub fn create(app_data_dir: &Path, self_user_id: &str) -> Result<CryptoCore, CmdError> {
-    let dir = store::data_dir(app_data_dir)?;
+    let dir = sealed::data_dir(app_data_dir)?;
     let key_provider: Box<dyn KeyProvider> = Box::new(SoftwareKeyProvider::new(&dir));
-    let mut rng = store::os_rng();
+    let mut rng = sealed::os_rng();
     let identity = IdentityKeyPair::generate(&mut rng);
     // 14-битный ненулевой registrationId — как у Signal.
     let registration_id = (rng.next_u32() % 16380) + 1;
@@ -284,7 +257,7 @@ impl CryptoCore {
     /// Сгенерировать signed + kyber (по разу) + пачку одноразовых; вернуть бандл.
     pub fn publish_keys(&mut self, count: u32) -> Result<PublicBundle, CmdError> {
         let identity = self.store.identity_key_pair()?;
-        let mut rng = store::os_rng();
+        let mut rng = sealed::os_rng();
 
         if self.store.signed_prekey_id.is_none() {
             let id = 1u32;
@@ -330,7 +303,7 @@ impl CryptoCore {
 
     /// Долить одноразовые prekey'и (для POST /api/keys/topup).
     pub fn topup(&mut self, count: u32) -> Result<Vec<OneTimePrekeyOut>, CmdError> {
-        let mut rng = store::os_rng();
+        let mut rng = sealed::os_rng();
         let out = self.generate_one_time(count, &mut rng)?;
         self.persist()?;
         Ok(out)
@@ -367,7 +340,7 @@ impl CryptoCore {
 
         let remote = addr(user_id);
         let local = addr(self.store.self_user_id());
-        let mut rng = store::os_rng();
+        let mut rng = sealed::os_rng();
         // session_store и identity_store — РАЗНЫЕ поля self.store ⇒ непересекающиеся &mut.
         block_on(process_prekey_bundle(
             &remote,
@@ -404,7 +377,7 @@ impl CryptoCore {
 
         let remote = addr(to_user_id);
         let local = addr(self.store.self_user_id());
-        let mut rng = store::os_rng();
+        let mut rng = sealed::os_rng();
         let msg = block_on(message_encrypt(
             plaintext.as_bytes(),
             &remote,
@@ -442,7 +415,7 @@ impl CryptoCore {
         let bytes = b64d(ciphertext_b64)?;
         let remote = addr(from_user_id);
         let local = addr(self.store.self_user_id());
-        let mut rng = store::os_rng();
+        let mut rng = sealed::os_rng();
 
         let plaintext = match msg_type {
             "prekey" => {

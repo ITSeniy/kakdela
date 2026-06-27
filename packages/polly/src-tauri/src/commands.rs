@@ -9,12 +9,23 @@ use std::sync::Mutex;
 
 use tauri::{AppHandle, Manager, State};
 
-use crate::crypto::{self, BundleIn, CmdError, CryptoCore, EncryptOut, OneTimePrekeyOut, PublicBundle};
+use crate::crypto::{self, BundleIn, CryptoCore, EncryptOut, OneTimePrekeyOut, PublicBundle};
+use crate::error::CmdError;
+use crate::store::local_db::{self, HistoryStore, StoredMessage};
 
 /// Managed-state крипто-ядра. None — пока устройство не инициализировано/не загружено.
 pub struct CryptoState(pub Mutex<Option<CryptoCore>>);
 
 impl Default for CryptoState {
+    fn default() -> Self {
+        Self(Mutex::new(None))
+    }
+}
+
+/// Managed-state локальной истории. None — пока не загружена с диска.
+pub struct HistoryState(pub Mutex<Option<HistoryStore>>);
+
+impl Default for HistoryState {
     fn default() -> Self {
         Self(Mutex::new(None))
     }
@@ -145,4 +156,77 @@ pub fn crypto_safety_number(
     user_id: String,
 ) -> Result<String, CmdError> {
     with_core(&app, &state, |core| core.safety_number(&user_id))
+}
+
+// ───────── локальная история (T-102) ─────────
+
+/// Выполнить операцию над историей. Лениво открывает (пустая история валидна,
+/// «инициализации» не требует — в отличие от крипто-ядра).
+fn with_history<T>(
+    app: &AppHandle,
+    state: &HistoryState,
+    f: impl FnOnce(&mut HistoryStore) -> Result<T, CmdError>,
+) -> Result<T, CmdError> {
+    let mut guard = state
+        .0
+        .lock()
+        .map_err(|_| CmdError::internal("lock-poisoned", "history state lock poisoned"))?;
+    if guard.is_none() {
+        *guard = Some(local_db::open(&app_data_dir(app)?)?);
+    }
+    f(guard.as_mut().expect("history store loaded"))
+}
+
+/// Записать своё исходящее сообщение (после успешной отправки на релей).
+#[tauri::command]
+pub fn secret_history_append_outgoing(
+    app: AppHandle,
+    state: State<HistoryState>,
+    peer_user_id: String,
+    body: String,
+    sent_at_ms: u64,
+) -> Result<StoredMessage, CmdError> {
+    with_history(&app, &state, |h| h.append_outgoing(&peer_user_id, body, sent_at_ms))
+}
+
+/// Записать входящее сообщение (после расшифровки крипто-ядром).
+#[tauri::command]
+pub fn secret_history_append_incoming(
+    app: AppHandle,
+    state: State<HistoryState>,
+    peer_user_id: String,
+    body: String,
+    sent_at_ms: u64,
+) -> Result<StoredMessage, CmdError> {
+    with_history(&app, &state, |h| h.append_incoming(&peer_user_id, body, sent_at_ms))
+}
+
+/// Пометить исходящие прочитанными по входящему read-конверту (галочки в UI).
+#[tauri::command]
+pub fn secret_history_mark_read(
+    app: AppHandle,
+    state: State<HistoryState>,
+    peer_user_id: String,
+    before_ms: u64,
+) -> Result<u32, CmdError> {
+    with_history(&app, &state, |h| h.mark_outgoing_read(&peer_user_id, before_ms))
+}
+
+/// Вся история с собеседником (по возрастанию id).
+#[tauri::command]
+pub fn secret_history_list(
+    app: AppHandle,
+    state: State<HistoryState>,
+    peer_user_id: String,
+) -> Result<Vec<StoredMessage>, CmdError> {
+    with_history(&app, &state, |h| Ok(h.list(&peer_user_id)))
+}
+
+/// userId'ы всех собеседников с историей (для списка секретных чатов, T-103).
+#[tauri::command]
+pub fn secret_history_peers(
+    app: AppHandle,
+    state: State<HistoryState>,
+) -> Result<Vec<String>, CmdError> {
+    with_history(&app, &state, |h| Ok(h.peers()))
 }
