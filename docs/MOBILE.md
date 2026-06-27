@@ -149,3 +149,34 @@ loopback). Cleartext HTTP разрешён только в debug (`usesCleartext
  re-auth на холодный старт). На Android токен должен лежать в **Android Keystore**
 (нативная команда или secure-storage плагин) — это часть T-100, нативная фаза,
 делается вместе с `tauri android init`.
+
+---
+
+## Крипто-ядро секретных чатов (T-101)
+
+E2EE-ядро живёт в `src-tauri/src/crypto/` и обёрнуто host-слоем
+`src/lib/host/crypto.ts`. Приватные ключи и ratchet-состояние **никогда** не
+покидают нативную сторону — WebView видит только публичные бандлы и base64
+шифртекста. Web-путь (`pnpm dev:web`) секретных чатов не поддерживает и бросает
+`{ code: 'secret-chats-unsupported' }`.
+
+- **Протокол:** libsignal v0.96.4 = **PQXDH** (X25519 + Kyber1024) + Double
+  Ratchet. Это сильнее классического X3DH из карточки; решение Path A (см.
+  `tasks/T-101.md`). Бандл поэтому содержит дополнительный подписанный Kyber
+  prekey — отсюда столбцы `kyber_pre_key*` в `secret_identities` (миграция 0022).
+- **Стор:** `crypto/store.rs` держит сериализованные записи libsignal в
+  `secret-store.bin`, зашифрованном AES-256-GCM. Запись атомарна (tmp + rename),
+  иначе обрыв на записи ratchet-состояния сделал бы историю нерасшифровываемой.
+- **Тесты:** `cargo test --lib crypto` — round-trip PQXDH+ratchet между двумя
+  «устройствами» и симметрия safety number; плюс переживание перезапуска (reopen).
+  Кросс-проверка под Android: `cargo ndk -t x86_64 --platform 24 check`.
+
+### Осталось (нативный шаг, не верифицируется без Kotlin/эмулятора)
+
+DEK (ключ шифрования стора) сейчас отдаёт `SoftwareKeyProvider` — он хранит
+32-байтный ключ файлом рядом со стором (тот же программный уровень, что
+`secrets.ts`). Это закрывает «прочитал файл», но не рутовый доступ. Аппаратное
+запечатывание DEK — **Android Keystore** (Kotlin-плагин: Keystore-backed master
+key, StrongBox если доступен) — подменяет ТОЛЬКО `KeyProvider` в `store.rs`,
+крипто-ядро не трогает. Это последний кусок T-101; сюда же сворачивается
+hardware-хранилище JWT из T-100.

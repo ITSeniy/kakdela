@@ -39,6 +39,9 @@ export const keysRoutes: FastifyPluginAsyncZod = async (app) => {
         signedPreKeyId:  body.signedPrekey.keyId,
         signedPreKey:    body.signedPrekey.pubKey,
         signedPreKeySig: body.signedPrekey.signature,
+        kyberPreKeyId:   body.kyberPrekey.keyId,
+        kyberPreKey:     body.kyberPrekey.pubKey,
+        kyberPreKeySig:  body.kyberPrekey.signature,
         updatedAt:       new Date(),
       }
       await db
@@ -143,6 +146,11 @@ export const keysRoutes: FastifyPluginAsyncZod = async (app) => {
           keyId:     identity.signedPreKeyId,
           pubKey:    identity.signedPreKey,
           signature: identity.signedPreKeySig,
+        },
+        kyberPrekey: {
+          keyId:     identity.kyberPreKeyId,
+          pubKey:    identity.kyberPreKey,
+          signature: identity.kyberPreKeySig,
         },
         oneTimePrekey: otp ? { keyId: otp.keyId, pubKey: otp.pubKey } : null,
       })

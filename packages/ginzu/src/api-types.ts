@@ -786,6 +786,15 @@ export const SignedPrekeySchema = z.object({
 })
 export type SignedPrekey = z.infer<typeof SignedPrekeySchema>
 
+// Kyber1024 prekey (PQXDH, libsignal v0.96.4). Публичный ключ ~1.5КБ base64 —
+// укладывается в base64Key (≤8192). Подписан identity-ключом, как signed prekey.
+export const KyberPrekeySchema = z.object({
+  keyId:     z.number().int().nonnegative(),
+  pubKey:    base64Key,
+  signature: base64Key,
+})
+export type KyberPrekey = z.infer<typeof KyberPrekeySchema>
+
 export const OneTimePrekeySchema = z.object({
   keyId:  z.number().int().nonnegative(),
   pubKey: base64Key,
@@ -796,6 +805,7 @@ export const PublishKeysRequestSchema = z.object({
   identityKey:    base64Key,
   registrationId: z.number().int().nonnegative(),
   signedPrekey:   SignedPrekeySchema,
+  kyberPrekey:    KyberPrekeySchema,
   oneTimePrekeys: z.array(OneTimePrekeySchema).max(200),
 })
 export type PublishKeysRequest = z.infer<typeof PublishKeysRequestSchema>
@@ -812,6 +822,7 @@ export const PrekeyBundleResponseSchema = z.object({
   identityKey:    base64Key,
   registrationId: z.number().int().nonnegative(),
   signedPrekey:   SignedPrekeySchema,
+  kyberPrekey:    KyberPrekeySchema,
   oneTimePrekey:  OneTimePrekeySchema.nullable(),
 })
 export type PrekeyBundleResponse = z.infer<typeof PrekeyBundleResponseSchema>

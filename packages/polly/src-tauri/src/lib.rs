@@ -3,6 +3,11 @@
 // close-to-tray, глобальные хоткеи) изолирована под #[cfg(desktop)], чтобы
 // Android-сборка линковалась без tray-icon / window API.
 
+// Крипто-ядро секретных чатов (T-101) — кросс-платформенно (мобайл-онли по
+// смыслу, но компилируется и на desktop ради единого cargo check).
+mod commands;
+mod crypto;
+
 #[cfg(desktop)]
 use tauri::{
     menu::{Menu, MenuItem},
@@ -19,10 +24,19 @@ pub fn run() {
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
+        .manage(commands::CryptoState::default())
         .invoke_handler(tauri::generate_handler![
             greet,
             focus_main_window,
             set_tray_badge,
+            commands::crypto_init,
+            commands::crypto_publish_keys,
+            commands::crypto_topup,
+            commands::crypto_process_bundle,
+            commands::crypto_encrypt,
+            commands::crypto_decrypt,
+            commands::crypto_session_exists,
+            commands::crypto_safety_number,
         ])
         .setup(|app| {
             // Вся десктопная обвязка — в setup_desktop под cfg(desktop).

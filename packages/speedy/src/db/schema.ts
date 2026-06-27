@@ -350,6 +350,9 @@ const bytea = customType<{ data: Buffer; driver: Buffer }>({
 export const secretMsgTypeEnum = pgEnum('secret_msg_type', ['prekey', 'message'])
 
 // Identity-ключ + текущий signed prekey устройства (один на пользователя).
+// libsignal v0.96.4 — это PQXDH: помимо EC signed prekey бандл ОБЯЗАН содержать
+// подписанный Kyber1024 prekey (last-resort, один на пользователя). Все ключи —
+// ТОЛЬКО публичные (слепой каталог).
 export const secretIdentities = pgTable('secret_identities', {
   userId:          uuid('user_id').primaryKey().references(() => users.id, { onDelete: 'cascade' }),
   identityKey:     text('identity_key').notNull(),          // base64 публичного ключа
@@ -357,6 +360,9 @@ export const secretIdentities = pgTable('secret_identities', {
   signedPreKeyId:  integer('signed_pre_key_id').notNull(),
   signedPreKey:    text('signed_pre_key').notNull(),        // base64
   signedPreKeySig: text('signed_pre_key_sig').notNull(),    // base64 подпись identity-ключом
+  kyberPreKeyId:   integer('kyber_pre_key_id').notNull(),
+  kyberPreKey:     text('kyber_pre_key').notNull(),         // base64 публичного Kyber1024
+  kyberPreKeySig:  text('kyber_pre_key_sig').notNull(),     // base64 подпись identity-ключом
   updatedAt:       timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })
 

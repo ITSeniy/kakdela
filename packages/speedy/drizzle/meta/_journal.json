@@ -155,6 +155,13 @@
       "when": 1782529682035,
       "tag": "0021_abandoned_killer_shrike",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1782543538275,
+      "tag": "0022_giant_la_nuit",
+      "breakpoints": true
     }
   ]
 }
