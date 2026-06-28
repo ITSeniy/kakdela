@@ -1,7 +1,7 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 
-import type { Channel, CustomEmoji, MemberPublic, Message as IMessage } from '@kakdela/ginzu/api-types'
+import type { Channel, CustomEmoji, MemberPublic, Message as IMessage, RoleRef } from '@kakdela/ginzu/api-types'
 
 import { Avatar } from '../../components/Avatar.js'
 import { Badge } from '../../components/Badge.js'
@@ -37,6 +37,8 @@ interface MessageProps {
   memberMap: ReadonlyMap<string, MemberPublic>
   channelMap: ReadonlyMap<string, Channel>
   emojiMap?: ReadonlyMap<string, CustomEmoji>
+  /** Роли сервера для рендера `@роль` (пусто/нет в DM). */
+  roles?: ReadonlyArray<RoleRef>
   /** В DM и внутри самого треда «начать тред» прятать. */
   threadsAllowed?: boolean
   /** Может ли текущий пользователь закреплять (server: admin/owner). */
@@ -176,7 +178,7 @@ function scrollToMessage(id: string) {
 
 export function Message({
   message, prev, member, isOwn, currentUserId, pendingStatus,
-  memberMap, channelMap, emojiMap, threadsAllowed = true, canPin = false, nsfw = false, enter = false,
+  memberMap, channelMap, emojiMap, roles, threadsAllowed = true, canPin = false, nsfw = false, enter = false,
   onEdit, onDelete, onRetry, onReply, onAddReaction, onRemoveReaction,
 }: MessageProps) {
   const enterCls = enter ? 'kd-msg-in' : ''
@@ -207,8 +209,8 @@ export function Message({
   }, [editing, message.content])
 
   const html = useMemo(
-    () => renderMarkdown(message.content, { members: memberMap, channels: channelMap, emoji: emojiMap }),
-    [message.content, memberMap, channelMap, emojiMap],
+    () => renderMarkdown(message.content, { members: memberMap, channels: channelMap, emoji: emojiMap, roles }),
+    [message.content, memberMap, channelMap, emojiMap, roles],
   )
 
   const messageReactions = 'reactions' in message ? (message.reactions ?? []) : []
@@ -221,9 +223,9 @@ export function Message({
   // Цитата ответа — инлайном: эмодзи `:name:` и базовое форматирование.
   const replyHtml = useMemo(
     () => (msgReplyTo && !msgReplyTo.deleted
-      ? renderMarkdownInline(msgReplyTo.content, { members: memberMap, channels: channelMap, emoji: emojiMap })
+      ? renderMarkdownInline(msgReplyTo.content, { members: memberMap, channels: channelMap, emoji: emojiMap, roles })
       : null),
-    [msgReplyTo, memberMap, channelMap, emojiMap],
+    [msgReplyTo, memberMap, channelMap, emojiMap, roles],
   )
 
   const previewForThread =

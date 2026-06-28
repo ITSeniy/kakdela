@@ -14,6 +14,7 @@ import { useAuthStore } from '../auth/store.js'
 import { useViewScope } from '../navigation/viewScope.js'
 import { useServerEmoji } from '../emoji/api.js'
 import { useProfileUi } from '../profile/store.js'
+import { listRoles } from '../roles/api.js'
 import { getChannelStats, getServerDetail, listMembers } from '../servers/api.js'
 import { Composer } from './Composer.js'
 import { MessageList } from './MessageList.js'
@@ -152,6 +153,14 @@ export function ChatScreen({ serverId, channelId }: ChatScreenProps) {
   }, [serverDetail?.channels])
 
   const { emoji: serverEmoji, byName: emojiMap } = useServerEmoji(serverId)
+
+  // Роли сервера (без @everyone) — для рендера/автокомплита `@роль`.
+  const { data: allRoles = [] } = useQuery({
+    queryKey: ['roles', serverId],
+    queryFn: () => listRoles(serverId),
+    staleTime: 30_000,
+  })
+  const roles = useMemo(() => allRoles.filter((r) => !r.isEveryone), [allRoles])
 
   async function handleSend(content: string, attachments: Attachment[] = [], gif?: GifEmbed, sticker?: StickerRef) {
     if (!user) return
@@ -309,6 +318,7 @@ export function ChatScreen({ serverId, channelId }: ChatScreenProps) {
         memberMap={memberMap}
         channelMap={channelMap}
         emojiMap={emojiMap}
+        roles={roles}
         pending={pending}
         canPin={canPin}
         threadsAllowed={channel?.threadsAllowed ?? true}
@@ -324,6 +334,7 @@ export function ChatScreen({ serverId, channelId }: ChatScreenProps) {
       <Composer
         channelName={channel?.name ?? ''}
         customEmoji={serverEmoji}
+        roles={roles}
         channelId={channelId}
         memberMap={memberMap}
         allowBroadcast

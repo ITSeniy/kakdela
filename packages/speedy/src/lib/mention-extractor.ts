@@ -12,6 +12,20 @@ export interface MentionCandidate {
   username?: string
 }
 
+export interface RoleCandidate {
+  id: string
+  name: string
+  /** Может ли роль упоминать кто угодно. Если false — только при allowBroadcast. */
+  mentionable: boolean
+}
+
+export interface ExtractMentionsResult {
+  /** Конкретные пользователи (`@user`, `@everyone`, `@here`). */
+  users: ParsedMention[]
+  /** Роли, упомянутые в тексте и разрешённые к пингу — разворачивает вызывающий. */
+  roleIds: string[]
+}
+
 export interface ExtractMentionsOptions {
   /** Text to scan for mentions. */
   text: string
@@ -29,6 +43,8 @@ export interface ExtractMentionsOptions {
    * For DM channels this is typically empty (we never broadcast in DM).
    */
   onlineIds: readonly string[]
+  /** Роли сервера для резолва `@роль`. Для DM — пусто. */
+  roleCandidates?: readonly RoleCandidate[]
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -51,6 +67,25 @@ function resolveName(token: string, candidates: readonly MentionCandidate[]): Me
   return weakHit
 }
 
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/**
+ * Имена ролей могут содержать пробелы, поэтому их матчим отдельным проходом:
+ * для каждой роли ищем `@<имя роли>` с границей слова после (чтобы `@мод` не
+ * цеплялся к роли `@модераторы`). Возвращает id разрешённых к пингу ролей.
+ */
+function matchRoles(text: string, roles: readonly RoleCandidate[], allowBroadcast: boolean): string[] {
+  const out: string[] = []
+  for (const role of roles) {
+    if (!role.mentionable && !allowBroadcast) continue
+    const re = new RegExp(`(^|[\\s(])@${escapeRegExp(role.name)}(?![\\p{L}\\p{N}_-])`, 'iu')
+    if (re.test(text)) out.push(role.id)
+  }
+  return out
+}
+
 /**
  * Extracts all valid mentions from a message text. Каждый mentioned user
  * появляется ровно один раз в результате — даже если упомянут несколькими
@@ -58,10 +93,11 @@ function resolveName(token: string, candidates: readonly MentionCandidate[]): Me
  * сильный (broadcast > user — но фактически мы возвращаем по уникальному
  * userId один тип, что нам и нужно для строки mentions).
  *
- * Self-mentions автоматически отфильтровываются.
+ * Роли возвращаются отдельным списком id (вызывающий разворачивает их в
+ * участников — это требует БД). Self-mentions автоматически отфильтровываются.
  */
-export function extractMentions(opts: ExtractMentionsOptions): ParsedMention[] {
-  const { text, authorId, candidates, allowBroadcast, onlineIds } = opts
+export function extractMentions(opts: ExtractMentionsOptions): ExtractMentionsResult {
+  const { text, authorId, candidates, allowBroadcast, onlineIds, roleCandidates } = opts
 
   const byUser = new Map<string, MentionType>()
   // Set один раз для O(1) проверки. authorId выкидываем независимо.
@@ -102,5 +138,9 @@ export function extractMentions(opts: ExtractMentionsOptions): ParsedMention[] {
     if (!byUser.has(member.id)) byUser.set(member.id, 'user')
   }
 
-  return Array.from(byUser, ([userId, type]) => ({ userId, type }))
+  const users = Array.from(byUser, ([userId, type]) => ({ userId, type }))
+  const roleIds = roleCandidates && roleCandidates.length > 0
+    ? matchRoles(text, roleCandidates, allowBroadcast)
+    : []
+  return { users, roleIds }
 }

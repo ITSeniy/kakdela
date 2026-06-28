@@ -120,6 +120,16 @@ body {
   background: var(--kd-accent);
   color: #fff;
 }
+/* @роль — статичный чип (роли не навигируются). Отличается от @user (warm) и
+   #channel (accent): нейтрально-акцентный фон. */
+.kd-md .kd-mention-role {
+  background: color-mix(in srgb, var(--kd-accent) 16%, transparent);
+  color: var(--kd-accent-deep);
+  padding: 0 4px;
+  border-radius: 3px;
+  font-weight: 600;
+  font-size: 0.95em;
+}
 /* T-081: custom emoji inline в тексте сообщения. Размер совпадает с
    line-height обычного шрифта, чтобы строка не «прыгала». Несколько emoji
    подряд (emoji-only сообщение) — render крупнее через `.kd-md.kd-md-jumbo`. */

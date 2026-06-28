@@ -1,7 +1,7 @@
 import { type MouseEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation } from 'wouter'
 
-import type { Channel, CustomEmoji, MemberPublic, Message as IMessage } from '@kakdela/ginzu/api-types'
+import type { Channel, CustomEmoji, MemberPublic, Message as IMessage, RoleRef } from '@kakdela/ginzu/api-types'
 
 import { DayDivider } from '../../components/DayDivider.js'
 import { openExternal } from '../../lib/host/shell.js'
@@ -18,6 +18,8 @@ interface MessageListProps {
   channelMap: Map<string, Channel>
   /** Map name → custom emoji для рендера `:name:` в markdown. */
   emojiMap?: ReadonlyMap<string, CustomEmoji>
+  /** Роли сервера для рендера `@роль`. */
+  roles?: ReadonlyArray<RoleRef>
   pending: PendingMessage[]
   /** Когда false — пункт «начать тред» в контекстном меню скрывается. */
   threadsAllowed?: boolean
@@ -63,7 +65,7 @@ function UnreadDivider() {
 }
 
 export function MessageList({
-  serverId, channelId, currentUserId, memberMap, channelMap, emojiMap,
+  serverId, channelId, currentUserId, memberMap, channelMap, emojiMap, roles,
   pending, threadsAllowed = true, canPin = false, nsfw = false,
   onEdit, onDelete, onRetry, onMention, onReply, onAddReaction, onRemoveReaction,
 }: MessageListProps) {
@@ -352,6 +354,7 @@ export function MessageList({
             memberMap={memberMap}
             channelMap={channelMap}
             emojiMap={emojiMap}
+            roles={roles}
             enter={enter}
             threadsAllowed={threadsAllowed}
             canPin={canPin}

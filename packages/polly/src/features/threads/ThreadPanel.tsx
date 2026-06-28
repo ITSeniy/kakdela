@@ -21,6 +21,7 @@ import { MessageList } from '../chat/MessageList.js'
 import type { PendingMessage } from '../chat/types.js'
 import { useServerEmoji } from '../emoji/api.js'
 import { useProfileUi } from '../profile/store.js'
+import { listRoles } from '../roles/api.js'
 import { listMembers } from '../servers/api.js'
 import { archiveThread, listThreads } from './api.js'
 import { useThreadUi } from './store.js'
@@ -80,6 +81,14 @@ export function ThreadPanel({ threadId, parentChannelId, serverId }: ThreadPanel
   const emptyChannelMap = useMemo(() => new Map<string, Channel>(), [])
 
   const { emoji: serverEmoji, byName: emojiMap } = useServerEmoji(serverId)
+
+  const { data: allRoles = [] } = useQuery({
+    queryKey: ['roles', serverId],
+    queryFn: () => listRoles(serverId!),
+    enabled: serverId !== null,
+    staleTime: 30_000,
+  })
+  const roles = useMemo(() => allRoles.filter((r) => !r.isEveryone), [allRoles])
 
   async function handleSend(content: string, attachments: Attachment[] = [], gif?: GifEmbed, sticker?: StickerRef) {
     if (!user) return
@@ -261,6 +270,7 @@ export function ThreadPanel({ threadId, parentChannelId, serverId }: ThreadPanel
         memberMap={memberMap}
         channelMap={emptyChannelMap}
         emojiMap={emojiMap}
+        roles={roles}
         pending={pending}
         threadsAllowed={false}
         onMention={openProfile}
@@ -279,6 +289,7 @@ export function ThreadPanel({ threadId, parentChannelId, serverId }: ThreadPanel
         <Composer
           channelName={`тред: ${titleName}`}
           customEmoji={serverEmoji}
+          roles={roles}
           channelId={threadId}
           memberMap={memberMap}
           allowBroadcast

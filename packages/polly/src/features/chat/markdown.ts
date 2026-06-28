@@ -1,15 +1,17 @@
 import DOMPurify from 'dompurify'
 import MarkdownIt from 'markdown-it'
 
-import type { Channel, CustomEmoji, MemberPublic } from '@kakdela/ginzu/api-types'
+import type { Channel, CustomEmoji, MemberPublic, RoleRef } from '@kakdela/ginzu/api-types'
 
-import { findChannelByMention, findMemberByMention } from './mentions.js'
+import { findChannelByMention, findMemberByMention, findRoleByMention } from './mentions.js'
 
 export interface RenderEnv {
   members?: ReadonlyMap<string, MemberPublic>
   channels?: ReadonlyMap<string, Channel>
   /** Карта custom emoji сервера по `name` — резолвится в `<img class="kd-emoji">`. */
   emoji?: ReadonlyMap<string, CustomEmoji>
+  /** Роли сервера (без @everyone) — резолвят `@роль` в чип. Пусто в DM. */
+  roles?: ReadonlyArray<RoleRef>
 }
 
 const md = new MarkdownIt({
@@ -84,7 +86,20 @@ md.inline.ruler.before('emphasis', 'mention', (state, silent) => {
       return true
     }
     const member = findMemberByMention(env.members, name)
-    if (!member) return false
+    if (!member) {
+      // Не участник — пробуем `@роль` (имя может содержать пробелы).
+      const roleHit = findRoleByMention(env.roles, rest)
+      if (!roleHit) return false
+      const open = state.push('mention_role_open', 'span', 1)
+      open.attrSet('data-mention', 'role')
+      open.attrSet('data-id', roleHit.role.id)
+      open.attrSet('class', 'kd-mention-role')
+      const text = state.push('text', '', 0)
+      text.content = '@' + roleHit.role.name
+      state.push('mention_role_close', 'span', -1)
+      state.pos += 1 + roleHit.matchedLength
+      return true
+    }
     const open = state.push('mention_user_open', 'span', 1)
     open.attrSet('data-mention', 'user')
     open.attrSet('data-id', member.id)

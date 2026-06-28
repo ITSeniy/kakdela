@@ -1,7 +1,7 @@
 import React, { type ClipboardEvent, type DragEvent, type KeyboardEvent, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 
-import type { Attachment, CustomEmoji, GifEmbed, MemberPublic, Message, StickerRef } from '@kakdela/ginzu/api-types'
+import type { Attachment, CustomEmoji, GifEmbed, MemberPublic, Message, Role, StickerRef } from '@kakdela/ginzu/api-types'
 
 import { Avatar } from '../../components/Avatar.js'
 import { Icon } from '../../components/Icon.js'
@@ -44,6 +44,8 @@ const FORMAT_ACTIONS: Array<
 interface ComposerProps {
   channelName: string
   customEmoji?: ReadonlyArray<CustomEmoji>
+  /** Роли сервера для автокомплита `@роль` (нет в DM). */
+  roles?: ReadonlyArray<Role>
   replyTo: Message | null
   replyAuthor: string | undefined
   /** id канала — для индикатора «кто печатает» и отправки typing-событий. */
@@ -123,6 +125,9 @@ interface MentionOption {
   sub?: string
   avatarUrl?: string | null
   broadcast?: boolean
+  /** Опция-роль — рисуем цветную точку вместо аватара. */
+  role?: boolean
+  roleColor?: string | null
 }
 
 /** Токен для текста: предпочитаем username (`@ник`) — он уникален и без
@@ -137,7 +142,7 @@ function makeLocalId(): string {
 }
 
 export function Composer({
-  channelName, customEmoji, replyTo, replyAuthor,
+  channelName, customEmoji, roles, replyTo, replyAuthor,
   channelId, memberMap, allowBroadcast,
   onCancelReply, onSend,
 }: ComposerProps) {
@@ -296,8 +301,15 @@ export function Composer({
       })
       if (list.length >= 8) break
     }
+    // Роли: упоминаемые — всем; неупоминаемые — только при праве на @everyone.
+    for (const r of roles ?? []) {
+      if (list.length >= 8) break
+      if (!r.mentionable && !allowBroadcast) continue
+      if (q && !r.name.toLowerCase().includes(q)) continue
+      list.push({ key: `role:${r.id}`, label: r.name, insert: '@' + r.name, sub: 'роль', role: true, roleColor: r.color })
+    }
     return list.slice(0, 8)
-  }, [mention, memberMap, allowBroadcast, meId])
+  }, [mention, memberMap, allowBroadcast, meId, roles])
 
   function pickMention(opt: MentionOption) {
     if (!mention) return
@@ -699,6 +711,10 @@ export function Composer({
               >
                 {opt.broadcast ? (
                   <span className="w-5 h-5 rounded-full bg-kd-warm-bg text-kd-warm flex items-center justify-center text-[11px] font-bold shrink-0">@</span>
+                ) : opt.role ? (
+                  <span className="w-5 h-5 rounded-full bg-kd-accent-bg flex items-center justify-center shrink-0">
+                    <span className="w-2 h-2 rounded-full" style={{ background: opt.roleColor ?? 'var(--kd-accent)' }} />
+                  </span>
                 ) : (
                   <Avatar name={opt.label} avatarUrl={opt.avatarUrl ?? null} size={20} />
                 )}

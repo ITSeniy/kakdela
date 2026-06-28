@@ -22,11 +22,11 @@ import {
 } from '@kakdela/ginzu/api-types'
 import { hasPermission } from '@kakdela/ginzu/permissions'
 
-import { channels, dmChannels, mentions as mentionsTable, messages, reactions as reactionsTable, serverMembers, users } from '../db/schema.js'
+import { channels, dmChannels, memberRoles, mentions as mentionsTable, messages, reactions as reactionsTable, serverMembers, serverRoles, users } from '../db/schema.js'
 import { db } from '../lib/db.js'
 import { env } from '../env.js'
 import { resolvePreviewsForContent } from '../lib/link-preview.js'
-import { extractMentions, type MentionCandidate, type ParsedMention } from '../lib/mention-extractor.js'
+import { extractMentions, type MentionCandidate, type ParsedMention, type RoleCandidate } from '../lib/mention-extractor.js'
 import { assertCanAccessChannel, assertPermission, getMemberPermissions, notFound } from '../lib/permissions.js'
 import { redis } from '../lib/redis.js'
 import { presence } from '../presence/store.js'
@@ -77,6 +77,42 @@ interface MentionContext {
   candidates: MentionCandidate[]
   allowBroadcast: boolean
   onlineIds: string[]
+  /** Роли сервера для `@роль` (пусто в DM). */
+  roleCandidates: RoleCandidate[]
+  /** serverId для разворота ролей в участников (null в DM). */
+  serverId: string | null
+}
+
+/**
+ * Разворачивает упомянутые роли в участников сервера (для fan-out) и сливает с
+ * прямыми упоминаниями. Носители ролей получают обычное user-упоминание.
+ */
+async function resolveMentions(
+  text: string,
+  authorId: string,
+  ctx: MentionContext,
+): Promise<ParsedMention[]> {
+  const { users, roleIds } = extractMentions({
+    text,
+    authorId,
+    candidates:     ctx.candidates,
+    allowBroadcast: ctx.allowBroadcast,
+    onlineIds:      ctx.onlineIds,
+    roleCandidates: ctx.roleCandidates,
+  })
+  if (roleIds.length === 0 || !ctx.serverId) return users
+
+  const memberRows = await db
+    .select({ userId: memberRoles.userId })
+    .from(memberRoles)
+    .where(and(eq(memberRoles.serverId, ctx.serverId), inArray(memberRoles.roleId, roleIds)))
+
+  const byUser = new Map(users.map((u) => [u.userId, u.type]))
+  for (const r of memberRows) {
+    if (r.userId === authorId) continue
+    if (!byUser.has(r.userId)) byUser.set(r.userId, 'user')
+  }
+  return Array.from(byUser, ([userId, type]) => ({ userId, type }))
 }
 
 /**
@@ -94,7 +130,8 @@ async function buildMentionContext(
     .where(eq(channels.id, channelId))
     .limit(1)
   const ch = chRows[0]
-  if (!ch) return { candidates: [], allowBroadcast: false, onlineIds: [] }
+  const empty: MentionContext = { candidates: [], allowBroadcast: false, onlineIds: [], roleCandidates: [], serverId: null }
+  if (!ch) return empty
 
   if (ch.kind === 'dm') {
     const dmRows = await db
@@ -103,17 +140,17 @@ async function buildMentionContext(
       .where(eq(dmChannels.channelId, channelId))
       .limit(1)
     const dm = dmRows[0]
-    if (!dm) return { candidates: [], allowBroadcast: false, onlineIds: [] }
+    if (!dm) return empty
     const ids = [dm.userAId, dm.userBId]
     const userRows = await db
       .select({ id: users.id, displayName: users.displayName, username: users.username })
       .from(users)
       .where(inArray(users.id, ids))
-    return { candidates: userRows, allowBroadcast: false, onlineIds: [] }
+    return { candidates: userRows, allowBroadcast: false, onlineIds: [], roleCandidates: [], serverId: null }
   }
 
   // server channel
-  if (!ch.serverId) return { candidates: [], allowBroadcast: false, onlineIds: [] }
+  if (!ch.serverId) return empty
   const memberRows = await db
     .select({
       id:          users.id,
@@ -143,10 +180,18 @@ async function buildMentionContext(
     })
     .map((m) => m.id)
 
+  // Роли сервера (кроме @everyone) для резолва `@роль`.
+  const roleRows = await db
+    .select({ id: serverRoles.id, name: serverRoles.name, mentionable: serverRoles.mentionable })
+    .from(serverRoles)
+    .where(and(eq(serverRoles.serverId, ch.serverId), eq(serverRoles.isEveryone, false)))
+
   return {
     candidates: memberRows.map((m) => ({ id: m.id, displayName: m.displayName, username: m.username })),
     allowBroadcast,
     onlineIds,
+    roleCandidates: roleRows,
+    serverId: ch.serverId,
   }
 }
 
@@ -517,13 +562,7 @@ export const messagesRoutes: FastifyPluginAsyncZod = async (app) => {
       }
 
       const mentionCtx = await buildMentionContext(userId, channelId)
-      const parsedMentions = extractMentions({
-        text:           content,
-        authorId:       userId,
-        candidates:     mentionCtx.candidates,
-        allowBroadcast: mentionCtx.allowBroadcast,
-        onlineIds:      mentionCtx.onlineIds,
-      })
+      const parsedMentions = await resolveMentions(content, userId, mentionCtx)
       await persistMentions({ messageId: msg.id, channelId, parsed: parsedMentions })
 
       const replyToData = msg.replyToId
@@ -596,13 +635,7 @@ export const messagesRoutes: FastifyPluginAsyncZod = async (app) => {
       const existingIds = new Set(existing.map((m) => m.mentionedUserId))
 
       const ctx = await buildMentionContext(userId, result.channelId)
-      const parsed = extractMentions({
-        text:           content,
-        authorId:       userId,
-        candidates:     ctx.candidates,
-        allowBroadcast: ctx.allowBroadcast,
-        onlineIds:      ctx.onlineIds,
-      })
+      const parsed = await resolveMentions(content, userId, ctx)
       const parsedById = new Map(parsed.map((m) => [m.userId, m.type]))
 
       const toAdd = parsed.filter((m) => !existingIds.has(m.userId))
@@ -846,13 +879,7 @@ export const messagesRoutes: FastifyPluginAsyncZod = async (app) => {
       // @упоминания в подписи пересыла — как в обычной отправке.
       if (noteContent) {
         const ctx = await buildMentionContext(userId, toChannelId)
-        const parsed = extractMentions({
-          text:           noteContent,
-          authorId:       userId,
-          candidates:     ctx.candidates,
-          allowBroadcast: ctx.allowBroadcast,
-          onlineIds:      ctx.onlineIds,
-        })
+        const parsed = await resolveMentions(noteContent, userId, ctx)
         await persistMentions({ messageId: msg.id, channelId: toChannelId, parsed })
       }
 
