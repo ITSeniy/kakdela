@@ -24,6 +24,12 @@ const MAIN_WINDOW_LABEL: &str = "main";
 #[cfg(desktop)]
 const CALL_POPUP_LABEL: &str = "call-popup";
 
+/// Данные текущего входящего звонка (T-087). Окно-попап (статичная страница)
+/// забирает их через `get_call_popup_data` — это надёжнее, чем query-параметр
+/// (никакого percent-кодирования `?`) и init-скрипта (никаких гонок инъекции).
+#[derive(Default)]
+struct PendingCall(std::sync::Mutex<Option<String>>);
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -32,12 +38,14 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .manage(commands::CryptoState::default())
         .manage(commands::HistoryState::default())
+        .manage(PendingCall::default())
         .invoke_handler(tauri::generate_handler![
             greet,
             focus_main_window,
             set_tray_badge,
             open_call_popup,
             close_call_popup,
+            get_call_popup_data,
             commands::crypto_init,
             commands::crypto_publish_keys,
             commands::crypto_topup,
@@ -181,45 +189,63 @@ fn set_tray_badge(app: tauri::AppHandle, count: u32) {
 #[tauri::command]
 fn open_call_popup(
     app: tauri::AppHandle,
+    state: tauri::State<'_, PendingCall>,
     channel_id: String,
     from_name: String,
     from_avatar_url: Option<String>,
 ) {
+    // Кладём данные звонка в app-state — попап заберёт их через get_call_popup_data.
+    let json = serde_json::json!({
+        "channelId": channel_id,
+        "fromName": from_name,
+        "fromAvatarUrl": from_avatar_url,
+    })
+    .to_string();
+    if let Ok(mut guard) = state.0.lock() {
+        *guard = Some(json);
+    }
     #[cfg(desktop)]
     {
-        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
         use tauri::{WebviewUrl, WebviewWindowBuilder};
         // Повторный invite до закрытия прежнего попапа — пересоздаём.
         if let Some(existing) = app.get_webview_window(CALL_POPUP_LABEL) {
             let _ = existing.close();
         }
-        let data = serde_json::json!({
-            "channelId": channel_id,
-            "fromName": from_name,
-            "fromAvatarUrl": from_avatar_url,
-        })
-        .to_string();
-        // Грузим ОТДЕЛЬНУЮ статичную страницу (public/call-popup.html), а не SPA:
-        // никакого React/Vite-бандла в этом webview'е → нечему «не загрузиться».
-        // Данные едут в query (base64url), читаются синхронно из window.location.
-        let encoded = URL_SAFE_NO_PAD.encode(data.as_bytes());
-        let url = format!("call-popup.html?cp={encoded}");
-        let built = WebviewWindowBuilder::new(&app, CALL_POPUP_LABEL, WebviewUrl::App(url.into()))
-            .title("Входящий звонок")
-            .inner_size(340.0, 128.0)
-            .resizable(false)
-            .decorations(false)
-            .always_on_top(true)
-            .skip_taskbar(true)
-            .focused(false)
-            .build();
+        // Грузим ОТДЕЛЬНУЮ статичную страницу (public/call-popup.html) по ЧИСТОМУ
+        // пути, без query: WebviewUrl::App percent-кодирует `?` → 404 → белое
+        // окно. Данные идут не через URL, а через get_call_popup_data.
+        let built = WebviewWindowBuilder::new(
+            &app,
+            CALL_POPUP_LABEL,
+            WebviewUrl::App("call-popup.html".into()),
+        )
+        .title("Входящий звонок")
+        .inner_size(340.0, 128.0)
+        .resizable(false)
+        .decorations(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .focused(false)
+        .build();
         match built {
-            Ok(win) => position_call_popup(&win),
+            Ok(win) => {
+                position_call_popup(&win);
+                // В debug-сборке (`pnpm dev:polly`) сразу открываем DevTools
+                // попапа — иначе окно «немое»: контекстного меню/хоткея нет.
+                #[cfg(debug_assertions)]
+                win.open_devtools();
+            }
             Err(err) => eprintln!("[call-popup] build failed: {err}"),
         }
     }
     #[cfg(not(desktop))]
-    let _ = (app, channel_id, from_name, from_avatar_url);
+    let _ = app;
+}
+
+/// Статичная страница попапа забирает данные текущего звонка отсюда.
+#[tauri::command]
+fn get_call_popup_data(state: tauri::State<'_, PendingCall>) -> Option<String> {
+    state.0.lock().ok().and_then(|g| g.clone())
 }
 
 /// Закрыть попап входящего звонка (после принятия/отклонения/таймаута/отмены).
