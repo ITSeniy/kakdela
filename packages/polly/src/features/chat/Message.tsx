@@ -379,7 +379,9 @@ export function Message({
             <span className="font-mono font-bold text-kd-text-soft shrink-0">
               ↳ {msgReplyTo.authorName}
             </span>
-            <span className="kd-md opacity-80 truncate min-w-0" dangerouslySetInnerHTML={{ __html: replyHtml ?? '' }} />
+            {msgReplyTo.content.trim()
+              ? <span className="kd-md opacity-80 truncate min-w-0" dangerouslySetInnerHTML={{ __html: replyHtml ?? '' }} />
+              : <span className="italic opacity-70 truncate min-w-0">вложение</span>}
           </>
         )}
       </button>
