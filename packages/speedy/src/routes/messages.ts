@@ -12,6 +12,7 @@ import {
   SendMessageRequestSchema,
   type Attachment,
   type ForwardedRef,
+  type GifEmbed,
   type LinkPreview,
   type ReactionAggregate,
   type ReplyRef,
@@ -45,6 +46,7 @@ const MSG_COLS = {
   forwardedFrom: messages.forwardedFrom,
   linkPreviews:  messages.linkPreviews,
   system:        messages.system,
+  gif:           messages.gif,
 }
 
 async function resolveReplies(ids: string[]): Promise<Map<string, ReplyRef>> {
@@ -183,6 +185,7 @@ interface MsgRow {
   forwardedFrom: unknown
   linkPreviews: unknown
   system: unknown
+  gif: unknown
 }
 
 function serializeMessage(
@@ -212,6 +215,8 @@ function serializeMessage(
     linkPreviews: (row.linkPreviews as LinkPreview[] | null) ?? [],
     // Системное событие (call-log); null для обычных сообщений.
     system: (row.system as SystemEvent | null) ?? null,
+    // GIF-вложение (jsonb-снимок в форме GifEmbed); null — обычное сообщение.
+    gif: (row.gif as GifEmbed | null) ?? null,
   }
 }
 
@@ -455,7 +460,7 @@ export const messagesRoutes: FastifyPluginAsyncZod = async (app) => {
     },
     async (req, reply) => {
       const { channelId } = req.params
-      const { content, replyToId, clientNonce, attachments: attachmentIds, spoilerAttachments } = req.body
+      const { content, replyToId, clientNonce, attachments: attachmentIds, spoilerAttachments, gif } = req.body
       const userId = req.authUser!.id
 
       const access = await assertCanAccessChannel(userId, channelId)
@@ -488,6 +493,7 @@ export const messagesRoutes: FastifyPluginAsyncZod = async (app) => {
           content,
           replyToId: replyToId ?? null,
           clientNonce: clientNonce ?? null,
+          gif: gif ?? null,
         })
         .returning(MSG_COLS)
 

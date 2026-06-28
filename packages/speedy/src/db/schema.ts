@@ -212,6 +212,9 @@ export const messages = pgTable(
     // Системное событие (SystemEvent), напр. итог DM-звонка (T-087). null —
     // обычное сообщение. Рендерится отдельной строкой, не «пузырём».
     system: jsonb('system'),
+    // GIF-вложение (GifEmbed): {gifUrl, mp4Url, previewUrl, width, height}.
+    // null — обычное сообщение. Хранится структурно, чтобы рендерить <video>.
+    gif: jsonb('gif'),
   },
   (t) => ({
     channelIdIdx:      index('messages_channel_id_id_idx').on(t.channelId, t.id),
@@ -313,6 +316,27 @@ export const emoji = pgTable(
   (t) => ({
     serverIdIdx:    index('emoji_server_id_idx').on(t.serverId),
     serverNameUniq: uniqueIndex('emoji_server_name_unique_idx').on(t.serverId, t.name),
+  }),
+)
+
+// Избранные гифки пользователя (GIPHY или загруженный .gif). Дедуп по
+// (user_id, gif_url). mp4_url null у загруженных .gif без перекодирования.
+export const gifFavorites = pgTable(
+  'gif_favorites',
+  {
+    id:         uuid('id').primaryKey().$defaultFn(uuidv7),
+    userId:     uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    gifUrl:     text('gif_url').notNull(),
+    mp4Url:     text('mp4_url'),
+    previewUrl: text('preview_url').notNull(),
+    width:      integer('width').notNull(),
+    height:     integer('height').notNull(),
+    title:      text('title').notNull().default(''),
+    createdAt:  timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    userCreatedIdx: index('gif_favorites_user_created_idx').on(t.userId, t.createdAt),
+    userGifUnique:  uniqueIndex('gif_favorites_user_gif_unique_idx').on(t.userId, t.gifUrl),
   }),
 )
 

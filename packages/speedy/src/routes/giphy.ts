@@ -20,7 +20,7 @@ import { redis } from '../lib/redis.js'
 const TRENDING_TTL_S = 600    // 10 минут — тренды меняются медленно
 const SEARCH_TTL_S = 3_600    // 1 час — один и тот же запрос не жжёт лимит
 
-interface GiphyRendition { url?: string; width?: string; height?: string }
+interface GiphyRendition { url?: string; mp4?: string; width?: string; height?: string }
 interface GiphyImages { [key: string]: GiphyRendition | undefined }
 interface GiphyItem { id: string; title?: string; images: GiphyImages }
 
@@ -32,15 +32,28 @@ function pickRendition(images: GiphyImages, keys: string[]): GiphyRendition | un
   return images.original
 }
 
+/** MP4-версия гифки — рендерим её как <video> (легче и без перезагрузки кадров). */
+function pickMp4(images: GiphyImages): string | undefined {
+  for (const k of ['original', 'fixed_width', 'downsized', 'downsized_small']) {
+    const r = images[k]
+    if (r?.mp4) return r.mp4
+  }
+  return undefined
+}
+
 function normalize(items: GiphyItem[]): GiphyGif[] {
   const out: GiphyGif[] = []
   for (const g of items) {
     const preview = pickRendition(g.images, ['fixed_width_downsampled', 'fixed_width', 'fixed_height'])
     const full = pickRendition(g.images, ['downsized_medium', 'downsized', 'fixed_width', 'original'])
-    if (!preview?.url || !full?.url) continue
+    const mp4 = pickMp4(g.images)
+    // mp4 обязателен (рендер через <video>) — у GIPHY он есть почти всегда;
+    // редкие записи без него пропускаем, чем отдавать гифку без видео.
+    if (!preview?.url || !full?.url || !mp4) continue
     out.push({
       id:         g.id,
       url:        full.url,
+      mp4Url:     mp4,
       previewUrl: preview.url,
       width:      Number(preview.width) || 200,
       height:     Number(preview.height) || 200,

@@ -1,4 +1,4 @@
-import type { Message, MessagesPage, PinnedMessagesResponse } from '@kakdela/ginzu/api-types'
+import type { GifEmbed, Message, MessagesPage, PinnedMessagesResponse } from '@kakdela/ginzu/api-types'
 
 import { apiFetch } from '../../lib/api.js'
 
@@ -20,6 +20,7 @@ export interface SendMessageBody {
   clientNonce?: string
   attachments?: string[]
   spoilerAttachments?: string[]
+  gif?: GifEmbed
 }
 
 export async function sendMessage(channelId: string, body: SendMessageBody): Promise<Message> {

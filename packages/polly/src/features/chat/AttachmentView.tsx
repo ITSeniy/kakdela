@@ -4,6 +4,7 @@ import type { Attachment } from '@kakdela/ginzu/api-types'
 
 import { Icon } from '../../components/Icon.js'
 import { openExternal } from '../../lib/host/shell.js'
+import { useGifFavorites } from '../giphy/favorites.js'
 import { Lightbox, type LightboxContext } from './Lightbox.js'
 import { AudioPlayer } from './media/AudioPlayer.js'
 import { formatBytes } from './formatBytes.js'
@@ -14,6 +15,43 @@ interface AttachmentListProps {
   lightboxContext?: LightboxContext
   /** NSFW-канал: скрыть медиа за блюром до клика «показать». */
   blur?: boolean
+}
+
+/** Загруженный .gif — по MIME или расширению. Такие можно класть в избранное. */
+function isGif(att: Attachment): boolean {
+  return att.contentType === 'image/gif' || /\.gif$/i.test(att.originalName)
+}
+
+/** Звёздочка «в избранное» поверх gif-вложения (сосед-кнопка, не вложенная). */
+function GifFavStar({ attachment, children }: { attachment: Attachment; children: React.ReactNode }) {
+  const fav = useGifFavorites()
+  const existing = fav.byUrl.get(attachment.url)
+  const faved = existing !== undefined
+  return (
+    <div className="relative inline-block group">
+      {children}
+      <button
+        type="button"
+        onClick={() => {
+          if (existing) fav.remove.mutate(existing.id)
+          else fav.add.mutate({
+            gifUrl:     attachment.url,
+            mp4Url:     null,
+            previewUrl: attachment.thumbUrl ?? attachment.url,
+            width:      attachment.width ?? 200,
+            height:     attachment.height ?? 200,
+            title:      attachment.originalName,
+          })
+        }}
+        title={faved ? 'убрать из избранного' : 'в избранное'}
+        className={`absolute top-1.5 right-1.5 w-7 h-7 flex items-center justify-center rounded text-[14px] leading-none bg-kd-overlay-strong transition-opacity ${
+          faved ? 'text-kd-warm opacity-100' : 'text-white opacity-0 group-hover:opacity-100'
+        }`}
+      >
+        {faved ? '★' : '☆'}
+      </button>
+    </div>
+  )
 }
 
 /** EXT для плашки карточки файла: расширение из имени, максимум 4 символа. */
@@ -160,7 +198,9 @@ export function AttachmentList({ attachments, lightboxContext, blur = false }: A
   function renderItem(att: Attachment) {
     switch (att.kind) {
       case 'image':
-        return <ImageThumb attachment={att} onOpen={() => openMedia(att)} />
+        return isGif(att)
+          ? <GifFavStar attachment={att}><ImageThumb attachment={att} onOpen={() => openMedia(att)} /></GifFavStar>
+          : <ImageThumb attachment={att} onOpen={() => openMedia(att)} />
       case 'video':
         return <VideoThumb attachment={att} onOpen={() => openMedia(att)} />
       case 'audio':

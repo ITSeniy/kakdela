@@ -1,7 +1,7 @@
 import React, { type ClipboardEvent, type DragEvent, type KeyboardEvent, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 
-import type { Attachment, CustomEmoji, GiphyGif, MemberPublic, Message } from '@kakdela/ginzu/api-types'
+import type { Attachment, CustomEmoji, GifEmbed, MemberPublic, Message } from '@kakdela/ginzu/api-types'
 
 import { Avatar } from '../../components/Avatar.js'
 import { Icon } from '../../components/Icon.js'
@@ -52,7 +52,7 @@ interface ComposerProps {
   /** Показывать ли @everyone / @here в автокомплите (серверные каналы). */
   allowBroadcast?: boolean
   onCancelReply: () => void
-  onSend: (content: string, attachments: Attachment[]) => void
+  onSend: (content: string, attachments: Attachment[], gif?: GifEmbed) => void
 }
 
 const TYPING_THROTTLE_MS = 3_000
@@ -171,10 +171,11 @@ export function Composer({
   })
   const gifEnabled = gifConfig?.enabled ?? false
 
-  function sendGif(gif: GiphyGif) {
-    // Discord-style: гифка уходит сразу отдельным сообщением (CDN-URL GIPHY,
-    // рендерится как markdown-картинка). Текст композера не трогаем.
-    onSend(`![](${gif.url})`, [])
+  function sendGif(gif: GifEmbed) {
+    // Discord-style: гифка уходит сразу отдельным сообщением структурным
+    // embed'ом (рендерится как <video>/<img>, кликабельна в лайтбокс). Текст
+    // композера не трогаем.
+    onSend('', [], gif)
     setGifOpen(false)
   }
   const attachmentsRef = useRef<PendingAttachment[]>([])

@@ -4,6 +4,7 @@ import { type InfiniteData, useQuery, useQueryClient } from '@tanstack/react-que
 import type {
   Attachment,
   Channel,
+  GifEmbed,
   MemberPublic,
   Message,
   MessagesPage,
@@ -79,7 +80,7 @@ export function ThreadPanel({ threadId, parentChannelId, serverId }: ThreadPanel
 
   const { emoji: serverEmoji, byName: emojiMap } = useServerEmoji(serverId)
 
-  async function handleSend(content: string, attachments: Attachment[] = []) {
+  async function handleSend(content: string, attachments: Attachment[] = [], gif?: GifEmbed) {
     if (!user) return
     const nonce = crypto.randomUUID()
     const replyId = replyTo?.id ?? null
@@ -92,6 +93,7 @@ export function ThreadPanel({ threadId, parentChannelId, serverId }: ThreadPanel
       createdAt: new Date().toISOString(),
       editedAt: null,
       attachments,
+      gif: gif ?? null,
       _pending: 'sending',
       _nonce: nonce,
     }
@@ -104,6 +106,7 @@ export function ThreadPanel({ threadId, parentChannelId, serverId }: ThreadPanel
         ...(replyId ? { replyToId: replyId } : {}),
         clientNonce: nonce,
         ...(attachments.length > 0 ? { attachments: attachments.map((a) => a.id) } : {}),
+        ...(gif ? { gif } : {}),
       })
       queryClient.setQueryData<MsgCache>(['messages', threadId], (old) => {
         if (!old || old.pages.length === 0) return old

@@ -6,6 +6,7 @@ import type {
   Attachment,
   Channel,
   DmSummary,
+  GifEmbed,
   MemberPublic,
   Message,
   MessagesPage,
@@ -350,7 +351,7 @@ export function DmScreen({ channelId, onBack }: DmScreenProps) {
       })
   }, [channelId, lastMessageId, queryClient])
 
-  async function handleSend(content: string, attachments: Attachment[] = []) {
+  async function handleSend(content: string, attachments: Attachment[] = [], gif?: GifEmbed) {
     if (!user) return
     const nonce = crypto.randomUUID()
     const replyId = replyTo?.id ?? null
@@ -363,6 +364,7 @@ export function DmScreen({ channelId, onBack }: DmScreenProps) {
       createdAt: new Date().toISOString(),
       editedAt: null,
       attachments,
+      gif: gif ?? null,
       _pending: 'sending',
       _nonce: nonce,
     }
@@ -377,6 +379,7 @@ export function DmScreen({ channelId, onBack }: DmScreenProps) {
         clientNonce: nonce,
         ...(attachments.length > 0 ? { attachments: attachments.map((a) => a.id) } : {}),
         ...(spoilerIds.length > 0 ? { spoilerAttachments: spoilerIds } : {}),
+        ...(gif ? { gif } : {}),
       })
       queryClient.setQueryData<MsgCache>(['messages', channelId], (old) => {
         if (!old || old.pages.length === 0) return old

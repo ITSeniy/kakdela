@@ -124,6 +124,19 @@ export const SystemEventSchema = z.object({
 })
 export type SystemEvent = z.infer<typeof SystemEventSchema>
 
+// GIF-вложение сообщения. Хранится структурно (jsonb), а не как markdown
+// `![](url)` — чтобы рендерить как <video> (mp4, без перезагрузки кадров) и
+// открывать в лайтбоксе. mp4Url null у загруженных .gif (без перекодирования) —
+// такие рендерятся обычным <img>.
+export const GifEmbedSchema = z.object({
+  gifUrl:     z.string().url(),
+  mp4Url:     z.string().url().nullable(),
+  previewUrl: z.string().url(),
+  width:      z.number().int().positive(),
+  height:     z.number().int().positive(),
+})
+export type GifEmbed = z.infer<typeof GifEmbedSchema>
+
 export const MessageSchema = z.object({
   id: z.string().uuid(),
   channelId: z.string().uuid(),
@@ -145,6 +158,8 @@ export const MessageSchema = z.object({
   forwarded: ForwardedRefSchema.nullable().optional(),
   /** OG-превью ссылок из текста. Подъезжают асинхронно (WS msg.embeds). */
   linkPreviews: z.array(LinkPreviewSchema).default([]),
+  /** GIF-вложение (GIPHY или загруженный .gif); null — обычное сообщение. */
+  gif: GifEmbedSchema.nullable().optional(),
 })
 export type Message = z.infer<typeof MessageSchema>
 
@@ -275,9 +290,11 @@ export const SendMessageRequestSchema = z.object({
   attachments: z.array(z.string().uuid()).max(10).optional(),
   /** Подмножество attachments, которые нужно пометить спойлером. */
   spoilerAttachments: z.array(z.string().uuid()).max(10).optional(),
+  /** GIF-вложение (отправка из пикера/избранного). */
+  gif: GifEmbedSchema.optional(),
 }).refine(
-  (v) => v.content.trim().length > 0 || (v.attachments && v.attachments.length > 0),
-  { message: 'message must have content or attachments', path: ['content'] },
+  (v) => v.content.trim().length > 0 || (v.attachments && v.attachments.length > 0) || v.gif !== undefined,
+  { message: 'message must have content, attachments or a gif', path: ['content'] },
 )
 export type SendMessageRequest = z.infer<typeof SendMessageRequestSchema>
 
@@ -310,6 +327,8 @@ export const GiphyGifSchema = z.object({
   id: z.string(),
   /** URL гифки для отправки/показа (downsized с CDN GIPHY — не рехостим). */
   url: z.string().url(),
+  /** MP4-версия (GIPHY отдаёт её для каждой гифки) — рендерим как <video>. */
+  mp4Url: z.string().url(),
   /** Маленькое превью для грида пикера. */
   previewUrl: z.string().url(),
   width: z.number().int().positive(),
@@ -327,6 +346,35 @@ export type GiphyResponse = z.infer<typeof GiphyResponseSchema>
 
 export const GiphyConfigSchema = z.object({ enabled: z.boolean() })
 export type GiphyConfig = z.infer<typeof GiphyConfigSchema>
+
+// ───── Избранные гифки (per-user, хранится на бэкенде) ─────
+
+export const GifFavoriteSchema = z.object({
+  id:         z.string().uuid(),
+  gifUrl:     z.string().url(),
+  mp4Url:     z.string().url().nullable(),
+  previewUrl: z.string().url(),
+  width:      z.number().int().positive(),
+  height:     z.number().int().positive(),
+  title:      z.string(),
+  createdAt:  z.string(),
+})
+export type GifFavorite = z.infer<typeof GifFavoriteSchema>
+
+export const GifFavoritesResponseSchema = z.object({
+  favorites: z.array(GifFavoriteSchema),
+})
+export type GifFavoritesResponse = z.infer<typeof GifFavoritesResponseSchema>
+
+export const AddGifFavoriteRequestSchema = z.object({
+  gifUrl:     z.string().url(),
+  mp4Url:     z.string().url().nullable().optional(),
+  previewUrl: z.string().url(),
+  width:      z.number().int().positive(),
+  height:     z.number().int().positive(),
+  title:      z.string().max(200).optional(),
+})
+export type AddGifFavoriteRequest = z.infer<typeof AddGifFavoriteRequestSchema>
 
 export const MemberPublicSchema = z.object({
   id: z.string().uuid(),

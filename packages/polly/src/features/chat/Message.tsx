@@ -13,6 +13,7 @@ import { useAppearance } from '../settings/appearance.js'
 import { useThreadUi } from '../threads/store.js'
 import { pinMessage, unpinMessage } from './api.js'
 import { AttachmentList } from './AttachmentView.js'
+import { GifEmbed } from './GifEmbed.js'
 import { useChatDisplaySettings } from './displaySettings.js'
 import { ContextMenu } from './ContextMenu.js'
 import { ForwardedCard } from './ForwardedCard.js'
@@ -210,6 +211,7 @@ export function Message({
   const msgReplyTo = 'replyTo' in message ? (message.replyTo ?? null) : null
   const msgAttachments = 'attachments' in message ? (message.attachments ?? []) : []
   const msgThread = 'thread' in message ? (message.thread ?? null) : null
+  const msgGif = message.gif ?? null
 
   // Цитата ответа — инлайном: эмодзи `:name:` и базовое форматирование.
   const replyHtml = useMemo(
@@ -499,9 +501,10 @@ export function Message({
             )}
           </div>
         </div>
-        {(msgAttachments.length > 0 || msgThread !== null || reactionsEl !== null) && (
+        {(msgAttachments.length > 0 || msgGif !== null || msgThread !== null || reactionsEl !== null) && (
           <div className="pl-11">
             {msgAttachments.length > 0 && <AttachmentList attachments={msgAttachments} lightboxContext={lightboxContext} blur={nsfw} />}
+            {msgGif && <GifEmbed gif={msgGif} />}
             <ThreadBadge />
             {reactionsEl}
           </div>
@@ -539,6 +542,7 @@ export function Message({
             </button>
           )}
           {msgAttachments.length > 0 && <AttachmentList attachments={msgAttachments} lightboxContext={lightboxContext} blur={nsfw} />}
+          {msgGif && <GifEmbed gif={msgGif} />}
           <ThreadBadge />
           {reactionsEl}
         </div>
@@ -597,6 +601,7 @@ export function Message({
           {forwardedEl}
           {linkPreviewsEl}
           {msgAttachments.length > 0 && <AttachmentList attachments={msgAttachments} lightboxContext={lightboxContext} blur={nsfw} />}
+          {msgGif && <GifEmbed gif={msgGif} />}
           <ThreadBadge />
           {reactionsEl}
         </div>

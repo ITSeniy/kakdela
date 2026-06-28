@@ -15,6 +15,7 @@ import { toast } from '../../components/toast/index.js'
 import { openExternal } from '../../lib/host/shell.js'
 import { pinMessage, unpinMessage } from '../chat/api.js'
 import { AttachmentList } from '../chat/AttachmentView.js'
+import { GifEmbed } from '../chat/GifEmbed.js'
 import { ContextMenu } from '../chat/ContextMenu.js'
 import { ForwardedCard } from '../chat/ForwardedCard.js'
 import { LinkPreviews } from '../chat/LinkPreviewCard.js'
@@ -256,6 +257,7 @@ function DmBubble({
   const messageReactions = 'reactions' in message ? (message.reactions ?? []) : []
   const msgReplyTo = 'replyTo' in message ? (message.replyTo ?? null) : null
   const msgAttachments = 'attachments' in message ? (message.attachments ?? []) : []
+  const msgGif = message.gif ?? null
 
   const name = member?.displayName ?? 'неизвестно'
   const time = fmtTime(message.createdAt)
@@ -439,6 +441,7 @@ function DmBubble({
         {forwardedEl}
         <LinkPreviews previews={(message as IMessage).linkPreviews} />
         {msgAttachments.length > 0 && <AttachmentList attachments={msgAttachments} />}
+        {msgGif && <GifEmbed gif={msgGif} />}
         {showMeta && (
           <div className="flex items-center gap-1.5 mt-[2px] px-1 text-[10px] font-mono text-kd-text-mute">
             <span>{time}</span>

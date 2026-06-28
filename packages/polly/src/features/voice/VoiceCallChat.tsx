@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { type InfiniteData, useQuery, useQueryClient } from '@tanstack/react-query'
 
-import type { Attachment, Channel, MemberPublic, Message, MessagesPage } from '@kakdela/ginzu/api-types'
+import type { Attachment, Channel, GifEmbed, MemberPublic, Message, MessagesPage } from '@kakdela/ginzu/api-types'
 
 import { Icon } from '../../components/Icon.js'
 import { toast } from '../../components/toast/index.js'
@@ -90,7 +90,7 @@ export function VoiceCallChat({ serverId, channelId }: VoiceCallChatProps) {
 
   const { emoji: serverEmoji, byName: emojiMap } = useServerEmoji(serverId)
 
-  async function handleSend(content: string, attachments: Attachment[] = []) {
+  async function handleSend(content: string, attachments: Attachment[] = [], gif?: GifEmbed) {
     if (!user) return
     const nonce = crypto.randomUUID()
     const replyId = replyTo?.id ?? null
@@ -103,6 +103,7 @@ export function VoiceCallChat({ serverId, channelId }: VoiceCallChatProps) {
       createdAt: new Date().toISOString(),
       editedAt: null,
       attachments,
+      gif: gif ?? null,
       _pending: 'sending',
       _nonce: nonce,
     }
@@ -115,6 +116,7 @@ export function VoiceCallChat({ serverId, channelId }: VoiceCallChatProps) {
         ...(replyId ? { replyToId: replyId } : {}),
         clientNonce: nonce,
         ...(attachments.length > 0 ? { attachments: attachments.map((a) => a.id) } : {}),
+        ...(gif ? { gif } : {}),
       })
       queryClient.setQueryData<MsgCache>(
         ['messages', channelId],

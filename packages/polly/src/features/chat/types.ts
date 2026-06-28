@@ -1,4 +1,4 @@
-import type { Attachment } from '@kakdela/ginzu/api-types'
+import type { Attachment, GifEmbed } from '@kakdela/ginzu/api-types'
 
 export interface PendingMessage {
   id: string
@@ -9,6 +9,7 @@ export interface PendingMessage {
   createdAt: string
   editedAt: null
   attachments: Attachment[]
+  gif?: GifEmbed | null
   _pending: 'sending' | 'error'
   _nonce: string
 }
