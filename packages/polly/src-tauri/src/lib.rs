@@ -199,10 +199,11 @@ fn open_call_popup(
             "fromAvatarUrl": from_avatar_url,
         })
         .to_string();
-        // Данные кладём в query (base64url), а НЕ в init-скрипт: query доступен
-        // из window.location уже на первом рендере, без гонок инъекции скрипта.
+        // Грузим ОТДЕЛЬНУЮ статичную страницу (public/call-popup.html), а не SPA:
+        // никакого React/Vite-бандла в этом webview'е → нечему «не загрузиться».
+        // Данные едут в query (base64url), читаются синхронно из window.location.
         let encoded = URL_SAFE_NO_PAD.encode(data.as_bytes());
-        let url = format!("index.html?cp={encoded}");
+        let url = format!("call-popup.html?cp={encoded}");
         let built = WebviewWindowBuilder::new(&app, CALL_POPUP_LABEL, WebviewUrl::App(url.into()))
             .title("Входящий звонок")
             .inner_size(340.0, 128.0)

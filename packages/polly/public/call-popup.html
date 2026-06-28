@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Входящий звонок</title>
+    <!--
+      Самодостаточное окно входящего DM-звонка (T-087, desktop). НЕ грузит SPA:
+      ни React, ни Vite-бандла, ни авторизации — поэтому не может «не отрендериться»
+      в отдельном webview'е. Данные звонка приходят в query `?cp=<base64url JSON>`
+      (см. open_call_popup в src-tauri/src/lib.rs). Кнопки шлют глобальный
+      tauri-event `call-popup-action` главному окну (его ловит IncomingCall) и
+      закрывают это окно. Использует window.__TAURI__ (withGlobalTauri: true).
+    -->
+    <style>
+      :root {
+        --panel: #221d15; --text: #e8ddc4; --soft: #b8a98a;
+        --border: rgba(232, 195, 140, 0.12); --online: #9bb083; --danger: #c87060;
+      }
+      html[data-theme='light'] {
+        --panel: #f0e8d4; --text: #2a2418; --soft: #5e5440;
+        --border: rgba(60, 50, 30, 0.14); --online: #5d6f4c; --danger: #c0432f;
+      }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body { height: 100%; }
+      body {
+        font-family: 'Inter', -apple-system, system-ui, sans-serif;
+        background: var(--panel);
+        color: var(--text);
+        border: 1px solid var(--border);
+        display: flex; align-items: center; gap: 12px;
+        padding: 0 14px;
+        user-select: none; overflow: hidden;
+        animation: pop 0.18s ease-out;
+      }
+      @keyframes pop { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+      .ava {
+        position: relative; flex: 0 0 auto; width: 44px; height: 44px;
+        border-radius: 50%; overflow: hidden;
+        display: flex; align-items: center; justify-content: center;
+        color: #fff; font-weight: 600; font-size: 17px; letter-spacing: -0.02em;
+      }
+      .ava img { width: 100%; height: 100%; object-fit: cover; display: block; }
+      .badge {
+        position: absolute; bottom: -2px; right: -2px;
+        width: 18px; height: 18px; border-radius: 50%;
+        background: var(--online); border: 2px solid var(--panel);
+        display: flex; align-items: center; justify-content: center;
+      }
+      .info { flex: 1 1 auto; min-width: 0; }
+      .name { font-size: 13px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .sub { font-size: 10px; color: var(--soft); font-family: 'JetBrains Mono', ui-monospace, monospace; margin-top: 1px; }
+      .actions { display: flex; gap: 6px; flex: 0 0 auto; }
+      button {
+        width: 36px; height: 36px; border-radius: 50%; border: 0; cursor: pointer;
+        display: flex; align-items: center; justify-content: center; color: #fff;
+        transition: opacity 0.12s;
+      }
+      button:hover { opacity: 0.9; }
+      .decline { background: var(--danger); }
+      .accept { background: var(--online); }
+      svg { width: 16px; height: 16px; }
+    </style>
+  </head>
+  <body>
+    <div class="ava" id="ava"></div>
+    <div class="info">
+      <div class="name" id="name">…</div>
+      <div class="sub">входящий звонок…</div>
+    </div>
+    <div class="actions">
+      <button class="decline" id="decline" title="отклонить" aria-label="отклонить">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.33-2.67m-2.67-3.34a19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91" />
+          <line x1="22" x2="2" y1="2" y2="22" />
+        </svg>
+      </button>
+      <button class="accept" id="accept" title="принять" aria-label="принять">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z" />
+        </svg>
+      </button>
+    </div>
+
+    <script>
+      (function () {
+        var PALETTE = ['#c87a3a', '#5d6f4c', '#a55e26', '#7a9162', '#b07a4a', '#6a8a5a']
+        function colorFor(name) {
+          var h = 0
+          for (var i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0
+          return PALETTE[h % PALETTE.length]
+        }
+        function initials(name) {
+          var parts = name.trim().split(/\s+/).filter(Boolean)
+          return ((parts[0] ? parts[0][0] : '?') + (parts[1] ? parts[1][0] : '')).toUpperCase()
+        }
+        function decodeCp(cp) {
+          try {
+            var b64 = cp.replace(/-/g, '+').replace(/_/g, '/')
+            while (b64.length % 4) b64 += '='
+            var bin = atob(b64)
+            var bytes = Uint8Array.from(bin, function (c) { return c.charCodeAt(0) })
+            return JSON.parse(new TextDecoder().decode(bytes))
+          } catch (e) { return null }
+        }
+        function resolveTheme() {
+          try {
+            var raw = localStorage.getItem('kd:theme:mode')
+            var mode = 'system'
+            if (raw) { var p = JSON.parse(raw); mode = (p && p.state && p.state.mode) || 'system' }
+            if (mode === 'light' || mode === 'dark') return mode
+          } catch (e) {}
+          return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+        }
+        function closeSelf() {
+          var T = window.__TAURI__
+          try {
+            if (T && T.window && T.window.getCurrentWindow) { T.window.getCurrentWindow().close(); return }
+          } catch (e) {}
+          try { if (T && T.core && T.core.invoke) T.core.invoke('close_call_popup') } catch (e) {}
+        }
+        function respond(action, channelId) {
+          var T = window.__TAURI__
+          try { if (T && T.event && T.event.emit) T.event.emit('call-popup-action', { action: action, channelId: channelId }) } catch (e) {}
+          closeSelf()
+        }
+
+        document.documentElement.setAttribute('data-theme', resolveTheme())
+
+        var data = decodeCp(new URLSearchParams(window.location.search).get('cp') || '')
+        if (!data || typeof data.channelId !== 'string') { closeSelf(); return }
+
+        var name = typeof data.fromName === 'string' && data.fromName ? data.fromName : 'звонок'
+        document.getElementById('name').textContent = name
+        var ava = document.getElementById('ava')
+        if (data.fromAvatarUrl) {
+          var img = document.createElement('img')
+          img.src = data.fromAvatarUrl
+          img.alt = ''
+          ava.appendChild(img)
+        } else {
+          ava.style.background = colorFor(name)
+          ava.textContent = initials(name)
+        }
+        // Иконка-телефон в бейдже статуса.
+        ava.insertAdjacentHTML('beforeend',
+          '<span class="badge"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg></span>')
+
+        document.getElementById('accept').addEventListener('click', function () { respond('accept', data.channelId) })
+        document.getElementById('decline').addEventListener('click', function () { respond('decline', data.channelId) })
+
+        // Подстраховка: окно само закроется чуть позже авто-сброса инвайта (32с).
+        setTimeout(closeSelf, 34000)
+      })()
+    </script>
+  </body>
+</html>

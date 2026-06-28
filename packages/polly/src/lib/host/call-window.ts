@@ -1,8 +1,9 @@
 // Отдельное окно входящего DM-звонка (T-087). На desktop его создаёт Rust
-// (open_call_popup) — маленькое окно поверх всех окон, видно даже когда КакДела
-// свёрнут. Кнопки попапа шлют глобальный tauri-event `call-popup-action`,
-// который слушает главное окно. В non-Tauri окружении (`pnpm dev:web`) и на
-// mobile всё это — no-op (там хватает тоста в самом приложении).
+// (open_call_popup) — маленькое окно поверх всех окон (статичная страница
+// public/call-popup.html), видно даже когда КакДела свёрнут. Его кнопки шлют
+// глобальный tauri-event `call-popup-action`, который слушает главное окно
+// (onCallPopupAction). В non-Tauri окружении (`pnpm dev:web`) и на mobile всё
+// это — no-op (там хватает тоста в самом приложении).
 
 function isTauri(): boolean {
   if (typeof window === 'undefined') return false
@@ -69,30 +70,5 @@ export function onCallPopupAction(cb: (a: CallPopupAction) => void): () => void 
   return () => {
     disposed = true
     if (unlisten) unlisten()
-  }
-}
-
-/** Попап-окно: отправить выбор пользователя главному окну. */
-export async function emitCallAction(
-  action: 'accept' | 'decline',
-  channelId: string,
-): Promise<void> {
-  if (!isTauri()) return
-  try {
-    const mod = await import('@tauri-apps/api/event')
-    await mod.emit(CALL_ACTION_EVENT, { action, channelId })
-  } catch (err) {
-    console.warn('[call-window] emit call-popup-action failed', err)
-  }
-}
-
-/** Попап-окно: закрыть само себя (после ответа или по таймауту-подстраховке). */
-export async function closeSelfPopup(): Promise<void> {
-  if (!isTauri()) return
-  try {
-    const mod = await import('@tauri-apps/api/window')
-    await mod.getCurrentWindow().close()
-  } catch (err) {
-    console.warn('[call-window] self close failed', err)
   }
 }
