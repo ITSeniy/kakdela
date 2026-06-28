@@ -3,7 +3,7 @@
 // те же обработчики из DmScreen — другой только рендер (свои справа на
 // kd-accent, чужие слева на kd-panel, время под пузырём).
 
-import { type MouseEvent, useEffect, useMemo, useRef, useState } from 'react'
+import { type MouseEvent, type TouchEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 
 import type { Channel, CustomEmoji, DmSummary, MemberPublic, Message as IMessage } from '@kakdela/ginzu/api-types'
@@ -24,6 +24,7 @@ import { renderMarkdown, renderMarkdownInline } from '../chat/markdown.js'
 import { useMessages } from '../chat/useMessages.js'
 import type { PendingMessage } from '../chat/types.js'
 import { useAllServerEmoji } from '../emoji/api.js'
+import { useIsMobile } from '../../app/useIsMobile.js'
 
 interface DmBubbleListProps {
   channelId: string
@@ -113,6 +114,13 @@ function DmBubble({
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null)
   const openForward = useForwardUi((s) => s.open)
   const queryClient = useQueryClient()
+  const isMobile = useIsMobile()
+  // Long-press на тач: hover-кластер действий недоступен пальцем, поэтому
+  // открываем то же контекст-меню по удержанию (~450 мс). Жест-флаг гасит
+  // «фантомный» click после удержания (иначе он улетел бы в ссылку/упоминание).
+  const lpTimer = useRef<number | null>(null)
+  const lpFired = useRef(false)
+  const lpStart = useRef<{ x: number; y: number } | null>(null)
 
   // В DM закреплять может любой из двух участников.
   function handlePinToggle(pin: boolean) {
@@ -165,6 +173,33 @@ function DmBubble({
     if (pendingStatus) return
     e.preventDefault()
     setMenuPos({ x: e.clientX, y: e.clientY })
+  }
+
+  function clearLongPress() {
+    if (lpTimer.current !== null) { window.clearTimeout(lpTimer.current); lpTimer.current = null }
+  }
+  function onTouchStart(e: TouchEvent<HTMLDivElement>) {
+    if (!isMobile || pendingStatus) return
+    const t = e.touches[0]
+    if (!t) return
+    lpStart.current = { x: t.clientX, y: t.clientY }
+    lpFired.current = false
+    clearLongPress()
+    lpTimer.current = window.setTimeout(() => {
+      lpFired.current = true
+      if (lpStart.current) setMenuPos({ x: lpStart.current.x, y: lpStart.current.y })
+    }, 450)
+  }
+  function onTouchMove(e: TouchEvent<HTMLDivElement>) {
+    const t = e.touches[0]
+    const s = lpStart.current
+    if (!t || !s) return
+    if (Math.abs(t.clientX - s.x) > 10 || Math.abs(t.clientY - s.y) > 10) clearLongPress()
+  }
+  function onClickCapture(e: MouseEvent<HTMLDivElement>) {
+    // Click сразу после успешного удержания — глушим, чтобы не сработала
+    // ссылка/упоминание/спойлер под пальцем.
+    if (lpFired.current) { e.preventDefault(); e.stopPropagation(); lpFired.current = false }
   }
 
   const contextMenuEl = menuPos && !pendingStatus ? (
@@ -237,9 +272,13 @@ function DmBubble({
 
   return (
     <div
-      className={`group flex items-end gap-2.5 px-5 py-1 ${isOwn ? 'flex-row-reverse' : ''} ${opacityCls}`}
+      className={`group flex items-end gap-2.5 px-5 py-1 ${isOwn ? 'flex-row-reverse' : ''} ${opacityCls} ${isMobile ? 'select-none' : ''}`}
       data-message-id={message.id}
       onContextMenu={openContextMenu}
+      onTouchStart={onTouchStart}
+      onTouchMove={onTouchMove}
+      onTouchEnd={clearLongPress}
+      onClickCapture={onClickCapture}
     >
       {contextMenuEl}
       {!isOwn ? (
@@ -279,7 +318,7 @@ function DmBubble({
         {message.content && (
           <div
             className={[
-              'px-3 py-[7px] rounded-kd text-[13px] leading-[1.45] break-words max-w-full min-w-0',
+              `px-3 py-[7px] rounded-kd ${isMobile ? 'text-[14px]' : 'text-[13px]'} leading-[1.45] break-words max-w-full min-w-0`,
               isOwn
                 ? 'bg-kd-accent text-white kd-on-accent'
                 : 'bg-kd-panel border border-kd-border text-kd-text',
@@ -312,7 +351,7 @@ function DmBubble({
           />
         )}
       </div>
-      {!pendingStatus && (
+      {!pendingStatus && !isMobile && (
         <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 text-kd-text-mute self-center shrink-0">
           <button type="button" onClick={() => onReply(message as IMessage)} title="ответить" className="hover:text-kd-text p-1">
             <Icon.Reply size={13} />
