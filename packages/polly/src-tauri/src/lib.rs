@@ -21,6 +21,9 @@ use tauri::{
 #[cfg(desktop)]
 const MAIN_WINDOW_LABEL: &str = "main";
 
+#[cfg(desktop)]
+const CALL_POPUP_LABEL: &str = "call-popup";
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -33,7 +36,8 @@ pub fn run() {
             greet,
             focus_main_window,
             set_tray_badge,
-            set_call_alert,
+            open_call_popup,
+            close_call_popup,
             commands::crypto_init,
             commands::crypto_publish_keys,
             commands::crypto_topup,
@@ -168,27 +172,84 @@ fn set_tray_badge(app: tauri::AppHandle, count: u32) {
     let _ = (app, count);
 }
 
-/// Входящий DM-звонок (T-087): на desktop поднимаем главное окно поверх всех
-/// и просим внимания, чтобы тост-звонок было видно, даже когда КакДела свёрнут
-/// или перекрыт другим окном. `active=false` снимает always-on-top после
-/// принятия/отклонения. На mobile — no-op.
+/// Входящий DM-звонок (T-087): на desktop поднимаем отдельное маленькое окно
+/// поверх всех окон — звонок видно, даже когда КакДела свёрнут или перекрыт.
+/// Окно presentational: данные звонка кладём init-скриптом в window.__CALL_POPUP__,
+/// а его кнопки шлют глобальный tauri-event `call-popup-action`, который ловит
+/// главное окно (см. features/voice/IncomingCall.tsx). На mobile — no-op
+/// (там хватает тоста в самом приложении).
 #[tauri::command]
-fn set_call_alert(app: tauri::AppHandle, active: bool) {
+fn open_call_popup(
+    app: tauri::AppHandle,
+    channel_id: String,
+    from_name: String,
+    from_avatar_url: Option<String>,
+) {
     #[cfg(desktop)]
     {
-        let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) else { return };
-        if active {
-            let _ = window.show();
-            let _ = window.unminimize();
-            let _ = window.set_always_on_top(true);
-            let _ = window.set_focus();
-            let _ = window.request_user_attention(Some(tauri::UserAttentionType::Critical));
-        } else {
-            let _ = window.set_always_on_top(false);
+        use tauri::{WebviewUrl, WebviewWindowBuilder};
+        // Повторный invite до закрытия прежнего попапа — пересоздаём.
+        if let Some(existing) = app.get_webview_window(CALL_POPUP_LABEL) {
+            let _ = existing.close();
+        }
+        let data = serde_json::json!({
+            "channelId": channel_id,
+            "fromName": from_name,
+            "fromAvatarUrl": from_avatar_url,
+        });
+        // init-скрипт исполняется ДО бандла → popup-роут читает данные синхронно.
+        let init = format!("window.__CALL_POPUP__ = {data};");
+        let built = WebviewWindowBuilder::new(
+            &app,
+            CALL_POPUP_LABEL,
+            WebviewUrl::App("index.html?call_popup=1".into()),
+        )
+        .title("Входящий звонок")
+        .inner_size(340.0, 128.0)
+        .resizable(false)
+        .decorations(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .focused(false)
+        .initialization_script(&init)
+        .build();
+        match built {
+            Ok(win) => position_call_popup(&win),
+            Err(err) => eprintln!("[call-popup] build failed: {err}"),
         }
     }
     #[cfg(not(desktop))]
-    let _ = (app, active);
+    let _ = (app, channel_id, from_name, from_avatar_url);
+}
+
+/// Закрыть попап входящего звонка (после принятия/отклонения/таймаута/отмены).
+#[tauri::command]
+fn close_call_popup(app: tauri::AppHandle) {
+    #[cfg(desktop)]
+    {
+        if let Some(win) = app.get_webview_window(CALL_POPUP_LABEL) {
+            let _ = win.close();
+        }
+    }
+    #[cfg(not(desktop))]
+    let _ = app;
+}
+
+/// Ставим попап в правый верхний угол текущего монитора с небольшим отступом.
+#[cfg(desktop)]
+fn position_call_popup(win: &tauri::WebviewWindow) {
+    let Ok(Some(monitor)) = win.current_monitor() else {
+        return;
+    };
+    let Ok(win_size) = win.outer_size() else {
+        return;
+    };
+    let mon_pos = monitor.position();
+    let mon_size = monitor.size();
+    let margin = (16.0 * monitor.scale_factor()).round() as i32;
+    let x = mon_pos.x + mon_size.width as i32 - win_size.width as i32 - margin;
+    let y = mon_pos.y + margin;
+    let _ = win.set_position(tauri::PhysicalPosition::new(x, y));
 }
 
 #[cfg(desktop)]

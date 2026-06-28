@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "default capability — что окну позволено",
-  "windows": ["main"],
+  "windows": ["main", "call-popup"],
   "permissions": [
     "core:default",
     "os:allow-platform",

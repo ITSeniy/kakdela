@@ -192,6 +192,8 @@ interface DmBubbleProps {
   isOwn: boolean
   /** Склейка: предыдущее сообщение того же автора рядом — без аватара, плотно. */
   grouped: boolean
+  /** «Хвост» группы (последнее сообщение в склейке) — под ним и висит время. */
+  isGroupTail: boolean
   currentUserId: string | null
   pendingStatus?: 'sending' | 'error'
   memberMap: ReadonlyMap<string, MemberPublic>
@@ -207,7 +209,7 @@ interface DmBubbleProps {
 }
 
 function DmBubble({
-  message, member, isOwn, grouped, currentUserId, pendingStatus,
+  message, member, isOwn, grouped, isGroupTail, currentUserId, pendingStatus,
   memberMap, channelMap, emojiMap, onMention,
   onEdit, onDelete, onRetry, onReply, onAddReaction, onRemoveReaction,
 }: DmBubbleProps) {
@@ -260,9 +262,10 @@ function DmBubble({
   const canDelete = isOwn
   const editDisabled = Date.now() - new Date(message.createdAt).getTime() > EDIT_WINDOW_MS
   const opacityCls = pendingStatus === 'sending' ? 'opacity-60' : ''
-  // У склеенных сообщений время-метку прячем (его несёт «голова» группы),
-  // кроме случаев «(изм.)» / статуса отправки — их важно видеть всегда.
-  const showMeta = !grouped || Boolean(message.editedAt) || Boolean(pendingStatus)
+  // Время-метку показываем под «хвостом» группы (последнее сообщение), а не
+  // под «головой» — иначе таймстамп вклинивается между склеенными сообщениями
+  // одного автора. «(изм.)» / статус отправки важно видеть на любом сообщении.
+  const showMeta = isGroupTail || Boolean(message.editedAt) || Boolean(pendingStatus)
 
   function copyContent() {
     if (navigator.clipboard) void navigator.clipboard.writeText(message.content)
@@ -649,13 +652,18 @@ export function DmBubbleList({
         msg: IMessage | PendingMessage
         isPending: boolean
         grouped: boolean
+        tail: boolean
       }
+  type MsgRow = Extract<ItemRow, { type: 'msg' }>
 
   const rows: ItemRow[] = []
   // prevForMsg — для day-разделителя (любое последнее сообщение); groupAnchor —
   // последнее ОБЫЧНОЕ сообщение для склейки (системные строки её разрывают).
+  // lastMsgRow — строка groupAnchor'а: когда следующее сообщение к ней
+  // приклеивается, снимаем с неё tail (время несёт только хвост группы).
   let prevForMsg: IMessage | PendingMessage | null = null
   let groupAnchor: IMessage | PendingMessage | null = null
+  let lastMsgRow: MsgRow | null = null
   for (let i = 0; i < messages.length; i += 1) {
     const m = messages[i]!
     const dayBreak = prevForMsg === null || !sameDay(prevForMsg.createdAt, m.createdAt)
@@ -665,6 +673,7 @@ export function DmBubbleList({
     if ((m as IMessage).system) {
       rows.push({ type: 'system', msg: m })
       groupAnchor = null // системная строка разрывает склейку
+      lastMsgRow = null
       prevForMsg = m
       continue
     }
@@ -676,7 +685,10 @@ export function DmBubbleList({
       && groupAnchor !== null
       && groupAnchor.authorId === m.authorId
       && minutesBetween(groupAnchor.createdAt, m.createdAt) < GROUP_WINDOW_MIN
-    rows.push({ type: 'msg', msg: m, isPending: false, grouped })
+    if (grouped && lastMsgRow) lastMsgRow.tail = false
+    const row: MsgRow = { type: 'msg', msg: m, isPending: false, grouped, tail: true }
+    rows.push(row)
+    lastMsgRow = row
     prevForMsg = m
     groupAnchor = m
   }
@@ -686,7 +698,10 @@ export function DmBubbleList({
       groupAnchor !== null
       && groupAnchor.authorId === p.authorId
       && minutesBetween(groupAnchor.createdAt, p.createdAt) < GROUP_WINDOW_MIN
-    rows.push({ type: 'msg', msg: p, isPending: true, grouped })
+    if (grouped && lastMsgRow) lastMsgRow.tail = false
+    const row: MsgRow = { type: 'msg', msg: p, isPending: true, grouped, tail: true }
+    rows.push(row)
+    lastMsgRow = row
     prevForMsg = p
     groupAnchor = p
   }
@@ -735,6 +750,7 @@ export function DmBubbleList({
             member={memberMap.get(m.authorId)}
             isOwn={m.authorId === currentUserId}
             grouped={row.grouped}
+            isGroupTail={row.tail}
             currentUserId={currentUserId}
             pendingStatus={row.isPending ? (m as PendingMessage)._pending : undefined}
             memberMap={memberMap}

@@ -13,6 +13,7 @@ import { channels, messages } from '../db/schema.js'
 import { db } from '../lib/db.js'
 import { redis } from '../lib/redis.js'
 import { broadcastToChannel, broadcastToServer } from '../ws/broadcast.js'
+import { listDmParticipants } from './guido.js'
 
 // Имена комнат в guido — `voice-${channelId}`. Если webhook прилетел с
 // другим префиксом — это либо чужая комната, либо мы что-то неправильно
@@ -136,19 +137,42 @@ async function handleDmRoomEvent(
       }
       return
     }
+    case 'participant_left':
+    case 'participant_connection_aborted': {
+      // `room_finished` LiveKit шлёт только спустя empty_timeout (минуты) —
+      // из-за этого call-log появлялся в чате с большой задержкой. Фиксируем
+      // звонок сразу, как только комната опустела. Источник истины — LiveKit
+      // (numParticipants из вебхука по версиям трактуется по-разному), как и
+      // в остальной логике DM-звонков.
+      const remaining = await listDmParticipants(channelId)
+      if (remaining.length > 0) return
+      await finalizeDmCall(channelId, log)
+      return
+    }
     case 'room_finished': {
-      const raw = await redis.get(key)
-      await redis.del(key)
-      const meta = parseDmCallLog(raw)
-      // Логируем только состоявшийся звонок (зашёл второй участник).
-      if (!meta || !meta.answered) return
-      const durationSec = Math.max(1, Math.round((Date.now() - meta.startedAt) / 1000))
-      await postDmCallLog(channelId, meta.initiator, durationSec, log)
+      // Подстраховка на случай, если empty-детект по participant_left не
+      // сработал (например, аборт без события). Ключ уже мог быть удалён —
+      // finalizeDmCall тогда просто no-op.
+      await finalizeDmCall(channelId, log)
       return
     }
     default:
       return
   }
+}
+
+// Завершает DM-звонок: атомарно забирает meta (del — это же и дедуп против
+// двойного лога от participant_left + room_finished) и, если звонок
+// состоялся, пишет call-log в чат.
+async function finalizeDmCall(channelId: string, log: WebhookLogger): Promise<void> {
+  const key = dmCallLogKey(channelId)
+  const raw = await redis.get(key)
+  await redis.del(key)
+  const meta = parseDmCallLog(raw)
+  // Логируем только состоявшийся звонок (зашёл второй участник).
+  if (!meta || !meta.answered) return
+  const durationSec = Math.max(1, Math.round((Date.now() - meta.startedAt) / 1000))
+  await postDmCallLog(channelId, meta.initiator, durationSec, log)
 }
 
 function parseDmCallLog(raw: string | null | undefined): DmCallLogMeta | null {
