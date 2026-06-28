@@ -48,6 +48,11 @@
         background: var(--online); border: 2px solid var(--panel);
         display: flex; align-items: center; justify-content: center;
       }
+      /* Перетаскивание окна: вся карточка — drag-region (data-tauri-drag-region
+         на body). Аватар и текст пропускают клики «насквозь» к body, чтобы за
+         них тоже можно было таскать; кнопки остаются кликабельными. */
+      .ava, .info { pointer-events: none; }
+      .actions { pointer-events: auto; }
       .info { flex: 1 1 auto; min-width: 0; }
       .name { font-size: 13px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       .sub { font-size: 10px; color: var(--soft); font-family: 'JetBrains Mono', ui-monospace, monospace; margin-top: 1px; }
@@ -63,7 +68,7 @@
       svg { width: 16px; height: 16px; }
     </style>
   </head>
-  <body>
+  <body data-tauri-drag-region>
     <div class="ava" id="ava"></div>
     <div class="info">
       <div class="name" id="name">…</div>
