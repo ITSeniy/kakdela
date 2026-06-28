@@ -11,6 +11,7 @@ import { Avatar } from '../../components/Avatar.js'
 import { toast } from '../../components/toast/index.js'
 import { openExternal } from '../../lib/host/shell.js'
 import { formatBytes } from './formatBytes.js'
+import { VideoPlayer } from './media/VideoPlayer.js'
 
 export interface LightboxContext {
   authorName?: string
@@ -68,6 +69,9 @@ export function Lightbox({ images, startIndex, onClose, context }: LightboxProps
   const [pan, setPan] = useState({ x: 0, y: 0 })
   const dragRef = useRef<{ x: number; y: number; px: number; py: number } | null>(null)
   const [dragging, setDragging] = useState(false)
+  // Вид текущего кадра для обработчика клавиш (он создаётся один раз и не видит
+  // свежий idx) — на видео space отдаём плееру, а не листанию галереи.
+  const curKindRef = useRef<string | undefined>(undefined)
 
   // Смена кадра — сбрасываем зум и сдвиг.
   useEffect(() => {
@@ -82,8 +86,11 @@ export function Lightbox({ images, startIndex, onClose, context }: LightboxProps
         // Лайтбокс — верхний слой: Esc не должен долетать до модалок/настроек.
         e.stopPropagation()
         onClose()
-      } else if (e.key === 'ArrowRight' || (e.key === ' ' && (e.target as HTMLElement)?.tagName !== 'VIDEO')) {
-        // space листает, но не когда фокус на видео — там он пауза/плей.
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault()
+        setIdx((i) => (i + 1) % images.length)
+      } else if (e.key === ' ' && curKindRef.current !== 'video') {
+        // space листает галерею; на видео его перехватывает плеер (пауза/плей).
         e.preventDefault()
         setIdx((i) => (i + 1) % images.length)
       } else if (e.key === 'ArrowLeft') {
@@ -103,6 +110,7 @@ export function Lightbox({ images, startIndex, onClose, context }: LightboxProps
   if (images.length === 0) return null
   const current = images[idx]
   if (!current) return null
+  curKindRef.current = current.kind
   const showNav = images.length > 1
 
   const zoomable = current.kind === 'image'
@@ -286,14 +294,7 @@ export function Lightbox({ images, startIndex, onClose, context }: LightboxProps
           </>
         )}
         {current.kind === 'video' ? (
-          <video
-            key={current.id}
-            src={current.url}
-            controls
-            autoPlay
-            playsInline
-            className="max-w-full max-h-full rounded-lg shadow-kd-modal"
-          />
+          <VideoPlayer key={current.id} src={current.url} autoPlay />
         ) : (
           <img
             src={current.url}

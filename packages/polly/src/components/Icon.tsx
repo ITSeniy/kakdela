@@ -238,4 +238,33 @@ export const Icon = {
   ),
   // Луна — «тема оформления» в мобильном профиле.
   Moon: makeIcon(<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />),
+  // Медиа-контролы (аудио/видео плееры).
+  Play: makeIcon(<polygon points="6 4 20 12 6 20 6 4" />, 'currentColor'),
+  Pause: makeIcon(
+    <>
+      <rect x="6" y="4" width="4" height="16" rx="1" />
+      <rect x="14" y="4" width="4" height="16" rx="1" />
+    </>,
+    'currentColor',
+  ),
+  // Динамик с крестом — звук выключен (нет SpeakerOff, как MicOff/HeadphonesOff).
+  SpeakerOff: makeIcon(
+    <>
+      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+      <line x1="23" y1="9" x2="17" y2="15" /><line x1="17" y1="9" x2="23" y2="15" />
+    </>,
+  ),
+  // На весь экран / свернуть (фуллскрин видео).
+  Maximize: makeIcon(
+    <>
+      <path d="M8 3H5a2 2 0 0 0-2 2v3" /><path d="M16 3h3a2 2 0 0 1 2 2v3" />
+      <path d="M21 16v3a2 2 0 0 1-2 2h-3" /><path d="M3 16v3a2 2 0 0 0 2 2h3" />
+    </>,
+  ),
+  Minimize: makeIcon(
+    <>
+      <path d="M8 3v3a2 2 0 0 1-2 2H3" /><path d="M21 8h-3a2 2 0 0 1-2-2V3" />
+      <path d="M3 16h3a2 2 0 0 1 2 2v3" /><path d="M16 21v-3a2 2 0 0 1 2-2h3" />
+    </>,
+  ),
 }

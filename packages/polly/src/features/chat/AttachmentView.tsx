@@ -5,6 +5,7 @@ import type { Attachment } from '@kakdela/ginzu/api-types'
 import { Icon } from '../../components/Icon.js'
 import { openExternal } from '../../lib/host/shell.js'
 import { Lightbox, type LightboxContext } from './Lightbox.js'
+import { AudioPlayer } from './media/AudioPlayer.js'
 import { formatBytes } from './formatBytes.js'
 
 interface AttachmentListProps {
@@ -92,15 +93,6 @@ function VideoThumb({
   )
 }
 
-function AudioView({ attachment }: { attachment: Attachment }) {
-  return (
-    <div className="px-3 py-2 bg-kd-panel-alt rounded-kd border border-kd-border" style={{ maxWidth: 420 }}>
-      <div className="text-[11px] text-kd-text font-mono truncate mb-1">{attachment.originalName}</div>
-      <audio controls preload="metadata" src={attachment.url} className="w-full" />
-    </div>
-  )
-}
-
 function FileCard({ attachment }: { attachment: Attachment }) {
   function download(e: React.MouseEvent) {
     e.preventDefault()
@@ -172,7 +164,7 @@ export function AttachmentList({ attachments, lightboxContext, blur = false }: A
       case 'video':
         return <VideoThumb attachment={att} onOpen={() => openMedia(att)} />
       case 'audio':
-        return <AudioView attachment={att} />
+        return <AudioPlayer attachment={att} />
       default:
         return <FileCard attachment={att} />
     }
