@@ -1,6 +1,6 @@
 {
   "name": "@kakdela/ginzu",
-  "version": "0.0.1",
+  "version": "0.6.8",
   "private": true,
   "description": "Shared types and protocols. Магический меч Гинзу — общий инструмент.",
   "type": "module",
