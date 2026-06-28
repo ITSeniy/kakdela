@@ -463,7 +463,7 @@ function DmBubble({
         )}
       </div>
       {!pendingStatus && !isMobile && (
-        <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 text-kd-text-mute self-center shrink-0">
+        <div className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity flex items-center gap-0.5 px-0.5 py-0.5 bg-kd-panel border border-kd-border rounded-kd shadow-kd-tile text-kd-text-mute self-center shrink-0">
           <ReactionAddButton
             emojiList={emojiMap && emojiMap.size > 0 ? [...emojiMap.values()] : undefined}
             onPick={(emoji) => onAddReaction(message.id, emoji)}

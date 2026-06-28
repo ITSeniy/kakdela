@@ -114,7 +114,9 @@ function Actions({
 
   if (pendingStatus) return null
   return (
-    <div className={`${pickerOpen ? 'opacity-100' : 'opacity-0'} group-hover:opacity-100 transition-opacity flex items-center gap-1 text-kd-text-mute self-start mt-0.5 shrink-0`}>
+    // Плавающий тулбар: абсолютом в правом-верхнем углу сообщения, с подложкой —
+    // не толкает контент по ширине и читается даже поверх медиа (как в Discord).
+    <div className={`absolute top-1 right-3 z-20 ${pickerOpen ? 'opacity-100' : 'opacity-0'} group-hover:opacity-100 focus-within:opacity-100 transition-opacity flex items-center gap-0.5 px-0.5 py-0.5 bg-kd-panel border border-kd-border rounded-kd shadow-kd-tile text-kd-text-mute`}>
       <div className="relative" ref={pickerContainerRef}>
         <button type="button" onClick={togglePicker} title="добавить реакцию" className="hover:text-kd-text p-1 block">
           <Icon.Smile size={13} />
@@ -460,11 +462,12 @@ export function Message({
   if (compact) {
     return (
       <div
-        className={`group px-4 py-[2px] ${hoverCls} ${opacityCls}`}
+        className={`group relative px-4 py-[2px] ${hoverCls} ${opacityCls}`}
         data-message-id={message.id}
         onContextMenu={openContextMenu}
       >
         {contextMenuEl}
+        {actionsEl}
         <ReplyQuote indent="pl-11" />
         <div className="flex gap-2 items-baseline">
           <span className="text-[10px] text-kd-text-mute font-mono w-9 shrink-0 text-right">
@@ -495,7 +498,6 @@ export function Message({
               </button>
             )}
           </div>
-          {actionsEl}
         </div>
         {(msgAttachments.length > 0 || msgThread !== null || reactionsEl !== null) && (
           <div className="pl-11">
@@ -511,7 +513,7 @@ export function Message({
   if (grouped) {
     return (
       <div
-        className={`group flex gap-2.5 px-4 py-[2px] items-start ${hoverCls} ${opacityCls}`}
+        className={`group relative flex gap-2.5 px-4 py-[2px] items-start ${hoverCls} ${opacityCls}`}
         data-message-id={message.id}
         onContextMenu={openContextMenu}
       >
@@ -547,11 +549,12 @@ export function Message({
 
   return (
     <div
-      className={`group px-4 py-1 ${hoverCls} ${opacityCls}`}
+      className={`group relative px-4 py-1 ${hoverCls} ${opacityCls}`}
       data-message-id={message.id}
       onContextMenu={openContextMenu}
     >
       {contextMenuEl}
+      {actionsEl}
       <ReplyQuote indent="pl-[42px]" />
       <div className="flex gap-2.5 items-start">
         <button
@@ -597,7 +600,6 @@ export function Message({
           <ThreadBadge />
           {reactionsEl}
         </div>
-        {actionsEl}
       </div>
     </div>
   )
