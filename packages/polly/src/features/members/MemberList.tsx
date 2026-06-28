@@ -25,7 +25,7 @@ interface MemberGroup {
 }
 
 const ROLE_TITLES: Record<'owner' | 'admin' | 'member', string> = {
-  owner: 'хозяева',
+  owner: 'хозяин',
   admin: 'админы',
   member: 'свои',
 }

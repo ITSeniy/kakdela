@@ -134,18 +134,18 @@ export function ContextMenu({
           <div className="my-1 border-t border-kd-border" />
         </>
       )}
-      <Item onClick={() => { onReply(); onClose() }}>↩ Ответить</Item>
+      <Item onClick={() => { onReply(); onClose() }}>Ответить</Item>
       {!hideStartThread && onStartThread && (
-        <Item onClick={() => { onStartThread(); onClose() }}>↳ Начать тред</Item>
+        <Item onClick={() => { onStartThread(); onClose() }}>Начать тред</Item>
       )}
       <Item onClick={() => { onCopyText(); onClose() }}>Копировать текст</Item>
       <Item onClick={() => { onCopyLink(); onClose() }}>Копировать ссылку</Item>
       {onForward && (
-        <Item onClick={() => { onForward(); onClose() }}>↪ Переслать</Item>
+        <Item onClick={() => { onForward(); onClose() }}>Переслать</Item>
       )}
       {canPin && (pinned
         ? <Item onClick={() => { onUnpin?.(); onClose() }}>Открепить</Item>
-        : <Item onClick={() => { onPin?.(); onClose() }}>📌 Закрепить</Item>
+        : <Item onClick={() => { onPin?.(); onClose() }}>Закрепить</Item>
       )}
       {isOwn && (
         <Item

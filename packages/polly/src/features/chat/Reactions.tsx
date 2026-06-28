@@ -25,6 +25,41 @@ export function ReactionEmoji({ emoji, emojiMap }: { emoji: string; emojiMap?: R
   return <span className="text-kd-text">{emoji}</span>
 }
 
+// Одна реакция-пилюля со своей всплывашкой «кто поставил» (по hover). Нативный
+// title слишком медленный и неоформленный — рисуем свой стилизованный тултип.
+function ReactionPill({
+  emoji, count, mine, names, emojiMap, onClick,
+}: {
+  emoji: string
+  count: number
+  mine: boolean
+  names: string[]
+  emojiMap?: ReadonlyMap<string, CustomEmoji>
+  onClick: () => void
+}) {
+  const [hover, setHover] = useState(false)
+  return (
+    <div className="relative" onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
+      <button
+        type="button"
+        onClick={onClick}
+        className={`flex items-center gap-1 px-1.5 py-px rounded text-[11px] bg-kd-panel-alt border transition-colors ${
+          mine ? 'border-kd-accent' : 'border-kd-border hover:border-kd-accent-soft'
+        }`}
+      >
+        <ReactionEmoji emoji={emoji} emojiMap={emojiMap} />
+        <span className="font-mono text-[10px] text-kd-text-soft">{count}</span>
+      </button>
+      {hover && names.length > 0 && (
+        <div className="absolute bottom-full left-0 mb-1 z-50 px-2 py-1 rounded-kd bg-kd-stage text-kd-stage-text text-[10px] leading-snug max-w-[220px] shadow-kd-modal pointer-events-none">
+          <span className="font-semibold">{names.join(', ')}</span>
+          <span className="opacity-70"> {names.length === 1 ? 'поставил' : 'поставили'}</span>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function Reactions({ messageId, reactions, currentUserId, memberMap, emojiMap, onAdd, onRemove }: ReactionsProps) {
   const [pickerOpen, setPickerOpen] = useState(false)
   // Вверх по умолчанию; у верха экрана места под picker (~435px) нет — вниз.
@@ -64,22 +99,17 @@ export function Reactions({ messageId, reactions, currentUserId, memberMap, emoj
     <div className="mt-1 flex flex-wrap gap-1 items-center">
       {reactions.map((r) => {
         const mine = currentUserId !== null && r.users.includes(currentUserId)
-        const names = r.users.map((uid) => memberMap.get(uid)?.displayName ?? '?').join(', ')
+        const names = r.users.map((uid) => memberMap.get(uid)?.displayName ?? '?')
         return (
-          <button
+          <ReactionPill
             key={r.emoji}
-            type="button"
-            title={names}
+            emoji={r.emoji}
+            count={r.count}
+            mine={mine}
+            names={names}
+            emojiMap={emojiMap}
             onClick={() => mine ? onRemove(messageId, r.emoji) : onAdd(messageId, r.emoji)}
-            className={`flex items-center gap-1 px-1.5 py-px rounded text-[11px] bg-kd-panel-alt border transition-colors ${
-              mine
-                ? 'border-kd-accent'
-                : 'border-kd-border hover:border-kd-accent-soft'
-            }`}
-          >
-            <ReactionEmoji emoji={r.emoji} emojiMap={emojiMap} />
-            <span className="font-mono text-[10px] text-kd-text-soft">{r.count}</span>
-          </button>
+          />
         )
       })}
 

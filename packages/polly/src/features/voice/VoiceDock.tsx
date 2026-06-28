@@ -108,7 +108,7 @@ function DockButton({
         danger
           ? 'text-kd-text-soft border-kd-border hover:bg-kd-danger hover:text-white hover:border-transparent'
           : active
-            ? 'bg-kd-panel-hi text-kd-text border-transparent'
+            ? 'bg-kd-accent text-white border-transparent hover:bg-kd-accent-deep'
             : 'text-kd-text-soft border-kd-border hover:bg-kd-panel-hi hover:text-kd-text',
       ].join(' ')}
     >

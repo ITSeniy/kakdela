@@ -188,11 +188,13 @@ export function StickerManagement({ serverId }: StickerManagementProps) {
           {stickers.map((s) => (
             <div
               key={s.id}
-              className="group relative aspect-square rounded-kd border border-kd-border bg-kd-panel-alt flex items-center justify-center p-2"
+              className="group relative rounded-kd border border-kd-border bg-kd-panel-alt overflow-hidden"
               title={s.name}
             >
-              <img src={s.imageUrl} alt={s.name} className="max-w-full max-h-full object-contain" draggable={false} />
-              <div className="absolute inset-x-0 bottom-0 px-1 py-0.5 text-[9px] font-mono text-kd-text-mute truncate text-center bg-kd-panel/80">
+              <div className="aspect-square flex items-center justify-center p-2">
+                <img src={s.imageUrl} alt={s.name} className="max-w-full max-h-full object-contain" draggable={false} />
+              </div>
+              <div className="px-1 py-0.5 text-[9px] font-mono text-kd-text-mute truncate text-center border-t border-kd-border">
                 {s.name}
               </div>
               <button

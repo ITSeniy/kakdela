@@ -156,8 +156,10 @@ export function SettingsScreen() {
       {/* левая навигация */}
       <nav className="w-[220px] shrink-0 bg-kd-panel-alt border-r border-kd-border px-2 py-3.5 overflow-y-auto">
         <div className="flex items-center gap-2 px-2.5 pb-2.5">
-          <div className="w-7 h-7 rounded-kd bg-kd-accent text-white text-[11px] font-bold flex items-center justify-center shrink-0">
-            {serverId ? serverName.charAt(0).toUpperCase() : 'кд'}
+          <div className="w-7 h-7 rounded-kd bg-kd-accent text-white text-[11px] font-bold flex items-center justify-center shrink-0 overflow-hidden">
+            {serverId && serverDetail?.server.iconUrl
+              ? <img src={serverDetail.server.iconUrl} alt="" className="w-full h-full object-cover" />
+              : serverId ? serverName.charAt(0).toUpperCase() : 'кд'}
           </div>
           <div className="min-w-0">
             <div className="text-[12px] font-bold text-kd-text truncate">

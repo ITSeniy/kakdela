@@ -47,6 +47,8 @@ export function ServerRail({
   const openCreate = useServerCreateJoinUi((s) => s.openCreate)
   const openJoin = useServerCreateJoinUi((s) => s.openJoin)
   const openSettings = useSettingsUi((s) => s.open)
+  const closeSettings = useSettingsUi((s) => s.close)
+  const settingsOpen = useSettingsUi((s) => s.isOpen)
   // Позиция fixed-меню «добавить сервер». null = закрыто. Меню нельзя
   // позиционировать absolute внутри списка: overflow-y-auto контейнера
   // обрезает всё, что выходит за ширину рельсы, — fixed клипу не подвержен.
@@ -194,7 +196,8 @@ export function ServerRail({
                 name={s.name}
                 iconUrl={s.iconUrl ?? null}
                 active={s.id === activeServerId}
-                onClick={() => navigate(`/servers/${s.id}`)}
+                // Клик по серверу в настройках — выход из них (возврат на сервер).
+                onClick={() => { if (settingsOpen) closeSettings(); navigate(`/servers/${s.id}`) }}
                 title={s.name}
               />
             </span>

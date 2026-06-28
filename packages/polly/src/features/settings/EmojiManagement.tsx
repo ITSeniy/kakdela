@@ -186,11 +186,13 @@ export function EmojiManagement({ serverId }: EmojiManagementProps) {
           {emoji.map((e) => (
             <div
               key={e.id}
-              className="group relative aspect-square rounded-kd border border-kd-border bg-kd-panel-alt flex items-center justify-center"
+              className="group relative rounded-kd border border-kd-border bg-kd-panel-alt overflow-hidden"
               title={`:${e.name}:`}
             >
-              <img src={e.imageUrl} alt={`:${e.name}:`} className="w-10 h-10 object-contain" draggable={false} />
-              <div className="absolute inset-x-0 bottom-0 px-1 py-0.5 text-[9px] font-mono text-kd-text-mute truncate text-center bg-kd-panel/80">
+              <div className="aspect-square flex items-center justify-center p-1.5">
+                <img src={e.imageUrl} alt={`:${e.name}:`} className="max-w-full max-h-full object-contain" draggable={false} />
+              </div>
+              <div className="px-1 py-0.5 text-[9px] font-mono text-kd-text-mute truncate text-center border-t border-kd-border">
                 :{e.name}:
               </div>
               <button
