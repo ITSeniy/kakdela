@@ -12,6 +12,8 @@ import { App } from './App.js'
 import { queryClient } from './lib/query.js'
 import './styles/global.css'
 
+// Окно входящего звонка (T-087, desktop) — это ОТДЕЛЬНАЯ статичная страница
+// public/call-popup.html, а не этот SPA-бандл (см. open_call_popup в Rust).
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>

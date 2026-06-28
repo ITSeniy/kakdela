@@ -116,11 +116,21 @@ export const LinkPreviewSchema = z.object({
 })
 export type LinkPreview = z.infer<typeof LinkPreviewSchema>
 
+// Системное событие в ленте (не «пузырь»): сейчас — итог DM-звонка (T-087).
+// Расширяемо по полю kind. durationSec — длительность состоявшегося звонка.
+export const SystemEventSchema = z.object({
+  kind: z.literal('call'),
+  durationSec: z.number().int().nonnegative(),
+})
+export type SystemEvent = z.infer<typeof SystemEventSchema>
+
 export const MessageSchema = z.object({
   id: z.string().uuid(),
   channelId: z.string().uuid(),
   authorId: z.string().uuid(),
   content: z.string().max(4000),
+  /** Системное событие (call-log и т.п.); null/absent — обычное сообщение. */
+  system: SystemEventSchema.nullable().optional(),
   replyToId: z.string().uuid().nullable().optional(),
   replyTo: ReplyRefSchema.nullable().optional(),
   createdAt: z.string(),

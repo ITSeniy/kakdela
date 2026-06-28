@@ -15,6 +15,7 @@ import {
   type LinkPreview,
   type ReactionAggregate,
   type ReplyRef,
+  type SystemEvent,
   type ThreadInfo,
 } from '@kakdela/ginzu/api-types'
 import { hasPermission } from '@kakdela/ginzu/permissions'
@@ -43,6 +44,7 @@ const MSG_COLS = {
   pinnedAt:      messages.pinnedAt,
   forwardedFrom: messages.forwardedFrom,
   linkPreviews:  messages.linkPreviews,
+  system:        messages.system,
 }
 
 async function resolveReplies(ids: string[]): Promise<Map<string, ReplyRef>> {
@@ -180,6 +182,7 @@ interface MsgRow {
   pinnedAt: Date | null
   forwardedFrom: unknown
   linkPreviews: unknown
+  system: unknown
 }
 
 function serializeMessage(
@@ -207,6 +210,8 @@ function serializeMessage(
     forwarded: (row.forwardedFrom as ForwardedRef | null) ?? null,
     // null (ещё не обрабатывалось) и [] (превью нет) для клиента эквивалентны.
     linkPreviews: (row.linkPreviews as LinkPreview[] | null) ?? [],
+    // Системное событие (call-log); null для обычных сообщений.
+    system: (row.system as SystemEvent | null) ?? null,
   }
 }
 

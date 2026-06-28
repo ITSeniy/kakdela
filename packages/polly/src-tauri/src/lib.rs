@@ -21,6 +21,15 @@ use tauri::{
 #[cfg(desktop)]
 const MAIN_WINDOW_LABEL: &str = "main";
 
+#[cfg(desktop)]
+const CALL_POPUP_LABEL: &str = "call-popup";
+
+/// Данные текущего входящего звонка (T-087). Окно-попап (статичная страница)
+/// забирает их через `get_call_popup_data` — это надёжнее, чем query-параметр
+/// (никакого percent-кодирования `?`) и init-скрипта (никаких гонок инъекции).
+#[derive(Default)]
+struct PendingCall(std::sync::Mutex<Option<String>>);
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -29,10 +38,14 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .manage(commands::CryptoState::default())
         .manage(commands::HistoryState::default())
+        .manage(PendingCall::default())
         .invoke_handler(tauri::generate_handler![
             greet,
             focus_main_window,
             set_tray_badge,
+            open_call_popup,
+            close_call_popup,
+            get_call_popup_data,
             commands::crypto_init,
             commands::crypto_publish_keys,
             commands::crypto_topup,
@@ -115,6 +128,18 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
         });
     }
 
+    // Окно-попап звонка (T-087) переиспользуется: любое закрытие (Alt+F4) —
+    // прячем, а не уничтожаем, иначе следующий звонок не найдёт окно.
+    if let Some(popup) = app.get_webview_window(CALL_POPUP_LABEL) {
+        let popup_clone = popup.clone();
+        popup.on_window_event(move |event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = popup_clone.hide();
+            }
+        });
+    }
+
     Ok(())
 }
 
@@ -165,6 +190,85 @@ fn set_tray_badge(app: tauri::AppHandle, count: u32) {
     }
     #[cfg(not(desktop))]
     let _ = (app, count);
+}
+
+/// Входящий DM-звонок (T-087): на desktop ПОКАЗЫВАЕМ отдельное маленькое окно
+/// поверх всех окон — звонок видно, даже когда КакДела свёрнут или перекрыт.
+/// Окно НЕ создаём на лету (рантайм-создание второго webview на Windows виснет
+/// белым) — оно заранее объявлено в tauri.conf.json (label `call-popup`,
+/// visible:false) и грузит статичную public/call-popup.html. Здесь лишь кладём
+/// данные в state, дёргаем страницу событием `call-popup-show` (она перечитает
+/// get_call_popup_data) и показываем окно. На mobile — no-op (хватает тоста).
+#[tauri::command]
+fn open_call_popup(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, PendingCall>,
+    channel_id: String,
+    from_name: String,
+    from_avatar_url: Option<String>,
+) {
+    // Кладём данные звонка в app-state — попап заберёт их через get_call_popup_data.
+    let json = serde_json::json!({
+        "channelId": channel_id,
+        "fromName": from_name,
+        "fromAvatarUrl": from_avatar_url,
+    })
+    .to_string();
+    if let Ok(mut guard) = state.0.lock() {
+        *guard = Some(json);
+    }
+    #[cfg(desktop)]
+    {
+        use tauri::Emitter;
+        if let Some(win) = app.get_webview_window(CALL_POPUP_LABEL) {
+            // Просим (уже загруженную) страницу перечитать данные и показываем.
+            let _ = win.emit("call-popup-show", ());
+            let _ = win.show();
+            // current_monitor знает монитор только после show — позиционируем после.
+            position_call_popup(&win);
+            let _ = win.set_always_on_top(true);
+            let _ = win.set_focus();
+        }
+    }
+    #[cfg(not(desktop))]
+    let _ = app;
+}
+
+/// Статичная страница попапа забирает данные текущего звонка отсюда.
+#[tauri::command]
+fn get_call_popup_data(state: tauri::State<'_, PendingCall>) -> Option<String> {
+    state.0.lock().ok().and_then(|g| g.clone())
+}
+
+/// Скрыть попап входящего звонка (после принятия/отклонения/таймаута/отмены).
+/// Именно hide (не close): окно переиспользуется, не пересоздаётся.
+#[tauri::command]
+fn close_call_popup(app: tauri::AppHandle) {
+    #[cfg(desktop)]
+    {
+        if let Some(win) = app.get_webview_window(CALL_POPUP_LABEL) {
+            let _ = win.hide();
+        }
+    }
+    #[cfg(not(desktop))]
+    let _ = app;
+}
+
+/// Ставим попап в правый верхний угол текущего монитора с небольшим отступом.
+#[cfg(desktop)]
+fn position_call_popup(win: &tauri::WebviewWindow) {
+    let Ok(Some(monitor)) = win.current_monitor() else {
+        return;
+    };
+    let Ok(win_size) = win.outer_size() else {
+        return;
+    };
+    let mon_pos = monitor.position();
+    let mon_size = monitor.size();
+    let margin = (16.0 * monitor.scale_factor()).round() as i32;
+    let x = mon_pos.x + mon_size.width as i32 - win_size.width as i32 - margin;
+    let y = mon_pos.y + margin;
+    let _ = win.set_position(tauri::PhysicalPosition::new(x, y));
 }
 
 #[cfg(desktop)]

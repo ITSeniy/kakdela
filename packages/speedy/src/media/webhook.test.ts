@@ -7,9 +7,19 @@ const mocks = vi.hoisted(() => ({
   srem: vi.fn(),
   del: vi.fn(),
   set: vi.fn(),
+  get: vi.fn(),
   hdel: vi.fn(),
   channelLookup: vi.fn(),
+  insertReturning: vi.fn(),
   broadcastToServer: vi.fn(),
+  broadcastToChannel: vi.fn(),
+  listDmParticipants: vi.fn(),
+}))
+
+// guido тащит livekit-server-sdk + env — мокаем только то, что использует
+// webhook (listDmParticipants как источник истины «комната опустела?»).
+vi.mock('./guido.js', () => ({
+  listDmParticipants: mocks.listDmParticipants,
 }))
 
 vi.mock('../lib/redis.js', () => ({
@@ -18,6 +28,7 @@ vi.mock('../lib/redis.js', () => ({
     srem: mocks.srem,
     del: mocks.del,
     set: mocks.set,
+    get: mocks.get,
     hdel: mocks.hdel,
   },
 }))
@@ -31,12 +42,17 @@ vi.mock('../lib/db.js', () => {
       }),
     }),
   })
-  return { db: { select } }
+  const insert = () => ({
+    values: () => ({
+      returning: () => mocks.insertReturning() as unknown,
+    }),
+  })
+  return { db: { select, insert } }
 })
 
 vi.mock('../ws/broadcast.js', () => ({
   broadcastToServer: mocks.broadcastToServer,
-  broadcastToChannel: vi.fn(),
+  broadcastToChannel: mocks.broadcastToChannel,
   wireBrokerToRegistry: vi.fn(),
 }))
 
@@ -44,6 +60,7 @@ const {
   alreadyProcessed,
   handleWebhookEvent,
   parseChannelIdFromRoom,
+  parseDmChannelIdFromRoom,
 } = await import('./webhook.js')
 
 const CHANNEL_ID = '11111111-1111-1111-1111-111111111111'
@@ -65,9 +82,12 @@ function buildEvent(partial: Partial<WebhookEvent> & { event: string }): Webhook
   } as unknown as WebhookEvent
 }
 
-function buildParticipant(tracks: Array<{ source: TrackSource; muted?: boolean }> = []) {
+function buildParticipant(
+  tracks: Array<{ source: TrackSource; muted?: boolean }> = [],
+  identity: string = USER_ID,
+) {
   return {
-    identity: USER_ID,
+    identity,
     name: 'Alice',
     isPublisher: true,
     joinedAt: 0n,
@@ -79,6 +99,12 @@ function buildParticipant(tracks: Array<{ source: TrackSource; muted?: boolean }
 function buildRoom(channelId = CHANNEL_ID) {
   return { name: `voice-${channelId}` } as unknown as NonNullable<WebhookEvent['room']>
 }
+
+function buildDmRoom(channelId = CHANNEL_ID, numParticipants = 0) {
+  return { name: `dm-${channelId}`, numParticipants } as unknown as NonNullable<WebhookEvent['room']>
+}
+
+const DM_CALL_KEY = `dm:call:${CHANNEL_ID}:log`
 
 beforeEach(() => {
   for (const m of Object.values(mocks)) m.mockReset()
@@ -92,6 +118,20 @@ describe('parseChannelIdFromRoom', () => {
     expect(parseChannelIdFromRoom('chat-abc')).toBeNull()
     expect(parseChannelIdFromRoom(undefined)).toBeNull()
     expect(parseChannelIdFromRoom('voice-')).toBeNull()
+  })
+  it('does not match dm- rooms (those go through the DM branch)', () => {
+    expect(parseChannelIdFromRoom('dm-abc')).toBeNull()
+  })
+})
+
+describe('parseDmChannelIdFromRoom', () => {
+  it('returns channelId for dm-<id> names', () => {
+    expect(parseDmChannelIdFromRoom('dm-abc')).toBe('abc')
+  })
+  it('returns null for non-dm rooms', () => {
+    expect(parseDmChannelIdFromRoom('voice-abc')).toBeNull()
+    expect(parseDmChannelIdFromRoom(undefined)).toBeNull()
+    expect(parseDmChannelIdFromRoom('dm-')).toBeNull()
   })
 })
 
@@ -281,5 +321,108 @@ describe('handleWebhookEvent', () => {
       { debug: () => {}, warn },
     )
     expect(warn).toHaveBeenCalled()
+  })
+})
+
+describe('handleWebhookEvent — DM call-log (T-087)', () => {
+  const OTHER_ID = '44444444-4444-4444-4444-444444444444'
+
+  function parseMetaArg(): { initiator: string; startedAt: number; answered: boolean } {
+    const call = mocks.set.mock.calls.find((c) => c[0] === DM_CALL_KEY)
+    if (!call) throw new Error('redis.set was not called for the dm call-log key')
+    return JSON.parse(call[1] as string) as { initiator: string; startedAt: number; answered: boolean }
+  }
+
+  it('first participant in a dm room records the initiator (answered=false)', async () => {
+    mocks.get.mockResolvedValueOnce(null)
+    await handleWebhookEvent(
+      buildEvent({
+        event: 'participant_joined',
+        room: buildDmRoom(CHANNEL_ID, 1),
+        participant: buildParticipant([], USER_ID),
+      }),
+    )
+    const meta = parseMetaArg()
+    expect(meta.initiator).toBe(USER_ID)
+    expect(meta.answered).toBe(false)
+    // DM-комнаты не трогают серверный voice-presence.
+    expect(mocks.sadd).not.toHaveBeenCalled()
+    expect(mocks.broadcastToServer).not.toHaveBeenCalled()
+  })
+
+  it('the other party joining flips answered=true', async () => {
+    mocks.get.mockResolvedValueOnce(
+      JSON.stringify({ initiator: USER_ID, startedAt: 1_000, answered: false }),
+    )
+    await handleWebhookEvent(
+      buildEvent({
+        event: 'participant_joined',
+        room: buildDmRoom(CHANNEL_ID, 2),
+        participant: buildParticipant([], OTHER_ID),
+      }),
+    )
+    expect(parseMetaArg().answered).toBe(true)
+  })
+
+  it('last participant leaving an answered call posts the call-log immediately', async () => {
+    mocks.listDmParticipants.mockResolvedValueOnce([]) // комната опустела
+    mocks.get.mockResolvedValueOnce(
+      JSON.stringify({ initiator: USER_ID, startedAt: Date.now() - 5_000, answered: true }),
+    )
+    mocks.channelLookup.mockResolvedValueOnce([{ kind: 'dm' }])
+    mocks.insertReturning.mockResolvedValueOnce([{ id: 'sys-1', createdAt: new Date() }])
+    await handleWebhookEvent(
+      buildEvent({
+        event: 'participant_left',
+        room: buildDmRoom(CHANNEL_ID, 0),
+        participant: buildParticipant([], OTHER_ID),
+      }),
+    )
+    expect(mocks.del).toHaveBeenCalledWith(DM_CALL_KEY)
+    expect(mocks.broadcastToChannel).toHaveBeenCalledWith(
+      CHANNEL_ID,
+      expect.objectContaining({
+        t: 'msg.new',
+        channelId: CHANNEL_ID,
+        message: expect.objectContaining({ system: { kind: 'call', durationSec: expect.any(Number) } }),
+      }),
+    )
+  })
+
+  it('participant_left with peers still present does not finalize', async () => {
+    mocks.listDmParticipants.mockResolvedValueOnce([{ userId: USER_ID }]) // ещё кто-то в комнате
+    await handleWebhookEvent(
+      buildEvent({
+        event: 'participant_left',
+        room: buildDmRoom(CHANNEL_ID, 1),
+        participant: buildParticipant([], OTHER_ID),
+      }),
+    )
+    expect(mocks.get).not.toHaveBeenCalled()
+    expect(mocks.broadcastToChannel).not.toHaveBeenCalled()
+  })
+
+  it('an unanswered (never-picked-up) call is not logged', async () => {
+    mocks.listDmParticipants.mockResolvedValueOnce([]) // комната опустела
+    mocks.get.mockResolvedValueOnce(
+      JSON.stringify({ initiator: USER_ID, startedAt: Date.now() - 5_000, answered: false }),
+    )
+    await handleWebhookEvent(
+      buildEvent({
+        event: 'participant_left',
+        room: buildDmRoom(CHANNEL_ID, 0),
+        participant: buildParticipant([], USER_ID),
+      }),
+    )
+    expect(mocks.del).toHaveBeenCalledWith(DM_CALL_KEY)
+    expect(mocks.broadcastToChannel).not.toHaveBeenCalled()
+  })
+
+  it('room_finished after the room already emptied is a no-op (dedup via del)', async () => {
+    mocks.get.mockResolvedValueOnce(null) // ключ уже забрал participant_left
+    await handleWebhookEvent(
+      buildEvent({ event: 'room_finished', room: buildDmRoom(CHANNEL_ID, 0) }),
+    )
+    expect(mocks.broadcastToChannel).not.toHaveBeenCalled()
   })
 })

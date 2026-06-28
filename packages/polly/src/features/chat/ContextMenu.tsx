@@ -14,6 +14,8 @@ interface ContextMenuProps {
   pinned?: boolean
   /** Может ли текущий пользователь закреплять (server: admin/owner; dm: да). */
   canPin?: boolean
+  /** Быстрые реакции строкой над меню (если задано) — главный путь на тач. */
+  onPickReaction?: (emoji: string) => void
   onReply: () => void
   onStartThread?: () => void
   onForward?: () => void
@@ -27,6 +29,9 @@ interface ContextMenuProps {
 }
 
 const MENU_WIDTH = 172
+
+// Быстрые реакции — частые эмодзи строкой над пунктами меню (Telegram-style).
+const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🔥']
 
 function Item({
   onClick, danger, disabled, children,
@@ -55,7 +60,7 @@ function Item({
 }
 
 export function ContextMenu({
-  x, y, isOwn, canDelete, editDisabled, hideStartThread, pinned, canPin,
+  x, y, isOwn, canDelete, editDisabled, hideStartThread, pinned, canPin, onPickReaction,
   onReply, onStartThread, onForward, onPin, onUnpin, onEdit, onDelete, onCopyText, onCopyLink, onClose,
 }: ContextMenuProps) {
   const ref = useRef<HTMLDivElement>(null)
@@ -112,6 +117,23 @@ export function ContextMenu({
         visibility: pos ? 'visible' : 'hidden',
       }}
     >
+      {onPickReaction && (
+        <>
+          <div className="flex items-center gap-1 px-2 py-1.5">
+            {QUICK_REACTIONS.map((emoji) => (
+              <button
+                key={emoji}
+                type="button"
+                onClick={() => { onPickReaction(emoji); onClose() }}
+                className="flex-1 flex items-center justify-center text-[18px] rounded py-1 hover:bg-kd-panel-alt transition-colors"
+              >
+                {emoji}
+              </button>
+            ))}
+          </div>
+          <div className="my-1 border-t border-kd-border" />
+        </>
+      )}
       <Item onClick={() => { onReply(); onClose() }}>↩ Ответить</Item>
       {!hideStartThread && onStartThread && (
         <Item onClick={() => { onStartThread(); onClose() }}>↳ Начать тред</Item>

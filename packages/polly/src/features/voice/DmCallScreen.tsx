@@ -5,7 +5,7 @@
 // + панель управления. Демо экрана работает как в серверном канале; камера
 // вне скоупа (см. T-087).
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import type { LocalVideoTrack, RemoteVideoTrack } from 'livekit-client'
 
@@ -82,6 +82,18 @@ export function DmCallScreen({ channelId, peer, onMinimize }: DmCallScreenProps)
   const connected = status === 'connected' || status === 'reconnecting'
   // «Звоним…» — мы подключились к комнате, но собеседник ещё не зашёл.
   const ringing = !peerPresent
+
+  // Собеседник был в звонке и вышел → звонок ЗАВЕРШЁН (а не «снова звоним»).
+  // Без этого после ухода второй стороны экран ошибочно откатывался в дозвон.
+  const everConnectedRef = useRef(false)
+  useEffect(() => {
+    if (peerPresent) {
+      everConnectedRef.current = true
+    } else if (everConnectedRef.current) {
+      toast.info('звонок завершён')
+      void leave()
+    }
+  }, [peerPresent, leave])
 
   // 1:1: чужую демку смотрим автоматически (без bandwidth-страхов нескольких
   // стримеров серверного канала).
