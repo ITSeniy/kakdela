@@ -85,3 +85,14 @@ export async function emitCallAction(
     console.warn('[call-window] emit call-popup-action failed', err)
   }
 }
+
+/** Попап-окно: закрыть само себя (после ответа или по таймауту-подстраховке). */
+export async function closeSelfPopup(): Promise<void> {
+  if (!isTauri()) return
+  try {
+    const mod = await import('@tauri-apps/api/window')
+    await mod.getCurrentWindow().close()
+  } catch (err) {
+    console.warn('[call-window] self close failed', err)
+  }
+}

@@ -187,6 +187,7 @@ fn open_call_popup(
 ) {
     #[cfg(desktop)]
     {
+        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
         use tauri::{WebviewUrl, WebviewWindowBuilder};
         // Повторный invite до закрытия прежнего попапа — пересоздаём.
         if let Some(existing) = app.get_webview_window(CALL_POPUP_LABEL) {
@@ -196,23 +197,21 @@ fn open_call_popup(
             "channelId": channel_id,
             "fromName": from_name,
             "fromAvatarUrl": from_avatar_url,
-        });
-        // init-скрипт исполняется ДО бандла → popup-роут читает данные синхронно.
-        let init = format!("window.__CALL_POPUP__ = {data};");
-        let built = WebviewWindowBuilder::new(
-            &app,
-            CALL_POPUP_LABEL,
-            WebviewUrl::App("index.html?call_popup=1".into()),
-        )
-        .title("Входящий звонок")
-        .inner_size(340.0, 128.0)
-        .resizable(false)
-        .decorations(false)
-        .always_on_top(true)
-        .skip_taskbar(true)
-        .focused(false)
-        .initialization_script(&init)
-        .build();
+        })
+        .to_string();
+        // Данные кладём в query (base64url), а НЕ в init-скрипт: query доступен
+        // из window.location уже на первом рендере, без гонок инъекции скрипта.
+        let encoded = URL_SAFE_NO_PAD.encode(data.as_bytes());
+        let url = format!("index.html?cp={encoded}");
+        let built = WebviewWindowBuilder::new(&app, CALL_POPUP_LABEL, WebviewUrl::App(url.into()))
+            .title("Входящий звонок")
+            .inner_size(340.0, 128.0)
+            .resizable(false)
+            .decorations(false)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .focused(false)
+            .build();
         match built {
             Ok(win) => position_call_popup(&win),
             Err(err) => eprintln!("[call-popup] build failed: {err}"),

@@ -15,16 +15,18 @@ import './lib/theme.js' // применяет сохранённую data-theme 
 import './styles/global.css'
 
 // Отдельное окно входящего звонка (T-087, desktop): тот же бандл, но грузится по
-// index.html?call_popup=1 и рендерит только лёгкий CallPopup — без auth/WS/query.
-const isCallPopup =
-  typeof window !== 'undefined' &&
-  new URLSearchParams(window.location.search).has('call_popup')
+// index.html?cp=<base64> и рендерит только лёгкий CallPopup — без auth/WS/query.
+// Данные звонка едут в самом query-параметре `cp` (см. open_call_popup в Rust).
+const callPopupData =
+  typeof window !== 'undefined'
+    ? new URLSearchParams(window.location.search).get('cp')
+    : null
 
 const root = ReactDOM.createRoot(document.getElementById('root')!)
-if (isCallPopup) {
+if (callPopupData) {
   root.render(
     <React.StrictMode>
-      <CallPopup />
+      <CallPopup encoded={callPopupData} />
     </React.StrictMode>,
   )
 } else {

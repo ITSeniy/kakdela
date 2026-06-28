@@ -1,30 +1,49 @@
 // Содержимое отдельного окна входящего звонка (T-087, desktop). Рендерится в
 // собственном Tauri-webview'е (label `call-popup`), который создаёт Rust поверх
-// всех окон. Данные звонка кладёт init-скрипт в window.__CALL_POPUP__; кнопки
-// лишь шлют действие главному окну через emitCallAction — сам join/decline и
-// закрытие попапа исполняет главное окно (IncomingCall).
+// всех окон. Данные звонка приходят в query-параметре `cp` (base64url JSON) —
+// надёжнее init-скрипта. Кнопки лишь шлют действие главному окну через
+// emitCallAction и закрывают попап; сам join/decline исполняет главное окно.
+
+import { useEffect } from 'react'
 
 import { Avatar } from '../../components/Avatar.js'
 import { Icon } from '../../components/Icon.js'
-import { emitCallAction } from '../../lib/host/call-window.js'
+import { closeSelfPopup, emitCallAction } from '../../lib/host/call-window.js'
 import type { CallPopupData } from '../../lib/host/call-window.js'
 
-function readPopupData(): CallPopupData | null {
-  const raw = (window as unknown as { __CALL_POPUP__?: CallPopupData }).__CALL_POPUP__
-  if (!raw || typeof raw.channelId !== 'string') return null
-  return {
-    channelId: raw.channelId,
-    fromName: raw.fromName,
-    fromAvatarUrl: raw.fromAvatarUrl ?? null,
+function decodeData(encoded: string): CallPopupData | null {
+  try {
+    let b64 = encoded.replace(/-/g, '+').replace(/_/g, '/')
+    while (b64.length % 4) b64 += '='
+    const bin = atob(b64)
+    const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0))
+    const obj = JSON.parse(new TextDecoder().decode(bytes)) as Partial<CallPopupData>
+    if (typeof obj.channelId !== 'string' || typeof obj.fromName !== 'string') return null
+    return { channelId: obj.channelId, fromName: obj.fromName, fromAvatarUrl: obj.fromAvatarUrl ?? null }
+  } catch {
+    return null
   }
 }
 
-export function CallPopup() {
-  const data = readPopupData()
-  if (!data) return null
+export function CallPopup({ encoded }: { encoded: string }) {
+  const data = decodeData(encoded)
 
-  const accept = () => void emitCallAction('accept', data.channelId)
-  const decline = () => void emitCallAction('decline', data.channelId)
+  // Подстраховка: окно само закроется, даже если главное окно не успеет/не
+  // сможет — чуть позже авто-сброса инвайта (32с) в IncomingCall.
+  useEffect(() => {
+    const t = window.setTimeout(() => void closeSelfPopup(), 34_000)
+    return () => window.clearTimeout(t)
+  }, [])
+
+  if (!data) {
+    // Данные не распарсились — не оставляем «белый ящик», закрываемся сразу.
+    void closeSelfPopup()
+    return null
+  }
+
+  const respond = (action: 'accept' | 'decline') => {
+    void emitCallAction(action, data.channelId).finally(() => void closeSelfPopup())
+  }
 
   return (
     <div className="fixed inset-0 flex items-center gap-3 px-3.5 bg-kd-panel border border-kd-border select-none overflow-hidden kd-call-pop">
@@ -41,7 +60,7 @@ export function CallPopup() {
       <div className="flex items-center gap-1.5 shrink-0">
         <button
           type="button"
-          onClick={decline}
+          onClick={() => respond('decline')}
           title="отклонить"
           className="w-9 h-9 rounded-full bg-kd-danger text-white flex items-center justify-center hover:opacity-90 transition-opacity"
         >
@@ -49,7 +68,7 @@ export function CallPopup() {
         </button>
         <button
           type="button"
-          onClick={accept}
+          onClick={() => respond('accept')}
           title="принять"
           className="w-9 h-9 rounded-full bg-kd-online text-white flex items-center justify-center hover:opacity-90 transition-opacity"
         >
