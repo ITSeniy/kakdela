@@ -23,6 +23,12 @@ export type ServerEvent =
   | { t: 'reaction.add'; channelId: string; messageId: string; userId: string; emoji: string }
   | { t: 'reaction.remove'; channelId: string; messageId: string; userId: string; emoji: string }
   | { t: 'dm.new'; channelId: string; withUserId: string }
+  // Звонок 1:1 в личке (T-087). Адресуются КОНКРЕТНОМУ userId (broadcastToUser),
+  // не всему каналу — звонок приватный. invite несёт имя/аватар звонящего для
+  // тоста; cancel — инициатор отменил/таймаут; decline — собеседник отклонил.
+  | { t: 'dm.call-invite'; channelId: string; fromUserId: string; fromName: string; fromAvatarUrl: string | null }
+  | { t: 'dm.call-cancel'; channelId: string; fromUserId: string }
+  | { t: 'dm.call-decline'; channelId: string; fromUserId: string }
   | { t: 'mention'; messageId: string; channelId: string; mentionedUserId: string; mentionType: 'user' | 'everyone' | 'here' }
   | { t: 'user.update'; userId: string; displayName: string; avatarUrl: string | null; customStatus: string | null }
   | { t: 'thread.new'; parentChannelId: string; parentMessageId: string; threadChannelId: string; name: string }
@@ -40,6 +46,9 @@ export type ServerEvent =
   // Админ перенёс участника в другой голосовой канал — клиент сам пере-джойнится.
   | { t: 'voice.moved'; userId: string; fromChannelId: string; toChannelId: string }
   | { t: 'voice.kicked'; channelId: string; userId: string }
+  // Секретные чаты (Фаза 6): «тебе пришёл шифр-конверт». БЕЗ контента — клиент
+  // идёт за ним в GET /api/secret/inbox и расшифровывает локально.
+  | { t: 'secret.envelope'; id: string; fromUserId: string }
 
 export type ClientEvent =
   | { t: 'hello'; token: string }
@@ -69,6 +78,15 @@ export const ServerEventSchema = z.discriminatedUnion('t', [
   z.object({ t: z.literal('reaction.add'), channelId: uuid, messageId: uuid, userId: uuid, emoji: z.string() }),
   z.object({ t: z.literal('reaction.remove'), channelId: uuid, messageId: uuid, userId: uuid, emoji: z.string() }),
   z.object({ t: z.literal('dm.new'), channelId: uuid, withUserId: uuid }),
+  z.object({
+    t: z.literal('dm.call-invite'),
+    channelId: uuid,
+    fromUserId: uuid,
+    fromName: z.string(),
+    fromAvatarUrl: z.string().nullable(),
+  }),
+  z.object({ t: z.literal('dm.call-cancel'), channelId: uuid, fromUserId: uuid }),
+  z.object({ t: z.literal('dm.call-decline'), channelId: uuid, fromUserId: uuid }),
   z.object({
     t: z.literal('mention'),
     messageId: uuid,
@@ -106,6 +124,7 @@ export const ServerEventSchema = z.discriminatedUnion('t', [
   z.object({ t: z.literal('voice.mod'), channelId: uuid, userId: uuid, muted: z.boolean(), deafened: z.boolean() }),
   z.object({ t: z.literal('voice.moved'), userId: uuid, fromChannelId: uuid, toChannelId: uuid }),
   z.object({ t: z.literal('voice.kicked'), channelId: uuid, userId: uuid }),
+  z.object({ t: z.literal('secret.envelope'), id: uuid, fromUserId: uuid }),
 ])
 
 export const ClientEventSchema = z.discriminatedUnion('t', [

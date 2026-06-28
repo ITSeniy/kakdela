@@ -16,6 +16,13 @@ export function voiceRoomName(channelId: string): string {
   return `voice-${channelId}`
 }
 
+// Комната DM-звонка (T-087). Отдельный префикс от серверных голос-каналов:
+// webhook игнорит `dm-` (см. media/webhook.ts), а состав 1:1-комнаты UI ведёт
+// сам по событиям LiveKit, серверный presence-broadcast здесь не нужен.
+export function dmRoomName(channelId: string): string {
+  return `dm-${channelId}`
+}
+
 // RoomServiceClient работает по HTTP/HTTPS (twirp). В проде клиенты ходят
 // через Caddy (wss://<домен>/livekit), а speedy — напрямую по docker-сети:
 // LIVEKIT_ADMIN_URL=http://livekit:7880. В dev переменная не нужна —
@@ -46,7 +53,7 @@ export async function issueToken(args: VoiceTokenIssueArgs): Promise<VoiceToken>
     canPublishData = true,
   } = args
 
-  const room = voiceRoomName(channelId)
+  const room = args.room ?? voiceRoomName(channelId)
   const metadata: VoiceTokenMetadata = { userId }
 
   const at = new AccessToken(env.LIVEKIT_API_KEY, env.LIVEKIT_API_SECRET, {
@@ -73,8 +80,15 @@ export async function revokeUser(args: { userId: string; channelId: string }): P
 }
 
 export async function listParticipants(channelId: string): Promise<VoiceParticipant[]> {
-  const room = voiceRoomName(channelId)
+  return listParticipantsForRoom(voiceRoomName(channelId))
+}
 
+/** Участники DM-звонка — источник истины для логики «кто инициатор» (T-087). */
+export async function listDmParticipants(channelId: string): Promise<VoiceParticipant[]> {
+  return listParticipantsForRoom(dmRoomName(channelId))
+}
+
+async function listParticipantsForRoom(room: string): Promise<VoiceParticipant[]> {
   let infos
   try {
     infos = await getRoomService().listParticipants(room)

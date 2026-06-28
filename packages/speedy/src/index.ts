@@ -6,6 +6,7 @@ import rateLimit from '@fastify/rate-limit'
 
 import { env } from './env.js'
 import { startAutoDeleteSweeper } from './lib/auto-delete.js'
+import { startSecretEnvelopeSweeper } from './lib/secret-sweeper.js'
 import { makeLoggerOptions } from './lib/logger.js'
 import { redis } from './lib/redis.js'
 import { healthRoutes } from './routes/health.js'
@@ -13,6 +14,8 @@ import { auditRoutes } from './routes/audit.js'
 import { authRoutes } from './routes/auth.js'
 import { channelsRoutes } from './routes/channels.js'
 import { dmRoutes } from './routes/dm.js'
+import { keysRoutes } from './routes/keys.js'
+import { secretChatRoutes } from './routes/secret-chat.js'
 import { emojiRoutes } from './routes/emoji.js'
 import { filesRoutes } from './routes/files.js'
 import { inboxRoutes } from './routes/inbox.js'
@@ -75,6 +78,8 @@ async function main() {
   await app.register(filesRoutes, { prefix: '/api' })
   await app.register(emojiRoutes, { prefix: '/api' })
   await app.register(dmRoutes, { prefix: '/api' })
+  await app.register(keysRoutes, { prefix: '/api' })
+  await app.register(secretChatRoutes, { prefix: '/api' })
   await app.register(inboxRoutes, { prefix: '/api' })
   await app.register(searchRoutes, { prefix: '/api' })
   await app.register(giphyRoutes, { prefix: '/api' })
@@ -99,6 +104,8 @@ async function main() {
 
   // Автоудаление сообщений в каналах с заданным сроком (настройки канала).
   startAutoDeleteSweeper(app.log)
+  // Retention недоставленных секретных конвертов (T-102): чистим старше 30 дней.
+  startSecretEnvelopeSweeper(app.log)
 }
 
 main().catch((err) => {

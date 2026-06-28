@@ -18,6 +18,7 @@ import { JoinServerModal } from './features/servers/JoinServerModal.js'
 import { SettingsScreen } from './features/settings/SettingsScreen.js'
 import { ForwardDialog } from './features/chat/ForwardDialog.js'
 import { CreateThreadDialog } from './features/threads/CreateThreadDialog.js'
+import { IncomingCall } from './features/voice/IncomingCall.js'
 import { useVoiceModerationSync } from './features/voice/moderationSync.js'
 import { leaveVoiceRoom } from './features/voice/useVoiceRoom.js'
 import { disposeVoiceRoomSync, getActiveRoom } from './lib/livekit.js'
@@ -146,6 +147,7 @@ export function App() {
       <ConfirmDialogHost />
       <ConnectionBanner />
       <CommandPalette />
+      <IncomingCall />
     </>
   )
 }

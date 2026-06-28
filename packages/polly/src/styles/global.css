@@ -32,6 +32,12 @@ body {
 .kd-scrollbar-hide { scrollbar-width: none; }
 .kd-scrollbar-hide::-webkit-scrollbar { display: none; }
 
+/* Safe-area (мобильный клиент, T-100): отступы под чёлку/жест-навигацию.
+   На desktop env(safe-area-inset-*) = 0 → классы безвредны везде. */
+.kd-safe-top    { padding-top: var(--kd-safe-top); }
+.kd-safe-bottom { padding-bottom: var(--kd-safe-bottom); }
+.kd-safe-x      { padding-left: var(--kd-safe-left); padding-right: var(--kd-safe-right); }
+
 /* Markdown-rendered message content (wrapped in .kd-md). */
 .kd-md p { margin: 0; }
 .kd-md p + p { margin-top: 0.4em; }
@@ -174,6 +180,25 @@ body {
 }
 .kd-flash {
   animation: kd-flash 1s ease-out forwards;
+}
+
+/* T-087: всплывающий тост входящего звонка. */
+@keyframes kd-call-pop {
+  0%   { opacity: 0; transform: translateY(8px) scale(0.98); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+.kd-call-pop {
+  animation: kd-call-pop 180ms ease-out;
+}
+
+/* T-087: пульсирующее кольцо вокруг аватара на экране дозвона. */
+@keyframes kd-ring-pulse {
+  0%   { box-shadow: 0 0 0 0 var(--kd-warm-soft); }
+  70%  { box-shadow: 0 0 0 16px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+.kd-ring-pulse {
+  animation: kd-ring-pulse 1.8s ease-out infinite;
 }
 
 /* T-066: ts_headline вставляет <mark> вокруг найденных лексем. */

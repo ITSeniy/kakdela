@@ -5,6 +5,7 @@ import type { Attachment, CustomEmoji, GiphyGif, MemberPublic, Message } from '@
 
 import { Avatar } from '../../components/Avatar.js'
 import { Icon } from '../../components/Icon.js'
+import { useIsMobile } from '../../app/useIsMobile.js'
 import { wsClient } from '../../lib/ws.js'
 import { useAuthStore } from '../auth/store.js'
 import { getGiphyConfig } from '../giphy/api.js'
@@ -58,9 +59,11 @@ const TYPING_THROTTLE_MS = 3_000
 const TYPING_TTL_MS = 8_000
 
 /** «Аня печатает…» вместо подсказки про shift+⏎, пока кто-то печатает. */
-function TypingLine({ channelId, memberMap }: {
+function TypingLine({ channelId, memberMap, mobile }: {
   channelId: string
   memberMap?: ReadonlyMap<string, MemberPublic>
+  /** На мобиле в простое не показываем десктопную подсказку про shift+⏎. */
+  mobile?: boolean
 }) {
   const meId = useAuthStore((s) => s.user?.id)
   const [typers, setTypers] = useState<Map<string, number>>(new Map())
@@ -102,7 +105,7 @@ function TypingLine({ channelId, memberMap }: {
   }, [channelId, meId])
 
   const names = [...typers.keys()].map((id) => memberMap?.get(id)?.displayName ?? 'кто-то')
-  if (names.length === 0) return <span>shift+⏎ — новая строка</span>
+  if (names.length === 0) return mobile ? null : <span>shift+⏎ — новая строка</span>
   const label = names.length === 1
     ? `${names[0]} печатает`
     : names.length === 2
@@ -151,6 +154,7 @@ export function Composer({
   const [mention, setMention] = useState<{ start: number; query: string } | null>(null)
   const [mentionIdx, setMentionIdx] = useState(0)
   const meId = useAuthStore((s) => s.user?.id)
+  const isMobile = useIsMobile()
   const lastTypingSentRef = useRef(0)
 
   const taRef = useRef<HTMLTextAreaElement>(null)
@@ -702,11 +706,11 @@ export function Composer({
           }}
           placeholder={placeholder}
           rows={1}
-          className="flex-1 bg-transparent resize-none text-[12px] text-kd-text outline-none placeholder:text-kd-text-mute leading-relaxed font-sans"
+          className={`flex-1 bg-transparent resize-none ${isMobile ? 'text-[14px]' : 'text-[12px]'} text-kd-text outline-none placeholder:text-kd-text-mute leading-relaxed font-sans`}
           style={{ maxHeight: 200 }}
         />
         <div className="flex items-center gap-2 text-kd-text-mute shrink-0">
-          <span className="text-[10px] font-mono opacity-70 select-none">md</span>
+          {!isMobile && <span className="text-[10px] font-mono opacity-70 select-none">md</span>}
           {gifEnabled && (
             <div className="relative" ref={gifContainerRef}>
               <button
@@ -755,17 +759,23 @@ export function Composer({
           onClick={send}
           disabled={sendDisabled}
           title={hasUploading ? 'ждём загрузку…' : undefined}
-          className="px-2.5 py-1 bg-kd-accent text-white text-[11px] font-semibold font-mono rounded hover:bg-kd-accent-deep transition-colors disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+          className={isMobile
+            ? 'w-9 h-9 rounded-full bg-kd-accent text-white flex items-center justify-center hover:bg-kd-accent-deep transition-colors disabled:opacity-50 disabled:cursor-not-allowed shrink-0'
+            : 'px-2.5 py-1 bg-kd-accent text-white text-[11px] font-semibold font-mono rounded hover:bg-kd-accent-deep transition-colors disabled:opacity-50 disabled:cursor-not-allowed shrink-0'}
         >
-          send ⏎
+          {isMobile ? <Icon.Send size={17} /> : 'send ⏎'}
         </button>
       </div>
-      <div className="mt-1.5 px-1 text-[10px] text-kd-text-mute flex items-center gap-2.5">
+      <div className="mt-1.5 px-1 text-[10px] text-kd-text-mute flex items-center gap-2.5 empty:hidden">
         {channelId
-          ? <TypingLine channelId={channelId} memberMap={memberMap} />
-          : <span>shift+⏎ — новая строка</span>}
-        <div className="flex-1" />
-        <span className="font-mono">**жирный** _курсив_ ~~зачёркнутый~~ `код` ||спойлер||</span>
+          ? <TypingLine channelId={channelId} memberMap={memberMap} mobile={isMobile} />
+          : (!isMobile && <span>shift+⏎ — новая строка</span>)}
+        {!isMobile && (
+          <>
+            <div className="flex-1" />
+            <span className="font-mono">**жирный** _курсив_ ~~зачёркнутый~~ `код` ||спойлер||</span>
+          </>
+        )}
       </div>
     </div>
   )

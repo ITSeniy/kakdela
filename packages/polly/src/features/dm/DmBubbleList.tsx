@@ -3,7 +3,7 @@
 // те же обработчики из DmScreen — другой только рендер (свои справа на
 // kd-accent, чужие слева на kd-panel, время под пузырём).
 
-import { type MouseEvent, useEffect, useMemo, useRef, useState } from 'react'
+import { type MouseEvent, type TouchEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 
 import type { Channel, CustomEmoji, DmSummary, MemberPublic, Message as IMessage } from '@kakdela/ginzu/api-types'
@@ -24,6 +24,7 @@ import { renderMarkdown, renderMarkdownInline } from '../chat/markdown.js'
 import { useMessages } from '../chat/useMessages.js'
 import type { PendingMessage } from '../chat/types.js'
 import { useAllServerEmoji } from '../emoji/api.js'
+import { useIsMobile } from '../../app/useIsMobile.js'
 
 interface DmBubbleListProps {
   channelId: string
@@ -61,6 +62,14 @@ function fmtTime(iso: string): string {
   return new Date(iso).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' })
 }
 
+function minutesBetween(a: string, b: string): number {
+  return Math.abs(new Date(a).getTime() - new Date(b).getTime()) / 60_000
+}
+
+// Окно склейки: подряд идущие сообщения одного автора в пределах 5 минут
+// «приклеиваются» — без повторного аватара и с плотным отступом.
+const GROUP_WINDOW_MIN = 5
+
 const EDIT_WINDOW_MS = 30 * 24 * 60 * 60 * 1000
 
 function scrollToMessage(id: string) {
@@ -89,6 +98,8 @@ interface DmBubbleProps {
   message: IMessage | PendingMessage
   member: MemberPublic | undefined
   isOwn: boolean
+  /** Склейка: предыдущее сообщение того же автора рядом — без аватара, плотно. */
+  grouped: boolean
   currentUserId: string | null
   pendingStatus?: 'sending' | 'error'
   memberMap: ReadonlyMap<string, MemberPublic>
@@ -104,7 +115,7 @@ interface DmBubbleProps {
 }
 
 function DmBubble({
-  message, member, isOwn, currentUserId, pendingStatus,
+  message, member, isOwn, grouped, currentUserId, pendingStatus,
   memberMap, channelMap, emojiMap, onMention,
   onEdit, onDelete, onRetry, onReply, onAddReaction, onRemoveReaction,
 }: DmBubbleProps) {
@@ -113,6 +124,13 @@ function DmBubble({
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null)
   const openForward = useForwardUi((s) => s.open)
   const queryClient = useQueryClient()
+  const isMobile = useIsMobile()
+  // Long-press на тач: hover-кластер действий недоступен пальцем, поэтому
+  // открываем то же контекст-меню по удержанию (~450 мс). Жест-флаг гасит
+  // «фантомный» click после удержания (иначе он улетел бы в ссылку/упоминание).
+  const lpTimer = useRef<number | null>(null)
+  const lpFired = useRef(false)
+  const lpStart = useRef<{ x: number; y: number } | null>(null)
 
   // В DM закреплять может любой из двух участников.
   function handlePinToggle(pin: boolean) {
@@ -150,6 +168,9 @@ function DmBubble({
   const canDelete = isOwn
   const editDisabled = Date.now() - new Date(message.createdAt).getTime() > EDIT_WINDOW_MS
   const opacityCls = pendingStatus === 'sending' ? 'opacity-60' : ''
+  // У склеенных сообщений время-метку прячем (его несёт «голова» группы),
+  // кроме случаев «(изм.)» / статуса отправки — их важно видеть всегда.
+  const showMeta = !grouped || Boolean(message.editedAt) || Boolean(pendingStatus)
 
   function copyContent() {
     if (navigator.clipboard) void navigator.clipboard.writeText(message.content)
@@ -165,6 +186,33 @@ function DmBubble({
     if (pendingStatus) return
     e.preventDefault()
     setMenuPos({ x: e.clientX, y: e.clientY })
+  }
+
+  function clearLongPress() {
+    if (lpTimer.current !== null) { window.clearTimeout(lpTimer.current); lpTimer.current = null }
+  }
+  function onTouchStart(e: TouchEvent<HTMLDivElement>) {
+    if (!isMobile || pendingStatus) return
+    const t = e.touches[0]
+    if (!t) return
+    lpStart.current = { x: t.clientX, y: t.clientY }
+    lpFired.current = false
+    clearLongPress()
+    lpTimer.current = window.setTimeout(() => {
+      lpFired.current = true
+      if (lpStart.current) setMenuPos({ x: lpStart.current.x, y: lpStart.current.y })
+    }, 450)
+  }
+  function onTouchMove(e: TouchEvent<HTMLDivElement>) {
+    const t = e.touches[0]
+    const s = lpStart.current
+    if (!t || !s) return
+    if (Math.abs(t.clientX - s.x) > 10 || Math.abs(t.clientY - s.y) > 10) clearLongPress()
+  }
+  function onClickCapture(e: MouseEvent<HTMLDivElement>) {
+    // Click сразу после успешного удержания — глушим, чтобы не сработала
+    // ссылка/упоминание/спойлер под пальцем.
+    if (lpFired.current) { e.preventDefault(); e.stopPropagation(); lpFired.current = false }
   }
 
   const contextMenuEl = menuPos && !pendingStatus ? (
@@ -237,12 +285,16 @@ function DmBubble({
 
   return (
     <div
-      className={`group flex items-end gap-2.5 px-5 py-1 ${isOwn ? 'flex-row-reverse' : ''} ${opacityCls}`}
+      className={`group flex items-end gap-2.5 px-5 ${grouped ? 'pt-0.5' : 'pt-2'} pb-0.5 ${isOwn ? 'flex-row-reverse' : ''} ${opacityCls} ${isMobile ? 'select-none' : ''}`}
       data-message-id={message.id}
       onContextMenu={openContextMenu}
+      onTouchStart={onTouchStart}
+      onTouchMove={onTouchMove}
+      onTouchEnd={clearLongPress}
+      onClickCapture={onClickCapture}
     >
       {contextMenuEl}
-      {!isOwn ? (
+      {!isOwn && !grouped ? (
         <button
           type="button"
           title="открыть профиль"
@@ -279,7 +331,7 @@ function DmBubble({
         {message.content && (
           <div
             className={[
-              'px-3 py-[7px] rounded-kd text-[13px] leading-[1.45] break-words max-w-full min-w-0',
+              `px-3 py-[7px] rounded-kd ${isMobile ? 'text-[14px]' : 'text-[13px]'} leading-[1.45] break-words max-w-full min-w-0`,
               isOwn
                 ? 'bg-kd-accent text-white kd-on-accent'
                 : 'bg-kd-panel border border-kd-border text-kd-text',
@@ -291,16 +343,18 @@ function DmBubble({
         {forwardedEl}
         <LinkPreviews previews={(message as IMessage).linkPreviews} />
         {msgAttachments.length > 0 && <AttachmentList attachments={msgAttachments} />}
-        <div className="flex items-center gap-1.5 mt-[3px] px-1 text-[10px] font-mono text-kd-text-mute">
-          <span>{time}</span>
-          {message.editedAt && <span className="text-[9px]">(изм.)</span>}
-          {pendingStatus === 'sending' && <span className="text-[9px]">отправляется…</span>}
-          {pendingStatus === 'error' && onRetry && (
-            <button type="button" onClick={onRetry} className="text-[9px] text-kd-danger hover:underline">
-              ошибка · повторить?
-            </button>
-          )}
-        </div>
+        {showMeta && (
+          <div className="flex items-center gap-1.5 mt-[2px] px-1 text-[10px] font-mono text-kd-text-mute">
+            <span>{time}</span>
+            {message.editedAt && <span className="text-[9px]">(изм.)</span>}
+            {pendingStatus === 'sending' && <span className="text-[9px]">отправляется…</span>}
+            {pendingStatus === 'error' && onRetry && (
+              <button type="button" onClick={onRetry} className="text-[9px] text-kd-danger hover:underline">
+                ошибка · повторить?
+              </button>
+            )}
+          </div>
+        )}
         {!pendingStatus && (
           <Reactions
             messageId={message.id}
@@ -312,7 +366,7 @@ function DmBubble({
           />
         )}
       </div>
-      {!pendingStatus && (
+      {!pendingStatus && !isMobile && (
         <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 text-kd-text-mute self-center shrink-0">
           <button type="button" onClick={() => onReply(message as IMessage)} title="ответить" className="hover:text-kd-text p-1">
             <Icon.Reply size={13} />
@@ -496,22 +550,35 @@ export function DmBubbleList({
         type: 'msg'
         msg: IMessage | PendingMessage
         isPending: boolean
+        grouped: boolean
       }
 
   const rows: ItemRow[] = []
   let prevForMsg: IMessage | PendingMessage | null = null
   for (let i = 0; i < messages.length; i += 1) {
     const m = messages[i]!
-    if (prevForMsg === null || !sameDay(prevForMsg.createdAt, m.createdAt)) {
-      rows.push({ type: 'day', label: formatDay(m.createdAt) })
-    }
-    if (i === firstUnreadIndex) rows.push({ type: 'unread' })
-    rows.push({ type: 'msg', msg: m, isPending: false })
+    const dayBreak = prevForMsg === null || !sameDay(prevForMsg.createdAt, m.createdAt)
+    if (dayBreak) rows.push({ type: 'day', label: formatDay(m.createdAt) })
+    const unreadHere = i === firstUnreadIndex
+    if (unreadHere) rows.push({ type: 'unread' })
+    // Ответ-сообщение всегда начинает новую «реплику» — со своим аватаром и
+    // отступом, чтобы цитата читалась.
+    const hasReply = 'replyTo' in m && (m as IMessage).replyTo != null
+    const grouped =
+      !dayBreak && !unreadHere && !hasReply
+      && prevForMsg !== null
+      && prevForMsg.authorId === m.authorId
+      && minutesBetween(prevForMsg.createdAt, m.createdAt) < GROUP_WINDOW_MIN
+    rows.push({ type: 'msg', msg: m, isPending: false, grouped })
     prevForMsg = m
   }
   for (let i = 0; i < pending.length; i += 1) {
     const p = pending[i]!
-    rows.push({ type: 'msg', msg: p, isPending: true })
+    const grouped =
+      prevForMsg !== null
+      && prevForMsg.authorId === p.authorId
+      && minutesBetween(prevForMsg.createdAt, p.createdAt) < GROUP_WINDOW_MIN
+    rows.push({ type: 'msg', msg: p, isPending: true, grouped })
     prevForMsg = p
   }
 
@@ -555,6 +622,7 @@ export function DmBubbleList({
             message={m}
             member={memberMap.get(m.authorId)}
             isOwn={m.authorId === currentUserId}
+            grouped={row.grouped}
             currentUserId={currentUserId}
             pendingStatus={row.isPending ? (m as PendingMessage)._pending : undefined}
             memberMap={memberMap}

@@ -6,6 +6,12 @@ export interface VoiceTokenIssueArgs {
   userId: string
   channelId: string
   displayName: string
+  /**
+   * Явное имя LiveKit-комнаты. По умолчанию `voice-${channelId}`; DM-звонок
+   * (T-087) передаёт `dm-${channelId}`, чтобы комната жила в отдельном
+   * неймспейсе (webhook её намеренно игнорит, см. media/webhook.ts).
+   */
+  room?: string
   canPublish?: boolean
   canSubscribe?: boolean
   canPublishData?: boolean

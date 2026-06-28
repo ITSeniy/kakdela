@@ -12,7 +12,9 @@ import { ApiError } from '../../lib/api.js'
 import { Avatar } from '../../components/Avatar.js'
 import { Modal } from '../../components/Modal.js'
 import { useSettingsUi } from '../settings/store.js'
+import { StartSecretChat } from '../secret/StartSecretChat.js'
 import { getUserProfile } from './api.js'
+import { fmtJoined, fmtTzNow } from './format.js'
 import { useProfileUi } from './store.js'
 
 const STATUS_LABEL: Record<UserProfile['status'], string> = {
@@ -27,36 +29,6 @@ const STATUS_DOT: Record<UserProfile['status'], string> = {
   idle:    'bg-kd-idle',
   dnd:     'bg-kd-dnd',
   offline: 'bg-kd-text-mute',
-}
-
-// «с нами с осени 2023» — сезон читается теплее точного месяца.
-function fmtJoined(iso: string): string {
-  const d = new Date(iso)
-  const m = d.getMonth() + 1
-  const season = m <= 2 || m === 12 ? 'зимы' : m <= 5 ? 'весны' : m <= 8 ? 'лета' : 'осени'
-  // Декабрьская зима относится к следующему году по ощущению, но год
-  // оставляем календарный — «с зимы 2023» для 2023-12 читается верно.
-  return `${season} ${d.getFullYear()}`
-}
-
-/** «МСК · 11:24» — короткое имя пояса + текущее время там. */
-function fmtTzNow(tz: string): string | null {
-  try {
-    const parts = new Intl.DateTimeFormat('ru', {
-      timeZone: tz,
-      hour: '2-digit',
-      minute: '2-digit',
-      timeZoneName: 'short',
-    }).formatToParts(new Date())
-    const get = (type: string) => parts.find((p) => p.type === type)?.value
-    const hour = get('hour')
-    const minute = get('minute')
-    const name = get('timeZoneName')
-    if (!hour || !minute) return null
-    return `${name ?? tz} · ${hour}:${minute}`
-  } catch {
-    return null
-  }
 }
 
 const ROLE_LABEL: Record<UserProfile['sharedServers'][number]['role'], string> = {
@@ -131,6 +103,9 @@ function ReadView({ profile }: { profile: UserProfile }) {
           </button>
         )}
       </div>
+
+      {/* секретный чат — только на мобиле, только для чужого профиля (T-103) */}
+      {!profile.isSelf && <StartSecretChat userId={profile.id} />}
 
       {/* роли — цветные пилюли (designs/final-profile.jsx) */}
       {profile.roles.length > 0 && (

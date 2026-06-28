@@ -2,8 +2,7 @@ import type { User } from '@kakdela/ginzu'
 
 import { useAuthStore } from '../features/auth/store.js'
 import { friendlyMessage } from './errorMessages.js'
-
-const SPEEDY_URL = import.meta.env.VITE_SPEEDY_URL ?? 'http://localhost:3001'
+import { SPEEDY_URL } from './serverUrl.js'
 
 export class ApiError extends Error {
   constructor(

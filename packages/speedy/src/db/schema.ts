@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto'
 
 import { isNotNull } from 'drizzle-orm'
-import { type AnyPgColumn, pgTable, pgEnum, uuid, text, timestamp, index, uniqueIndex, integer, bigint, boolean, jsonb, primaryKey } from 'drizzle-orm/pg-core'
+import { type AnyPgColumn, customType, pgTable, pgEnum, uuid, text, timestamp, index, uniqueIndex, integer, bigint, boolean, jsonb, primaryKey } from 'drizzle-orm/pg-core'
 
 function uuidv7(): string {
   const ms = Date.now()
@@ -327,5 +327,77 @@ export const sessions = pgTable(
   },
   (t) => ({
     userIdIdx: index('sessions_user_id_idx').on(t.userId),
+  }),
+)
+
+// ───── Secret chats (Фаза 6) ─────
+// Сервер хранит ТОЛЬКО публичные ключи и непрозрачный шифртекст — расшифровать
+// он не может ничего. Слепой каталог prekey'ев (T-101) + слепой релей (T-102).
+// Секретные чаты device-bound: расшифрованная история живёт на устройстве,
+// не здесь.
+
+// bytea-колонка для шифртекста (drizzle pg-core не отдаёт bytea «из коробки»).
+const bytea = customType<{ data: Buffer; driver: Buffer }>({
+  dataType() {
+    return 'bytea'
+  },
+})
+
+// Тип конверта = тип ciphertext'а libsignal: 'prekey' (PreKeySignalMessage —
+// первое сообщение сессии) или 'message' (обычный SignalMessage). Прикладные
+// read/typing зашифрованы ВНУТРИ конверта и серверу не видны (иначе утечка
+// метаданных о характере сообщений).
+export const secretMsgTypeEnum = pgEnum('secret_msg_type', ['prekey', 'message'])
+
+// Identity-ключ + текущий signed prekey устройства (один на пользователя).
+// libsignal v0.96.4 — это PQXDH: помимо EC signed prekey бандл ОБЯЗАН содержать
+// подписанный Kyber1024 prekey (last-resort, один на пользователя). Все ключи —
+// ТОЛЬКО публичные (слепой каталог).
+export const secretIdentities = pgTable('secret_identities', {
+  userId:          uuid('user_id').primaryKey().references(() => users.id, { onDelete: 'cascade' }),
+  identityKey:     text('identity_key').notNull(),          // base64 публичного ключа
+  registrationId:  integer('registration_id').notNull(),
+  signedPreKeyId:  integer('signed_pre_key_id').notNull(),
+  signedPreKey:    text('signed_pre_key').notNull(),        // base64
+  signedPreKeySig: text('signed_pre_key_sig').notNull(),    // base64 подпись identity-ключом
+  kyberPreKeyId:   integer('kyber_pre_key_id').notNull(),
+  kyberPreKey:     text('kyber_pre_key').notNull(),         // base64 публичного Kyber1024
+  kyberPreKeySig:  text('kyber_pre_key_sig').notNull(),     // base64 подпись identity-ключом
+  updatedAt:       timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+// Одноразовые prekey'и: выдаются по одному и помечаются consumed при выдаче.
+export const secretOneTimePrekeys = pgTable(
+  'secret_one_time_prekeys',
+  {
+    userId:     uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    keyId:      integer('key_id').notNull(),
+    pubKey:     text('pub_key').notNull(),                  // base64
+    consumedAt: timestamp('consumed_at', { withTimezone: true }),
+    createdAt:  timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    pk:           primaryKey({ columns: [t.userId, t.keyId] }),
+    // Выборка следующего неиспользованного ключа адресата.
+    availableIdx: index('secret_one_time_prekeys_available_idx').on(t.userId, t.consumedAt),
+  }),
+)
+
+// Очередь шифр-конвертов (store-and-forward). Удаляются после ack получателем;
+// retention-sweeper добивает недоставленные. Колонки content/text НЕТ — только
+// непрозрачный blob, чтобы его нельзя было случайно проиндексировать поиском.
+export const secretEnvelopes = pgTable(
+  'secret_envelopes',
+  {
+    id:         uuid('id').primaryKey().$defaultFn(uuidv7),
+    fromUserId: uuid('from_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    toUserId:   uuid('to_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    ciphertext: bytea('ciphertext').notNull(),
+    msgType:    secretMsgTypeEnum('msg_type').notNull(),
+    createdAt:  timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    // Инбокс получателя в порядке поступления (uuidv7 ~ время).
+    inboxIdx: index('secret_envelopes_to_user_id_idx').on(t.toUserId, t.id),
   }),
 )

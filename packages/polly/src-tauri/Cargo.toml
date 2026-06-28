@@ -25,5 +25,21 @@ tauri-plugin-global-shortcut = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
+# Секретные чаты (T-101): официальное Rust-ядро Signal. В v0.96.4 это PQXDH
+# (post-quantum X3DH: classic X25519 + Kyber1024) + Double Ratchet. Не на
+# crates.io — пин на git-тег. Обновлять осознанно (security-критично).
+libsignal-protocol = { git = "https://github.com/signalapp/libsignal", tag = "v0.96.4" }
+# rand 0.9 — ОБЯЗАТЕЛЬНО та же мажорная версия, что и у libsignal (rand_core 0.9):
+# message_encrypt<R: Rng + CryptoRng> требует трейты именно этой версии.
+rand = "0.9"
+# Шифрование локального стора сессий/ключей at-rest (DEK; см. crypto/store.rs).
+aes-gcm = "0.10"
+# Трейты стора libsignal объявлены через async_trait — наши impl'ы тоже.
+async-trait = "0.1"
+# Синхронный драйвер для ?Send async-трейтов стора libsignal (futures без I/O —
+# резолвятся за один poll). Дешевле, чем тащить tokio в крипто-путь.
+pollster = "0.4"
+base64 = "0.22"
+
 [features]
 custom-protocol = ["tauri/custom-protocol"]

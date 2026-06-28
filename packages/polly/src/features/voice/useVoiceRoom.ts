@@ -12,16 +12,35 @@ import {
   installVoiceRoom,
 } from '../../lib/livekit.js'
 import { playSound } from '../sounds/sounds.js'
-import { joinVoiceChannel, leaveVoiceChannel } from './api.js'
+import { joinDmVoice, joinVoiceChannel, leaveDmVoice, leaveVoiceChannel } from './api.js'
 import { useVoiceInputSettings } from './inputSettings.js'
 import { audioCaptureOptions } from './noiseSettings.js'
 import { useVoiceStore } from './store.js'
 
+export interface DmCallPeer {
+  id: string
+  name: string
+  avatarUrl: string | null
+}
+
 export interface UseVoiceRoom {
   join(channelId: string): Promise<void>
+  joinDm(channelId: string, peer: DmCallPeer): Promise<void>
   leave(): Promise<void>
   toggleMute(): Promise<void>
   toggleDeafen(): Promise<void>
+}
+
+// Куда подключаемся: серверный голос-канал или личный звонок (T-087). От этого
+// зависят join/leave-эндпоинты и контекст в store (шапка/док/тост).
+type JoinTarget =
+  | { kind: 'channel'; channelId: string }
+  | { kind: 'dm'; channelId: string; peer: DmCallPeer }
+
+function leaveForTarget(target: JoinTarget): Promise<void> {
+  return target.kind === 'dm'
+    ? leaveDmVoice(target.channelId)
+    : leaveVoiceChannel(target.channelId)
 }
 
 // Все mutating-операции с комнатой (join/leave) проходят через один queue
@@ -59,15 +78,25 @@ export function joinVoiceRoom(channelId: string): Promise<void> {
   // Бампаем seq СИНХРОННО — чтобы любая уже-стоящая в очереди операция
   // прочитала актуальный «победитель», ещё не дойдя до своей работы.
   const seq = ++joinSequence
-  return enqueueVoiceOp(() => runJoin(channelId, seq))
+  return enqueueVoiceOp(() => runJoin({ kind: 'channel', channelId }, seq))
+}
+
+/** Подключиться к личному звонку (T-087) — та же очередь, что у join канала. */
+export function joinDmCall(channelId: string, peer: DmCallPeer): Promise<void> {
+  const seq = ++joinSequence
+  return enqueueVoiceOp(() => runJoin({ kind: 'dm', channelId, peer }, seq))
 }
 
 export function useVoiceRoom(): UseVoiceRoom {
   const join = useCallback((channelId: string) => joinVoiceRoom(channelId), [])
+  const joinDm = useCallback(
+    (channelId: string, peer: DmCallPeer) => joinDmCall(channelId, peer),
+    [],
+  )
   const leave = useCallback(() => leaveVoiceRoom(), [])
   const toggleMute = useCallback(() => toggleMuteVoice(), [])
   const toggleDeafen = useCallback(() => toggleDeafenVoice(), [])
-  return { join, leave, toggleMute, toggleDeafen }
+  return { join, joinDm, leave, toggleMute, toggleDeafen }
 }
 
 /**
@@ -182,8 +211,10 @@ export async function retryMicrophone(): Promise<boolean> {
   }
 }
 
-async function runJoin(channelId: string, seq: number): Promise<void> {
+async function runJoin(target: JoinTarget, seq: number): Promise<void> {
   if (seq !== joinSequence) return
+
+  const { channelId } = target
 
   // Если до нас была активная комната — закрываем перед новым подключением.
   if (useVoiceStore.getState().activeChannelId) {
@@ -193,12 +224,16 @@ async function runJoin(channelId: string, seq: number): Promise<void> {
 
   const s = useVoiceStore.getState()
   s.setActiveChannelId(channelId)
+  s.setActiveContext(target.kind)
+  s.setActiveDmPeer(target.kind === 'dm' ? target.peer : null)
   s.setStatus('connecting')
   s.setError(null)
 
   let joinResponse
   try {
-    joinResponse = await joinVoiceChannel(channelId)
+    joinResponse = target.kind === 'dm'
+      ? await joinDmVoice(channelId)
+      : await joinVoiceChannel(channelId)
   } catch (err) {
     if (seq === joinSequence) {
       const code =
@@ -210,7 +245,7 @@ async function runJoin(channelId: string, seq: number): Promise<void> {
     return
   }
   if (seq !== joinSequence) {
-    void leaveVoiceChannel(channelId).catch(() => {})
+    void leaveForTarget(target).catch(() => {})
     return
   }
 
@@ -237,7 +272,7 @@ async function runJoin(channelId: string, seq: number): Promise<void> {
     // Поздно — успели отменить. Аккуратно сворачиваем эту orphan-комнату,
     // не трогая глобальное state (мы там и не успели стать «активными»).
     await disposeRoom(room)
-    void leaveVoiceChannel(channelId).catch(() => {})
+    void leaveForTarget(target).catch(() => {})
     return
   }
 
@@ -270,7 +305,7 @@ async function runJoin(channelId: string, seq: number): Promise<void> {
   // Между mic-publish'ом и сюда тоже могли отменить — финальный check.
   if (seq !== joinSequence) {
     await disposeRoom(room)
-    void leaveVoiceChannel(channelId).catch(() => {})
+    void leaveForTarget(target).catch(() => {})
     return
   }
 
@@ -285,11 +320,14 @@ async function runLeave(): Promise<void> {
 }
 
 async function teardownActive(): Promise<void> {
-  const channelId = useVoiceStore.getState().activeChannelId
+  const { activeChannelId, activeContext } = useVoiceStore.getState()
   await disposeVoiceRoom()
   useVoiceStore.getState().reset()
-  if (channelId) {
-    leaveVoiceChannel(channelId).catch(() => {})
+  if (activeChannelId) {
+    const leave = activeContext === 'dm'
+      ? leaveDmVoice(activeChannelId)
+      : leaveVoiceChannel(activeChannelId)
+    leave.catch(() => {})
   }
 }
 

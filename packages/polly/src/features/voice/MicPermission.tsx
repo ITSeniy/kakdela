@@ -40,6 +40,20 @@ const COPY_BY_PLATFORM: Record<HostPlatform, CopyPack> = {
     openLabel: null,
     openTarget: null,
   },
+  android: {
+    title: 'нужен доступ к микрофону',
+    body:
+      'Откройте настройки Android → Приложения → «как дела» → Разрешения → Микрофон и включите доступ. После — нажмите «Попробовать снова».',
+    openLabel: null,
+    openTarget: null,
+  },
+  ios: {
+    title: 'нужен доступ к микрофону',
+    body:
+      'Откройте Настройки → «как дела» → Микрофон и включите доступ. После — нажмите «Попробовать снова».',
+    openLabel: null,
+    openTarget: null,
+  },
 }
 
 interface MicPermissionDialogProps {

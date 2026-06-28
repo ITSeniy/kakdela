@@ -65,11 +65,12 @@ export const dmRoutes: FastifyPluginAsyncZod = async (app) => {
       // 1) Метаданные собеседников + live presence
       const otherUsersRows = await db
         .select({
-          id:          users.id,
-          displayName: users.displayName,
-          username:    users.username,
-          avatarUrl:   users.avatarUrl,
-          status:      users.status,
+          id:           users.id,
+          displayName:  users.displayName,
+          username:     users.username,
+          avatarUrl:    users.avatarUrl,
+          status:       users.status,
+          customStatus: users.customStatus,
         })
         .from(users)
         .where(inArray(users.id, otherIds))
@@ -136,13 +137,14 @@ export const dmRoutes: FastifyPluginAsyncZod = async (app) => {
         summaries.push({
           channelId: dm.channelId,
           otherUser: {
-            id:          other.id,
-            displayName: other.displayName,
-            username:    other.username,
-            avatarUrl:   other.avatarUrl,
-            status:      presenceMap.get(other.id)?.status ?? other.status,
-            roles:       [],
-            permissions: 0,
+            id:           other.id,
+            displayName:  other.displayName,
+            username:     other.username,
+            avatarUrl:    other.avatarUrl,
+            status:       presenceMap.get(other.id)?.status ?? other.status,
+            customStatus: other.customStatus,
+            roles:        [],
+            permissions:  0,
           },
           lastMessage: last
             ? {
@@ -194,11 +196,12 @@ export const dmRoutes: FastifyPluginAsyncZod = async (app) => {
 
       const otherRows = await db
         .select({
-          id:          users.id,
-          displayName: users.displayName,
-          username:    users.username,
-          avatarUrl:   users.avatarUrl,
-          status:      users.status,
+          id:           users.id,
+          displayName:  users.displayName,
+          username:     users.username,
+          avatarUrl:    users.avatarUrl,
+          status:       users.status,
+          customStatus: users.customStatus,
         })
         .from(users)
         .where(eq(users.id, other))
@@ -217,13 +220,14 @@ export const dmRoutes: FastifyPluginAsyncZod = async (app) => {
 
       const presenceMap = await presence.getStatusBulk([other])
       const otherPublic = {
-        id:          otherUser.id,
-        displayName: otherUser.displayName,
-        username:    otherUser.username,
-        avatarUrl:   otherUser.avatarUrl,
-        status:      presenceMap.get(otherUser.id)?.status ?? otherUser.status,
-        roles:       [],
-        permissions: 0,
+        id:           otherUser.id,
+        displayName:  otherUser.displayName,
+        username:     otherUser.username,
+        avatarUrl:    otherUser.avatarUrl,
+        status:       presenceMap.get(otherUser.id)?.status ?? otherUser.status,
+        customStatus: otherUser.customStatus,
+        roles:        [],
+        permissions:  0,
       }
 
       if (existing[0]) {

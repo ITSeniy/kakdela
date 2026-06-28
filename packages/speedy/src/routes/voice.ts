@@ -10,12 +10,12 @@ import {
   type VoiceParticipantPublic,
 } from '@kakdela/ginzu/api-types'
 
-import { channels, users } from '../db/schema.js'
+import { channels, dmChannels, users } from '../db/schema.js'
 import { db } from '../lib/db.js'
-import { assertMember, assertPermission, notFound } from '../lib/permissions.js'
+import { assertMember, assertPermission, forbidden, notFound } from '../lib/permissions.js'
 import { redis } from '../lib/redis.js'
-import { issueToken, listParticipants, muteParticipantMic, revokeUser } from '../media/guido.js'
-import { broadcastToServer } from '../ws/broadcast.js'
+import { dmRoomName, issueToken, listDmParticipants, listParticipants, muteParticipantMic, revokeUser } from '../media/guido.js'
+import { broadcastToServer, broadcastToUser } from '../ws/broadcast.js'
 
 // Резервный набор «кто сейчас в комнате» — основной источник истины это
 // LiveKit (см. T-032 webhook), но мы пишем сюда на join/leave для подстраховки
@@ -103,6 +103,45 @@ async function getParticipantsCached(channelId: string): Promise<VoiceParticipan
     }
   }
   return fetchAndCacheParticipants(channelId)
+}
+
+// ───── DM-звонки (T-087) ─────
+//
+// Личный 1:1 звонок поверх DM-канала: отдельная LiveKit-комната `dm-${id}`.
+// Источник истины «кто в звонке» — сам LiveKit (listDmParticipants), а не
+// Redis: так нет проблемы залипшего presence от упавшего клиента. Webhook
+// `dm-` игнорит, состав в UI ведёт LiveKit на клиенте. Инвайт уходит
+// targeted-событием второй стороне; pending-инвайты с таймаутом звонка живут
+// в памяти процесса (self-host = один инстанс speedy).
+const DM_RING_TIMEOUT_MS = 30_000
+
+interface PendingDmInvite {
+  from: string
+  to: string
+  timer: ReturnType<typeof setTimeout>
+}
+const dmInvites = new Map<string, PendingDmInvite>()
+
+function clearDmInvite(channelId: string): void {
+  const inv = dmInvites.get(channelId)
+  if (inv) {
+    clearTimeout(inv.timer)
+    dmInvites.delete(channelId)
+  }
+}
+
+/** Возвращает собеседника по DM-каналу, либо null если user не участник. */
+async function dmPeerOf(channelId: string, userId: string): Promise<string | null> {
+  const rows = await db
+    .select({ userAId: dmChannels.userAId, userBId: dmChannels.userBId })
+    .from(dmChannels)
+    .where(eq(dmChannels.channelId, channelId))
+    .limit(1)
+  const dm = rows[0]
+  if (!dm) return null
+  if (dm.userAId === userId) return dm.userBId
+  if (dm.userBId === userId) return dm.userAId
+  return null
 }
 
 export const voiceRoutes: FastifyPluginAsyncZod = async (app) => {
@@ -357,6 +396,150 @@ export const voiceRoutes: FastifyPluginAsyncZod = async (app) => {
         }
       }
 
+      return reply.code(204).send(null)
+    },
+  )
+
+  // ───── POST /api/voice/dm/:channelId/join (T-087) ─────
+  //
+  // Подключение к DM-звонку. Если в комнате ещё никого — я инициатор: зовём
+  // собеседника targeted-инвайтом и ставим 30s-таймер «не ответили». Если
+  // кто-то уже здесь (инициатор) — я принимаю: гасим звонок.
+  app.post(
+    '/voice/dm/:channelId/join',
+    {
+      preHandler: app.authenticate,
+      schema: {
+        params: z.object({ channelId: z.string().uuid() }),
+        response: {
+          200: VoiceJoinResponseSchema,
+          401: ErrorBodySchema,
+          403: ErrorBodySchema,
+          404: ErrorBodySchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const { channelId } = req.params
+      const userId = req.authUser!.id
+
+      const peerId = await dmPeerOf(channelId, userId)
+      if (!peerId) throw forbidden('not a participant of this dm')
+
+      const userRows = await db
+        .select({ displayName: users.displayName, avatarUrl: users.avatarUrl })
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1)
+      const me = userRows[0]
+      if (!me) throw notFound('user-not-found', 'user not found')
+
+      const token = await issueToken({
+        userId,
+        channelId,
+        displayName: me.displayName,
+        room: dmRoomName(channelId),
+      })
+
+      // Кто уже в комнате (по LiveKit) и есть ли висящий инвайт — определяет,
+      // инициатор я или принимающий. Это устойчиво и к гонке «принял раньше,
+      // чем у звонящего поднялась медиа» (тогда инвайт ещё висит на меня).
+      const present = await listDmParticipants(channelId)
+      const othersPresent = present.some((p) => p.userId !== userId)
+      const invite = dmInvites.get(channelId)
+
+      if (othersPresent || (invite && invite.to === userId)) {
+        // Принимаю звонок (или переподключаюсь) — гасим инвайт/таймаут.
+        clearDmInvite(channelId)
+      } else if (invite && invite.from === userId) {
+        // Я уже звоню (повторный/retry join) — продлеваем таймер, не дублируем
+        // инвайт.
+        clearTimeout(invite.timer)
+        invite.timer = setTimeout(() => {
+          dmInvites.delete(channelId)
+          void broadcastToUser(peerId, { t: 'dm.call-cancel', channelId, fromUserId: userId })
+          void broadcastToUser(userId, { t: 'dm.call-cancel', channelId, fromUserId: userId })
+        }, DM_RING_TIMEOUT_MS)
+      } else {
+        // Свежий звонок — я инициатор: зову собеседника и завожу таймаут.
+        clearDmInvite(channelId)
+        const timer = setTimeout(() => {
+          dmInvites.delete(channelId)
+          void broadcastToUser(peerId, { t: 'dm.call-cancel', channelId, fromUserId: userId })
+          void broadcastToUser(userId, { t: 'dm.call-cancel', channelId, fromUserId: userId })
+        }, DM_RING_TIMEOUT_MS)
+        dmInvites.set(channelId, { from: userId, to: peerId, timer })
+        await broadcastToUser(peerId, {
+          t: 'dm.call-invite',
+          channelId,
+          fromUserId: userId,
+          fromName: me.displayName,
+          fromAvatarUrl: me.avatarUrl ?? null,
+        })
+      }
+
+      // Список участников UI пересоберёт из самой LiveKit-комнаты после
+      // connect (installVoiceRoom), поэтому snapshot тут пустой.
+      return reply.code(200).send({
+        token: token.token,
+        url: token.url,
+        room: token.room,
+        participants: [],
+      })
+    },
+  )
+
+  // ───── POST /api/voice/dm/:channelId/leave (T-087) ─────
+  app.post(
+    '/voice/dm/:channelId/leave',
+    {
+      preHandler: app.authenticate,
+      schema: {
+        params: z.object({ channelId: z.string().uuid() }),
+        response: {
+          204: z.null(),
+          401: ErrorBodySchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const { channelId } = req.params
+      const userId = req.authUser!.id
+      // Инициатор положил трубку до ответа — отменяем звонок у собеседника.
+      const inv = dmInvites.get(channelId)
+      if (inv && inv.from === userId) {
+        clearDmInvite(channelId)
+        await broadcastToUser(inv.to, { t: 'dm.call-cancel', channelId, fromUserId: userId })
+      }
+      return reply.code(204).send(null)
+    },
+  )
+
+  // ───── POST /api/voice/dm/:channelId/decline (T-087) ─────
+  app.post(
+    '/voice/dm/:channelId/decline',
+    {
+      preHandler: app.authenticate,
+      schema: {
+        params: z.object({ channelId: z.string().uuid() }),
+        response: {
+          204: z.null(),
+          401: ErrorBodySchema,
+          403: ErrorBodySchema,
+          404: ErrorBodySchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const { channelId } = req.params
+      const userId = req.authUser!.id
+      const peerId = await dmPeerOf(channelId, userId)
+      if (!peerId) throw forbidden('not a participant of this dm')
+      const inv = dmInvites.get(channelId)
+      if (inv && inv.to === userId) {
+        clearDmInvite(channelId)
+        await broadcastToUser(inv.from, { t: 'dm.call-decline', channelId, fromUserId: userId })
+      }
       return reply.code(204).send(null)
     },
   )
