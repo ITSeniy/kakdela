@@ -209,3 +209,48 @@ body {
   border-radius: 2px;
   font-weight: 600;
 }
+
+/* ───── Микро-анимации входа (единый словарь движения) ─────
+   Идиома: 150–180ms, ease-out, fade + лёгкий translate/scale. Только входы
+   транзиентных элементов и подтверждения действий — без зацикленного движения
+   в покое. Всё уважает prefers-reduced-motion (ниже). */
+
+/* Оверлеи/панели/пикеры/ПКМ-меню/тайлы/реакции — «всплывает из точки». */
+@keyframes kd-pop-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.kd-pop-in { animation: kd-pop-in 160ms ease-out; }
+
+/* Фон модалки — только проявление, без сдвига. */
+@keyframes kd-overlay-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.kd-overlay-in { animation: kd-overlay-in 160ms ease-out; }
+
+/* Тост — поднимается снизу. */
+@keyframes kd-toast-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.kd-toast-in { animation: kd-toast-in 180ms ease-out; }
+
+/* Новое сообщение в ленте — мягкое проявление (контент, не «хром», поэтому
+   сдвиг меньше). Класс ставится только пришедшим после первого рендера. */
+@keyframes kd-msg-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.kd-msg-in { animation: kd-msg-in 160ms ease-out; }
+
+/* Системная страховка от перегруза: тем, кто просит меньше движения,
+   глушим вообще всё движение приложения (включая существующие kd-* и spin). */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

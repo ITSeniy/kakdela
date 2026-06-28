@@ -201,6 +201,8 @@ interface DmBubbleProps {
   memberMap: ReadonlyMap<string, MemberPublic>
   channelMap: ReadonlyMap<string, Channel>
   emojiMap?: ReadonlyMap<string, CustomEmoji>
+  /** Анимация входа — для сообщений, пришедших после первого рендера. */
+  enter?: boolean
   onMention?: (userId: string) => void
   onEdit: (id: string, content: string) => void
   onDelete: (id: string) => void
@@ -212,7 +214,7 @@ interface DmBubbleProps {
 
 function DmBubble({
   message, member, isOwn, grouped, isGroupTail, currentUserId, pendingStatus,
-  memberMap, channelMap, emojiMap, onMention,
+  memberMap, channelMap, emojiMap, enter = false, onMention,
   onEdit, onDelete, onRetry, onReply, onAddReaction, onRemoveReaction,
 }: DmBubbleProps) {
   const [editing, setEditing] = useState(false)
@@ -385,7 +387,7 @@ function DmBubble({
 
   return (
     <div
-      className={`group flex items-end gap-2.5 px-5 ${grouped ? 'pt-0.5' : 'pt-2'} pb-0.5 ${isOwn ? 'flex-row-reverse' : ''} ${opacityCls} ${isMobile ? 'select-none' : ''}`}
+      className={`group flex items-end gap-2.5 px-5 ${grouped ? 'pt-0.5' : 'pt-2'} pb-0.5 ${isOwn ? 'flex-row-reverse' : ''} ${opacityCls} ${isMobile ? 'select-none' : ''} ${enter ? 'kd-msg-in' : ''}`}
       data-message-id={message.id}
       onContextMenu={openContextMenu}
       onTouchStart={onTouchStart}
@@ -539,6 +541,10 @@ export function DmBubbleList({
   const isAtBottomRef = useRef(true)
   const prevScrollHeightRef = useRef<number | null>(null)
   const initialScrolledRef = useRef(false)
+  // Снимок последнего id на момент первой загрузки — входом анимируем только
+  // сообщения новее него (пришедшие вживую), не начальную пачку/историю.
+  const firstSeenMaxIdRef = useRef<string | null>(null)
+  const sawInitialRef = useRef(false)
 
   const [snapshotReadAt] = useState<string | null>(() => {
     if (typeof window === 'undefined') return null
@@ -619,7 +625,16 @@ export function DmBubbleList({
   useEffect(() => {
     initialScrolledRef.current = false
     isAtBottomRef.current = true
+    sawInitialRef.current = false
+    firstSeenMaxIdRef.current = null
   }, [channelId])
+
+  useEffect(() => {
+    if (!sawInitialRef.current && messages.length > 0) {
+      sawInitialRef.current = true
+      firstSeenMaxIdRef.current = messages[messages.length - 1]?.id ?? null
+    }
+  }, [messages])
 
   // Deep-link `#msg:<id>` (переход из Inbox/поиска): когда сообщение
   // появляется в DOM — скроллим к нему и подсвечиваем kd-flash.
@@ -751,6 +766,10 @@ export function DmBubbleList({
         }
         const m = row.msg
         const key = row.isPending ? (m as PendingMessage)._nonce : m.id
+        const enter = !row.isPending
+          && firstSeenMaxIdRef.current !== null
+          && m.id > firstSeenMaxIdRef.current
+          && m.authorId !== currentUserId
         return (
           <DmBubble
             key={key}
@@ -760,6 +779,7 @@ export function DmBubbleList({
             grouped={row.grouped}
             isGroupTail={row.tail}
             currentUserId={currentUserId}
+            enter={enter}
             pendingStatus={row.isPending ? (m as PendingMessage)._pending : undefined}
             memberMap={memberMap}
             channelMap={channelMap}

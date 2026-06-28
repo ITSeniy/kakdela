@@ -41,13 +41,13 @@ export function Modal({ onClose, children, width = 420, className, closeOnBackdr
 
   return createPortal(
     <div
-      className="fixed inset-0 z-40 bg-kd-overlay-soft backdrop-blur-[2px] flex items-center justify-center"
+      className="fixed inset-0 z-40 bg-kd-overlay-soft backdrop-blur-[2px] flex items-center justify-center kd-overlay-in"
       onClick={onBackdrop}
     >
       <div
         className={[
           'relative max-w-[92vw] max-h-[88vh] bg-kd-panel rounded-[10px] border border-kd-border',
-          'shadow-kd-modal overflow-hidden flex flex-col',
+          'shadow-kd-modal overflow-hidden flex flex-col kd-pop-in',
           className ?? '',
         ].join(' ')}
         style={{ width }}

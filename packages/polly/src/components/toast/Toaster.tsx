@@ -21,7 +21,7 @@ function ToastRow({ item }: { item: ToastItem }) {
   }, [item.id, item.duration, dismiss])
 
   return (
-    <div className="flex items-center gap-2.5 px-3.5 py-2.5 bg-kd-panel border border-kd-border rounded-kd shadow-kd-modal pointer-events-auto min-w-[260px] max-w-[420px]">
+    <div className="flex items-center gap-2.5 px-3.5 py-2.5 bg-kd-panel border border-kd-border rounded-kd shadow-kd-modal pointer-events-auto min-w-[260px] max-w-[420px] kd-toast-in">
       <span className={`w-2 h-2 rounded-full shrink-0 ${KIND_DOT[item.kind]}`} />
       <div className="flex-1 min-w-0 text-[12px] text-kd-text leading-snug">{item.message}</div>
       {item.action && (

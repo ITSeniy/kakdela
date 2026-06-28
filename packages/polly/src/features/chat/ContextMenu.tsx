@@ -109,7 +109,7 @@ export function ContextMenu({
   return (
     <div
       ref={ref}
-      className="fixed z-50 bg-kd-panel border border-kd-border rounded-kd shadow-lg py-1 select-none"
+      className={`fixed z-50 bg-kd-panel border border-kd-border rounded-kd shadow-lg py-1 select-none ${pos ? 'kd-pop-in' : ''}`}
       style={{
         left: pos?.x ?? x,
         top: pos?.y ?? y,

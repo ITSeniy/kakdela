@@ -69,7 +69,7 @@ export default function StickerPicker({ onSelect }: { onSelect: (sticker: Sticke
   }
 
   return (
-    <div className="w-[320px] h-[400px] bg-kd-panel border border-kd-border rounded-kd shadow-kd-modal flex flex-col overflow-hidden">
+    <div className="w-[320px] h-[400px] bg-kd-panel border border-kd-border rounded-kd shadow-kd-modal flex flex-col overflow-hidden kd-pop-in">
       <div className="px-2.5 py-2 border-b border-kd-border bg-kd-panel-alt shrink-0">
         <div className="flex items-center gap-2 px-2 py-1.5 rounded bg-kd-bg border border-kd-border">
           <Icon.Search size={13} className="text-kd-text-mute shrink-0" />

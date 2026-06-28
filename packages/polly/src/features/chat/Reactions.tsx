@@ -39,7 +39,7 @@ function ReactionPill({
 }) {
   const [hover, setHover] = useState(false)
   return (
-    <div className="relative" onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
+    <div className="relative kd-pop-in" onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
       <button
         type="button"
         onClick={onClick}

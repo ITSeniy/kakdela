@@ -114,6 +114,11 @@ export function MessageList({
   const stickToBottomRef = useRef(true)
   const prevScrollHeightRef = useRef<number | null>(null)
   const initialScrolledRef = useRef(false)
+  // Снимок «последний id на момент первой загрузки канала»: анимируем входом
+  // только сообщения новее него (т.е. пришедшие в реальном времени), но не
+  // начальную пачку и не подгрузку истории вверх. null до первой загрузки.
+  const firstSeenMaxIdRef = useRef<string | null>(null)
+  const sawInitialRef = useRef(false)
 
   const [snapshotReadAt] = useState<string | null>(() => {
     if (typeof window === 'undefined') return null
@@ -216,7 +221,19 @@ export function MessageList({
   useEffect(() => {
     initialScrolledRef.current = false
     stickToBottomRef.current = true
+    // Сбрасываем снимок входа: у нового канала свой «нулевой» момент.
+    sawInitialRef.current = false
+    firstSeenMaxIdRef.current = null
   }, [channelId])
+
+  // Фиксируем максимальный id после первой непустой загрузки канала — всё
+  // новее этого считается «пришедшим вживую» и анимируется.
+  useEffect(() => {
+    if (!sawInitialRef.current && messages.length > 0) {
+      sawInitialRef.current = true
+      firstSeenMaxIdRef.current = messages[messages.length - 1]?.id ?? null
+    }
+  }, [messages])
 
   // Deep-link `#msg:<id>` (например, переход из Inbox): когда сообщение
   // появляется в DOM — скроллим к нему и подсвечиваем kd-flash.
@@ -317,6 +334,12 @@ export function MessageList({
         if (row.type === 'unread') return <UnreadDivider key={`unread-${idx}`} />
         const m = row.msg
         const key = row.isPending ? (m as PendingMessage)._nonce : m.id
+        // Вход анимируем только у чужих сообщений новее снимка: свои отправки
+        // должны ощущаться мгновенными (без «доезжания» оптимистичной строки).
+        const enter = !row.isPending
+          && firstSeenMaxIdRef.current !== null
+          && m.id > firstSeenMaxIdRef.current
+          && m.authorId !== currentUserId
         return (
           <Message
             key={key}
@@ -329,6 +352,7 @@ export function MessageList({
             memberMap={memberMap}
             channelMap={channelMap}
             emojiMap={emojiMap}
+            enter={enter}
             threadsAllowed={threadsAllowed}
             canPin={canPin}
             nsfw={nsfw}

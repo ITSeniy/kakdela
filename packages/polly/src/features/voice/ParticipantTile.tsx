@@ -64,7 +64,7 @@ export function ParticipantTile({
       onClick={onClick}
       onKeyDown={onClick ? (e) => { if (e.key === 'Enter') onClick() } : undefined}
       className={[
-        'relative w-full h-full rounded-lg overflow-hidden flex items-center justify-center min-w-0',
+        'relative w-full h-full rounded-lg overflow-hidden flex items-center justify-center min-w-0 kd-pop-in',
         compact ? 'min-h-[72px]' : '',
         onClick ? 'cursor-pointer' : '',
         hoverCls,

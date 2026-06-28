@@ -43,6 +43,8 @@ interface MessageProps {
   canPin?: boolean
   /** NSFW-канал: блюрить медиа до клика. */
   nsfw?: boolean
+  /** Проиграть анимацию входа — для сообщений, пришедших после первого рендера. */
+  enter?: boolean
   onEdit: (id: string, content: string) => void
   onDelete: (id: string) => void
   onRetry?: () => void
@@ -174,9 +176,10 @@ function scrollToMessage(id: string) {
 
 export function Message({
   message, prev, member, isOwn, currentUserId, pendingStatus,
-  memberMap, channelMap, emojiMap, threadsAllowed = true, canPin = false, nsfw = false,
+  memberMap, channelMap, emojiMap, threadsAllowed = true, canPin = false, nsfw = false, enter = false,
   onEdit, onDelete, onRetry, onReply, onAddReaction, onRemoveReaction,
 }: MessageProps) {
+  const enterCls = enter ? 'kd-msg-in' : ''
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(message.content)
   const editRef = useRef<HTMLTextAreaElement>(null)
@@ -468,7 +471,7 @@ export function Message({
   if (compact) {
     return (
       <div
-        className={`group relative px-4 py-[2px] ${hoverCls} ${opacityCls}`}
+        className={`group relative px-4 py-[2px] ${hoverCls} ${opacityCls} ${enterCls}`}
         data-message-id={message.id}
         onContextMenu={openContextMenu}
       >
@@ -521,7 +524,7 @@ export function Message({
   if (grouped) {
     return (
       <div
-        className={`group relative flex gap-2.5 px-4 py-[2px] items-start ${hoverCls} ${opacityCls}`}
+        className={`group relative flex gap-2.5 px-4 py-[2px] items-start ${hoverCls} ${opacityCls} ${enterCls}`}
         data-message-id={message.id}
         onContextMenu={openContextMenu}
       >
@@ -559,7 +562,7 @@ export function Message({
 
   return (
     <div
-      className={`group relative px-4 py-1 ${hoverCls} ${opacityCls}`}
+      className={`group relative px-4 py-1 ${hoverCls} ${opacityCls} ${enterCls}`}
       data-message-id={message.id}
       onContextMenu={openContextMenu}
     >
