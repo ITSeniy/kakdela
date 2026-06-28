@@ -101,18 +101,20 @@ export async function loadMemberRoleInfo(
 
   for (const userId of userIds) {
     const builtin = builtinRoles.get(userId) ?? 'member'
+    const assigned = (byUser.get(userId) ?? []).slice().sort((a, b) => b.position - a.position)
+    const roles = assigned.map((r) => ({ id: r.id, name: r.name, color: r.color, position: r.position, hoist: r.hoist }))
+
+    // У owner права всегда полные, НО назначенные роли всё равно отдаём для
+    // отображения (цвет имени, hoist-группа, галочка в настройках ролей) —
+    // иначе хозяин не видит, что назначил роль сам себе.
     if (builtin === 'owner') {
-      out.set(userId, { roles: [], permissions: ALL_PERMISSIONS })
+      out.set(userId, { roles, permissions: ALL_PERMISSIONS })
       continue
     }
-    const assigned = (byUser.get(userId) ?? []).slice().sort((a, b) => b.position - a.position)
     let mask = everyoneMask
     for (const r of assigned) mask |= r.permissions
     if (builtin === 'admin') mask |= Permissions.ADMINISTRATOR
-    out.set(userId, {
-      roles: assigned.map((r) => ({ id: r.id, name: r.name, color: r.color, position: r.position, hoist: r.hoist })),
-      permissions: mask,
-    })
+    out.set(userId, { roles, permissions: mask })
   }
   return out
 }
