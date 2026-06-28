@@ -122,6 +122,8 @@ export function VoiceDock() {
   const status = useVoiceStore((s) => s.status)
   const activeChannelId = useVoiceStore((s) => s.activeChannelId)
   const activeServerId = useVoiceStore((s) => s.activeServerId)
+  const activeContext = useVoiceStore((s) => s.activeContext)
+  const activeDmUserName = useVoiceStore((s) => s.activeDmUserName)
   const screenSharing = useVoiceStore((s) => s.screenSharing)
   const noiseSuppression = useNoiseSettings((s) => s.noiseSuppression)
   const setNoiseSuppression = useNoiseSettings((s) => s.setNoiseSuppression)
@@ -133,11 +135,12 @@ export function VoiceDock() {
 
   const connected = status === 'connected' || status === 'reconnecting'
   const visible = activeChannelId !== null && (connected || status === 'connecting')
+  const isDm = activeContext === 'dm'
 
   const { data: serverDetail } = useQuery({
     queryKey: ['server', activeServerId],
     queryFn: () => getServerDetail(activeServerId!),
-    enabled: visible && activeServerId !== null,
+    enabled: visible && !isDm && activeServerId !== null,
     staleTime: 30_000,
   })
 
@@ -163,9 +166,13 @@ export function VoiceDock() {
   const channelName = serverDetail?.channels.find((c) => c.id === activeChannelId)?.name
   const serverName = serverDetail?.server.name
 
-  const statusText = status === 'connected'
-    ? 'голосовая связь подключена'
-    : status === 'reconnecting' ? 'переподключение…' : 'подключение…'
+  const statusText = isDm
+    ? (status === 'connected'
+        ? 'личный звонок'
+        : status === 'reconnecting' ? 'переподключение…' : 'соединение…')
+    : status === 'connected'
+      ? 'голосовая связь подключена'
+      : status === 'reconnecting' ? 'переподключение…' : 'подключение…'
   const statusCls = status === 'connected' ? 'text-kd-online' : 'text-kd-idle'
 
   return (
@@ -191,18 +198,20 @@ export function VoiceDock() {
         </button>
       </div>
 
-      {/* канал / сервер — телепорт на экран ГС */}
+      {/* канал/сервер (ГС) или собеседник (DM) — телепорт к экрану звонка */}
       <button
         type="button"
         onClick={() => {
-          if (activeServerId && activeChannelId) {
+          if (isDm && activeChannelId) {
+            navigate(`/dm/${activeChannelId}`)
+          } else if (activeServerId && activeChannelId) {
             navigate(`/servers/${activeServerId}/channels/${activeChannelId}`)
           }
         }}
-        title="перейти к голосовому каналу"
+        title={isDm ? 'вернуться к звонку' : 'перейти к голосовому каналу'}
         className="block w-full text-left text-[10px] font-mono text-kd-text-mute hover:text-kd-text hover:underline truncate mt-0.5"
       >
-        {channelName ?? '…'} / {serverName ?? '…'}
+        {isDm ? (activeDmUserName ?? '…') : `${channelName ?? '…'} / ${serverName ?? '…'}`}
       </button>
 
       {/* кнопки: шумодав · демо · выйти */}

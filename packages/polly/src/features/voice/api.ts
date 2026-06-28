@@ -14,6 +14,23 @@ export async function leaveVoiceChannel(channelId: string): Promise<void> {
   await apiFetch<void>(`/api/voice/${channelId}/leave`, { method: 'POST' })
 }
 
+// ───── DM-звонки (T-087) ─────
+
+/** Подключиться к DM-звонку. Первый зашедший = инициатор, сервер зовёт второго. */
+export async function joinDmVoice(channelId: string): Promise<VoiceJoinResponse> {
+  return apiFetch<VoiceJoinResponse>(`/api/voice/dm/${channelId}/join`, { method: 'POST' })
+}
+
+/** Выйти из DM-звонка (и отменить инвайт, если ещё не приняли). */
+export async function leaveDmVoice(channelId: string): Promise<void> {
+  await apiFetch<void>(`/api/voice/dm/${channelId}/leave`, { method: 'POST' })
+}
+
+/** Отклонить входящий DM-звонок. */
+export async function declineDmCall(channelId: string): Promise<void> {
+  await apiFetch<void>(`/api/voice/dm/${channelId}/decline`, { method: 'POST' })
+}
+
 export async function listVoiceParticipants(
   channelId: string,
 ): Promise<VoiceParticipantsResponse> {

@@ -23,6 +23,12 @@ interface VoiceState {
   activeChannelId: string | null
   /** Сервер активного голосового канала — для VoiceDock (имя/телепорт). */
   activeServerId: string | null
+  // Контекст активной сессии: серверный голос-канал или личный звонок (T-087).
+  activeContext: 'channel' | 'dm'
+  // Собеседник активного DM-звонка — для шапки звонка, дока и тоста.
+  activeDmUserId: string | null
+  activeDmUserName: string | null
+  activeDmAvatarUrl: string | null
   status: VoiceStatus
   muted: boolean
   deafened: boolean
@@ -62,6 +68,8 @@ interface VoiceActions {
   setError(err: string | null): void
   setActiveChannelId(id: string | null): void
   setActiveServerId(id: string | null): void
+  setActiveContext(ctx: 'channel' | 'dm'): void
+  setActiveDmPeer(peer: { id: string; name: string; avatarUrl: string | null } | null): void
   setMuted(muted: boolean): void
   setDeafened(deafened: boolean): void
   setMutedBeforeDeafen(m: boolean): void
@@ -83,6 +91,10 @@ interface VoiceActions {
 const initialState: VoiceState = {
   activeChannelId: null,
   activeServerId: null,
+  activeContext: 'channel',
+  activeDmUserId: null,
+  activeDmUserName: null,
+  activeDmAvatarUrl: null,
   status: 'idle',
   muted: false,
   deafened: false,
@@ -157,6 +169,18 @@ export const useVoiceStore = create<VoiceState & VoiceActions>()(persist((set) =
 
   setActiveServerId(id) {
     set({ activeServerId: id })
+  },
+
+  setActiveContext(ctx) {
+    set({ activeContext: ctx })
+  },
+
+  setActiveDmPeer(peer) {
+    set({
+      activeDmUserId: peer?.id ?? null,
+      activeDmUserName: peer?.name ?? null,
+      activeDmAvatarUrl: peer?.avatarUrl ?? null,
+    })
   },
 
   setMuted(muted) {

@@ -62,6 +62,14 @@ function fmtTime(iso: string): string {
   return new Date(iso).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' })
 }
 
+function minutesBetween(a: string, b: string): number {
+  return Math.abs(new Date(a).getTime() - new Date(b).getTime()) / 60_000
+}
+
+// Окно склейки: подряд идущие сообщения одного автора в пределах 5 минут
+// «приклеиваются» — без повторного аватара и с плотным отступом.
+const GROUP_WINDOW_MIN = 5
+
 const EDIT_WINDOW_MS = 30 * 24 * 60 * 60 * 1000
 
 function scrollToMessage(id: string) {
@@ -90,6 +98,8 @@ interface DmBubbleProps {
   message: IMessage | PendingMessage
   member: MemberPublic | undefined
   isOwn: boolean
+  /** Склейка: предыдущее сообщение того же автора рядом — без аватара, плотно. */
+  grouped: boolean
   currentUserId: string | null
   pendingStatus?: 'sending' | 'error'
   memberMap: ReadonlyMap<string, MemberPublic>
@@ -105,7 +115,7 @@ interface DmBubbleProps {
 }
 
 function DmBubble({
-  message, member, isOwn, currentUserId, pendingStatus,
+  message, member, isOwn, grouped, currentUserId, pendingStatus,
   memberMap, channelMap, emojiMap, onMention,
   onEdit, onDelete, onRetry, onReply, onAddReaction, onRemoveReaction,
 }: DmBubbleProps) {
@@ -158,6 +168,9 @@ function DmBubble({
   const canDelete = isOwn
   const editDisabled = Date.now() - new Date(message.createdAt).getTime() > EDIT_WINDOW_MS
   const opacityCls = pendingStatus === 'sending' ? 'opacity-60' : ''
+  // У склеенных сообщений время-метку прячем (его несёт «голова» группы),
+  // кроме случаев «(изм.)» / статуса отправки — их важно видеть всегда.
+  const showMeta = !grouped || Boolean(message.editedAt) || Boolean(pendingStatus)
 
   function copyContent() {
     if (navigator.clipboard) void navigator.clipboard.writeText(message.content)
@@ -272,7 +285,7 @@ function DmBubble({
 
   return (
     <div
-      className={`group flex items-end gap-2.5 px-5 py-1 ${isOwn ? 'flex-row-reverse' : ''} ${opacityCls} ${isMobile ? 'select-none' : ''}`}
+      className={`group flex items-end gap-2.5 px-5 ${grouped ? 'pt-0.5' : 'pt-2'} pb-0.5 ${isOwn ? 'flex-row-reverse' : ''} ${opacityCls} ${isMobile ? 'select-none' : ''}`}
       data-message-id={message.id}
       onContextMenu={openContextMenu}
       onTouchStart={onTouchStart}
@@ -281,7 +294,7 @@ function DmBubble({
       onClickCapture={onClickCapture}
     >
       {contextMenuEl}
-      {!isOwn ? (
+      {!isOwn && !grouped ? (
         <button
           type="button"
           title="открыть профиль"
@@ -330,16 +343,18 @@ function DmBubble({
         {forwardedEl}
         <LinkPreviews previews={(message as IMessage).linkPreviews} />
         {msgAttachments.length > 0 && <AttachmentList attachments={msgAttachments} />}
-        <div className="flex items-center gap-1.5 mt-[3px] px-1 text-[10px] font-mono text-kd-text-mute">
-          <span>{time}</span>
-          {message.editedAt && <span className="text-[9px]">(изм.)</span>}
-          {pendingStatus === 'sending' && <span className="text-[9px]">отправляется…</span>}
-          {pendingStatus === 'error' && onRetry && (
-            <button type="button" onClick={onRetry} className="text-[9px] text-kd-danger hover:underline">
-              ошибка · повторить?
-            </button>
-          )}
-        </div>
+        {showMeta && (
+          <div className="flex items-center gap-1.5 mt-[2px] px-1 text-[10px] font-mono text-kd-text-mute">
+            <span>{time}</span>
+            {message.editedAt && <span className="text-[9px]">(изм.)</span>}
+            {pendingStatus === 'sending' && <span className="text-[9px]">отправляется…</span>}
+            {pendingStatus === 'error' && onRetry && (
+              <button type="button" onClick={onRetry} className="text-[9px] text-kd-danger hover:underline">
+                ошибка · повторить?
+              </button>
+            )}
+          </div>
+        )}
         {!pendingStatus && (
           <Reactions
             messageId={message.id}
@@ -535,22 +550,35 @@ export function DmBubbleList({
         type: 'msg'
         msg: IMessage | PendingMessage
         isPending: boolean
+        grouped: boolean
       }
 
   const rows: ItemRow[] = []
   let prevForMsg: IMessage | PendingMessage | null = null
   for (let i = 0; i < messages.length; i += 1) {
     const m = messages[i]!
-    if (prevForMsg === null || !sameDay(prevForMsg.createdAt, m.createdAt)) {
-      rows.push({ type: 'day', label: formatDay(m.createdAt) })
-    }
-    if (i === firstUnreadIndex) rows.push({ type: 'unread' })
-    rows.push({ type: 'msg', msg: m, isPending: false })
+    const dayBreak = prevForMsg === null || !sameDay(prevForMsg.createdAt, m.createdAt)
+    if (dayBreak) rows.push({ type: 'day', label: formatDay(m.createdAt) })
+    const unreadHere = i === firstUnreadIndex
+    if (unreadHere) rows.push({ type: 'unread' })
+    // Ответ-сообщение всегда начинает новую «реплику» — со своим аватаром и
+    // отступом, чтобы цитата читалась.
+    const hasReply = 'replyTo' in m && (m as IMessage).replyTo != null
+    const grouped =
+      !dayBreak && !unreadHere && !hasReply
+      && prevForMsg !== null
+      && prevForMsg.authorId === m.authorId
+      && minutesBetween(prevForMsg.createdAt, m.createdAt) < GROUP_WINDOW_MIN
+    rows.push({ type: 'msg', msg: m, isPending: false, grouped })
     prevForMsg = m
   }
   for (let i = 0; i < pending.length; i += 1) {
     const p = pending[i]!
-    rows.push({ type: 'msg', msg: p, isPending: true })
+    const grouped =
+      prevForMsg !== null
+      && prevForMsg.authorId === p.authorId
+      && minutesBetween(prevForMsg.createdAt, p.createdAt) < GROUP_WINDOW_MIN
+    rows.push({ type: 'msg', msg: p, isPending: true, grouped })
     prevForMsg = p
   }
 
@@ -594,6 +622,7 @@ export function DmBubbleList({
             message={m}
             member={memberMap.get(m.authorId)}
             isOwn={m.authorId === currentUserId}
+            grouped={row.grouped}
             currentUserId={currentUserId}
             pendingStatus={row.isPending ? (m as PendingMessage)._pending : undefined}
             memberMap={memberMap}

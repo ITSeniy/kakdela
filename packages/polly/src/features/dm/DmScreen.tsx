@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { type InfiniteData, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useLocation } from 'wouter'
 
@@ -14,12 +14,17 @@ import type {
 import { Avatar } from '../../components/Avatar.js'
 import { Icon } from '../../components/Icon.js'
 import { toast } from '../../components/toast/index.js'
+import { wsClient } from '../../lib/ws.js'
 import { useAuthStore } from '../auth/store.js'
 import { useProfileUi } from '../profile/store.js'
 import { addReaction, deleteMessage, editMessage, removeReaction, sendMessage } from '../chat/api.js'
 import { Composer } from '../chat/Composer.js'
 import { useMessages } from '../chat/useMessages.js'
 import type { PendingMessage } from '../chat/types.js'
+import { DmCallScreen } from '../voice/DmCallScreen.js'
+import { useScreenShare } from '../voice/useScreenShare.js'
+import { useVoiceRoom, type DmCallPeer } from '../voice/useVoiceRoom.js'
+import { useVoiceStore } from '../voice/store.js'
 import { DmBubbleList } from './DmBubbleList.js'
 import { listDms, markDmRead } from './api.js'
 
@@ -45,10 +50,50 @@ const STATUS_COLOR: Record<MemberPublic['status'], string> = {
   offline: 'text-kd-text-mute',
 }
 
-function Header({ summary, onOpenProfile, onBack }: { summary: DmSummary | undefined; onOpenProfile: (id: string) => void; onBack?: () => void }) {
+// Кнопка-капсула шапки личной переписки (designs/final-dm.jsx:170-188):
+// иконка + подпись, тонкая рамка. Только десктоп.
+function HeaderAction({
+  icon, label, onClick, disabled, title,
+}: {
+  icon: React.ReactNode
+  label: string
+  onClick: () => void
+  disabled?: boolean
+  title?: string
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className={[
+        'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-kd border text-[11px] transition-colors',
+        disabled
+          ? 'border-kd-border text-kd-text-mute opacity-50 cursor-not-allowed'
+          : 'border-kd-border text-kd-text hover:bg-kd-panel-hi',
+      ].join(' ')}
+    >
+      {icon}
+      {label}
+    </button>
+  )
+}
+
+function Header({
+  summary, onOpenProfile, onBack, onCall, onScreen, peerTyping, callDisabled,
+}: {
+  summary: DmSummary | undefined
+  onOpenProfile: (id: string) => void
+  onBack?: () => void
+  onCall: () => void
+  onScreen: () => void
+  peerTyping: boolean
+  callDisabled: boolean
+}) {
   const [, navigate] = useLocation()
   // `onBack` передаёт только мобильный shell — по нему отличаем мобильную шапку
-  // (полноэкранный профиль /u/:id + кнопки звонка), не задевая десктоп.
+  // (полноэкранный профиль /u/:id + иконки-кнопки), не задевая десктоп.
   const mobile = Boolean(onBack)
   const back = onBack ? (
     <button
@@ -68,8 +113,17 @@ function Header({ summary, onOpenProfile, onBack }: { summary: DmSummary | undef
     )
   }
   const status = summary.otherUser.status
+  const custom = summary.otherUser.customStatus?.trim() || null
   const openProfile = () =>
     mobile ? navigate(`/u/${summary.otherUser.id}`) : onOpenProfile(summary.otherUser.id)
+  const callTitle = callDisabled ? 'вы уже в другом звонке' : undefined
+
+  // Статус-строка по макету: «● пьёт какао · печатает…». customStatus, если
+  // есть, идёт вместо текстового статуса; «печатает…» дописывается поверх.
+  // Цвет точки/текста всегда отражает реальный presence.
+  const statusBase = custom ?? STATUS_LABEL[status].replace(/^[●◐○]\s*/, '')
+  const statusColor = STATUS_COLOR[status]
+
   return (
     <div className="px-4 py-2 border-b border-kd-border bg-kd-panel-alt flex items-center gap-3 shrink-0">
       {back}
@@ -85,22 +139,24 @@ function Header({ summary, onOpenProfile, onBack }: { summary: DmSummary | undef
           size={mobile ? 38 : 30}
           status={status}
         />
-        <div className="flex-1 min-w-0">
+        <div className="min-w-0">
           <div className="text-[13px] font-bold text-kd-text truncate">
             {summary.otherUser.displayName}
           </div>
-          <div className={`text-[10px] font-mono ${STATUS_COLOR[status]}`}>
-            {STATUS_LABEL[status]}
+          <div className={`text-[10px] font-mono truncate ${statusColor}`}>
+            ● {statusBase}{peerTyping && ' · печатает…'}
           </div>
         </div>
       </button>
-      {mobile && (
+
+      {mobile ? (
         <>
           <button
             type="button"
-            onClick={() => toast.info('звонки в личке — скоро')}
-            title="позвонить"
-            className="shrink-0 text-kd-text-soft active:text-kd-text"
+            onClick={onCall}
+            disabled={callDisabled}
+            title={callTitle ?? 'позвонить'}
+            className={`shrink-0 ${callDisabled ? 'text-kd-text-mute opacity-50' : 'text-kd-text-soft active:text-kd-text'}`}
           >
             <Icon.Phone size={19} />
           </button>
@@ -121,6 +177,36 @@ function Header({ summary, onOpenProfile, onBack }: { summary: DmSummary | undef
             <Icon.More size={20} />
           </button>
         </>
+      ) : (
+        <div className="flex items-center gap-1.5 shrink-0">
+          <HeaderAction
+            icon={<Icon.Speaker size={12} />}
+            label="позвонить"
+            onClick={onCall}
+            disabled={callDisabled}
+            title={callTitle}
+          />
+          <HeaderAction
+            icon={<Icon.Video size={12} />}
+            label="видео"
+            onClick={() => toast.info('видеозвонок в личке — скоро')}
+          />
+          <HeaderAction
+            icon={<Icon.Monitor size={12} />}
+            label="экран"
+            onClick={onScreen}
+            disabled={callDisabled}
+            title={callTitle}
+          />
+          <button
+            type="button"
+            onClick={() => onOpenProfile(summary.otherUser.id)}
+            title="профиль"
+            className="px-1.5 py-1 rounded-kd text-kd-text-mute hover:text-kd-text hover:bg-kd-panel-hi transition-colors"
+          >
+            <Icon.More size={16} />
+          </button>
+        </div>
       )}
     </div>
   )
@@ -130,9 +216,26 @@ export function DmScreen({ channelId, onBack }: DmScreenProps) {
   const queryClient = useQueryClient()
   const user = useAuthStore((s) => s.user)
   const openProfile = useProfileUi((s) => s.open)
+  const { joinDm } = useVoiceRoom()
+  const { startShare } = useScreenShare()
+
+  // Активный DM-звонок именно в этом канале (T-087). callMinimized — звонок
+  // свёрнут, показываем чат с баннером «вернуться».
+  const activeChannelId = useVoiceStore((s) => s.activeChannelId)
+  const activeContext = useVoiceStore((s) => s.activeContext)
+  const voiceStatus = useVoiceStore((s) => s.status)
+  const callActiveHere =
+    activeContext === 'dm'
+    && activeChannelId === channelId
+    && (voiceStatus === 'connecting' || voiceStatus === 'connected' || voiceStatus === 'reconnecting')
+  // Любой активный голос (этот звонок, другой звонок или ГС) блокирует «позвонить».
+  const callDisabled = activeChannelId !== null
+  const [callMinimized, setCallMinimized] = useState(false)
 
   const [pending, setPending] = useState<PendingMessage[]>([])
   const [replyTo, setReplyTo] = useState<Message | null>(null)
+  const [peerTyping, setPeerTyping] = useState(false)
+  const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const { data: dms = [] } = useQuery({
     queryKey: ['dm-list'],
@@ -141,6 +244,49 @@ export function DmScreen({ channelId, onBack }: DmScreenProps) {
   })
 
   const summary = dms.find((d) => d.channelId === channelId)
+
+  const callPeer: DmCallPeer | undefined = summary
+    ? {
+        id: summary.otherUser.id,
+        name: summary.otherUser.displayName,
+        avatarUrl: summary.otherUser.avatarUrl,
+      }
+    : undefined
+
+  // Смена канала — сбрасываем «свёрнуто»; конец звонка — тоже (чтобы при
+  // следующем звонке снова открылся полный экран).
+  useEffect(() => { setCallMinimized(false) }, [channelId])
+  useEffect(() => { if (!callActiveHere) setCallMinimized(false) }, [callActiveHere])
+
+  // «печатает…» в шапке: ловим typing-события собеседника по этому каналу и
+  // гасим через 4с тишины (typing троттлится на отправке, 4с с запасом).
+  useEffect(() => {
+    setPeerTyping(false)
+    const off = wsClient.on((event) => {
+      if (event.t !== 'typing' || event.channelId !== channelId) return
+      if (event.userId === user?.id) return
+      setPeerTyping(true)
+      if (typingTimerRef.current) clearTimeout(typingTimerRef.current)
+      typingTimerRef.current = setTimeout(() => setPeerTyping(false), 4000)
+    })
+    return () => {
+      off()
+      if (typingTimerRef.current) clearTimeout(typingTimerRef.current)
+    }
+  }, [channelId, user?.id])
+
+  async function handleCall() {
+    if (!callPeer) return
+    setCallMinimized(false)
+    await joinDm(channelId, callPeer)
+  }
+
+  async function handleScreen() {
+    if (!callPeer) return
+    setCallMinimized(false)
+    await joinDm(channelId, callPeer)
+    await startShare()
+  }
 
   // Член-список для рендера сообщений в DM состоит из меня и собеседника.
   // Этого хватает, чтобы аватарки/имена в MessageList корректно
@@ -325,9 +471,32 @@ export function DmScreen({ channelId, onBack }: DmScreenProps) {
     }
   }
 
+  // Полноэкранный звонок замещает чат целиком; «свернуть» возвращает сюда.
+  if (callActiveHere && !callMinimized) {
+    return <DmCallScreen channelId={channelId} peer={callPeer} onMinimize={() => setCallMinimized(true)} />
+  }
+
   return (
     <div className="flex-1 min-w-0 min-h-0 flex flex-col bg-kd-bg">
-      <Header summary={summary} onOpenProfile={openProfile} onBack={onBack} />
+      <Header
+        summary={summary}
+        onOpenProfile={openProfile}
+        onBack={onBack}
+        onCall={handleCall}
+        onScreen={handleScreen}
+        peerTyping={peerTyping}
+        callDisabled={callDisabled}
+      />
+      {callActiveHere && callMinimized && (
+        <button
+          type="button"
+          onClick={() => setCallMinimized(false)}
+          className="shrink-0 flex items-center gap-2 px-4 py-1.5 bg-kd-online/15 border-b border-kd-border text-[11px] font-mono text-kd-online hover:bg-kd-online/25 transition-colors"
+        >
+          <Icon.Phone size={12} />
+          идёт звонок · вернуться
+        </button>
+      )}
       <DmBubbleList
         channelId={channelId}
         currentUserId={user?.id ?? null}

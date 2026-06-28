@@ -17,6 +17,7 @@ export type SoundEvent =
   | 'notification'
   | 'stream-start' | 'stream-end'
   | 'viewer-join' | 'viewer-leave'
+  | 'ring'
 
 export const SOUND_EVENT_LABELS: Record<SoundEvent, string> = {
   'mute-on':      'микрофон выключен',
@@ -33,6 +34,7 @@ export const SOUND_EVENT_LABELS: Record<SoundEvent, string> = {
   'stream-end':   'стрим закончился',
   'viewer-join':  'зритель зашёл на стрим',
   'viewer-leave': 'зритель ушёл со стрима',
+  'ring':         'входящий звонок',
 }
 
 export type SoundPackId = 'kakao' | 'retro' | 'custom'
@@ -114,6 +116,8 @@ const MELODIES: Record<SoundEvent, Note[]> = {
   'stream-end':   [{ f: 784, t: 0, d: 0.09 }, { f: 659, t: 0.08, d: 0.09 }, { f: 523, t: 0.16, d: 0.2 }],
   'viewer-join':  [{ f: 740, t: 0, d: 0.06, g: 0.6 }, { f: 988, t: 0.05, d: 0.09, g: 0.6 }],
   'viewer-leave': [{ f: 988, t: 0, d: 0.06, g: 0.6 }, { f: 740, t: 0.05, d: 0.09, g: 0.6 }],
+  // Входящий звонок: двойная «трель» как у телефона. IncomingCall зацикливает.
+  'ring':         [{ f: 660, t: 0, d: 0.2, g: 0.9 }, { f: 880, t: 0.22, d: 0.28, g: 0.9 }, { f: 660, t: 0.6, d: 0.2, g: 0.9 }, { f: 880, t: 0.82, d: 0.3, g: 0.9 }],
 }
 
 interface PackVoice {

@@ -17,6 +17,8 @@ interface VoiceControlsProps {
   onToggleScreenShare(): void
   onChangeScreenQuality(q: ScreenQuality): void
   onLeave(): void
+  /** Скрыть кнопку камеры (DM-звонок T-087: аудио + экран, без видео). */
+  hideCamera?: boolean
 }
 
 function NoteIcon() {
@@ -190,6 +192,7 @@ export function VoiceControls({
   onToggleScreenShare,
   onChangeScreenQuality,
   onLeave,
+  hideCamera = false,
 }: VoiceControlsProps) {
   const muted = useVoiceStore((s) => s.muted)
   const deafened = useVoiceStore((s) => s.deafened)
@@ -246,15 +249,17 @@ export function VoiceControls({
         <Icon.Headphones size={13} />
       </CtrlButton>
 
-      <CtrlButton
-        label={cameraOn ? 'камера' : 'камера (выкл)'}
-        onClick={onToggleCamera}
-        active={cameraOn}
-        tone={cameraOn ? 'hot' : 'default'}
-        title={cameraOn ? 'выключить веб-камеру' : 'включить веб-камеру'}
-      >
-        <Icon.Video size={13} />
-      </CtrlButton>
+      {!hideCamera && (
+        <CtrlButton
+          label={cameraOn ? 'камера' : 'камера (выкл)'}
+          onClick={onToggleCamera}
+          active={cameraOn}
+          tone={cameraOn ? 'hot' : 'default'}
+          title={cameraOn ? 'выключить веб-камеру' : 'включить веб-камеру'}
+        >
+          <Icon.Video size={13} />
+        </CtrlButton>
+      )}
 
       <ScreenShareButton
         onToggleScreenShare={onToggleScreenShare}
