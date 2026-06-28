@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { type InfiniteData, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useLocation } from 'wouter'
 
 import type {
   Attachment,
@@ -45,6 +46,10 @@ const STATUS_COLOR: Record<MemberPublic['status'], string> = {
 }
 
 function Header({ summary, onOpenProfile, onBack }: { summary: DmSummary | undefined; onOpenProfile: (id: string) => void; onBack?: () => void }) {
+  const [, navigate] = useLocation()
+  // `onBack` передаёт только мобильный shell — по нему отличаем мобильную шапку
+  // (полноэкранный профиль /u/:id + кнопки звонка), не задевая десктоп.
+  const mobile = Boolean(onBack)
   const back = onBack ? (
     <button
       type="button"
@@ -63,19 +68,21 @@ function Header({ summary, onOpenProfile, onBack }: { summary: DmSummary | undef
     )
   }
   const status = summary.otherUser.status
+  const openProfile = () =>
+    mobile ? navigate(`/u/${summary.otherUser.id}`) : onOpenProfile(summary.otherUser.id)
   return (
     <div className="px-4 py-2 border-b border-kd-border bg-kd-panel-alt flex items-center gap-3 shrink-0">
       {back}
       <button
         type="button"
-        onClick={() => onOpenProfile(summary.otherUser.id)}
+        onClick={openProfile}
         title="открыть профиль"
         className="flex items-center gap-3 flex-1 min-w-0 text-left hover:opacity-80 transition-opacity"
       >
         <Avatar
           name={summary.otherUser.displayName}
           avatarUrl={summary.otherUser.avatarUrl}
-          size={30}
+          size={mobile ? 38 : 30}
           status={status}
         />
         <div className="flex-1 min-w-0">
@@ -87,6 +94,34 @@ function Header({ summary, onOpenProfile, onBack }: { summary: DmSummary | undef
           </div>
         </div>
       </button>
+      {mobile && (
+        <>
+          <button
+            type="button"
+            onClick={() => toast.info('звонки в личке — скоро')}
+            title="позвонить"
+            className="shrink-0 text-kd-text-soft active:text-kd-text"
+          >
+            <Icon.Phone size={19} />
+          </button>
+          <button
+            type="button"
+            onClick={() => toast.info('видеозвонок в личке — скоро')}
+            title="видеозвонок"
+            className="shrink-0 text-kd-text-soft active:text-kd-text"
+          >
+            <Icon.Video size={20} />
+          </button>
+          <button
+            type="button"
+            onClick={openProfile}
+            title="профиль"
+            className="shrink-0 text-kd-text-mute active:text-kd-text"
+          >
+            <Icon.More size={20} />
+          </button>
+        </>
+      )}
     </div>
   )
 }

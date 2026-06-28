@@ -5,9 +5,11 @@ import { useLocation, useRoute } from 'wouter'
 import { EmptyState } from '../components/EmptyState.js'
 import { Icon } from '../components/Icon.js'
 import { useAuthStore } from '../features/auth/store.js'
-import { DmList } from '../features/dm/DmList.js'
 import { DmOpener } from '../features/dm/DmOpener.js'
 import { DmScreen } from '../features/dm/DmScreen.js'
+import { MobileDmList } from '../features/dm/MobileDmList.js'
+import { NewChatScreen } from '../features/dm/NewChatScreen.js'
+import { MobileProfileScreen } from '../features/profile/MobileProfileScreen.js'
 import { initSecretChats, startSecretChatListener } from '../features/secret/api.js'
 import { SecretChatList } from '../features/secret/SecretChatList.js'
 import { SecretChatScreen } from '../features/secret/SecretChatScreen.js'
@@ -16,11 +18,12 @@ type MobileTab = 'chats' | 'calls' | 'profile'
 
 /**
  * Мобильный shell (T-100). Личный мессенджер, НЕ «мобильный Discord»:
- * только личные переписки (cloud-DM) + bottom-nav. Серверов, каналов,
- * серверных голос-комнат и демо экрана здесь нет.
+ * только личные переписки (cloud-DM) + секретные чаты + bottom-nav. Серверов,
+ * каналов, серверных голос-комнат и демо экрана здесь нет.
  *
  * Подключается из Router при `useIsMobile()`; desktop остаётся на `<Shell/>`.
- * Экраны переиспользуются из `features/dm/*` — копий не плодим (T-100 п.4).
+ * Экраны: список чатов (MobileDmList), переписка (DmScreen), секретные чаты,
+ * «новая переписка» (NewChatScreen), профиль (MobileProfileScreen).
  */
 export function MobileShell() {
   const [location, navigate] = useLocation()
@@ -29,7 +32,9 @@ export function MobileShell() {
   const [, dmChannel] = useRoute<{ channelId: string }>('/dm/:channelId')
   const [, dmWith] = useRoute<{ userId: string }>('/dm/with/:userId')
   const [, secretPeer] = useRoute<{ userId: string }>('/secret/:userId')
+  const [, otherProfile] = useRoute<{ userId: string }>('/u/:userId')
   const [isSecretList] = useRoute('/secret')
+  const [isNewChat] = useRoute('/new')
   const [isCalls] = useRoute('/calls')
   const [isProfile] = useRoute('/profile')
 
@@ -54,13 +59,27 @@ export function MobileShell() {
   const openChannelId = dmChannel?.channelId ?? null
   const openWithUserId = dmWith?.userId ?? null
   const openSecretPeer = secretPeer?.userId ?? null
+  const openOtherProfile = otherProfile?.userId ?? null
 
-  // Внутри переписки — полноэкранный чат с кнопкой «назад», без bottom-nav
-  // (как в обычном мессенджере).
+  // ── Полноэкранные экраны (без bottom-nav, как обычный мессенджер) ──
   if (openSecretPeer) {
     return (
       <div className="h-full flex flex-col bg-kd-bg kd-safe-top">
         <SecretChatScreen peerUserId={openSecretPeer} onBack={() => navigate('/secret')} />
+      </div>
+    )
+  }
+  if (openOtherProfile) {
+    return (
+      <div className="h-full flex flex-col bg-kd-bg kd-safe-top">
+        <MobileProfileScreen userId={openOtherProfile} />
+      </div>
+    )
+  }
+  if (isNewChat) {
+    return (
+      <div className="h-full flex flex-col bg-kd-bg kd-safe-top">
+        <NewChatScreen />
       </div>
     )
   }
@@ -78,7 +97,7 @@ export function MobileShell() {
       </div>
     )
   }
-  // Полноэкранный список секретных чатов (из чатов → «секретные»).
+  // Полноэкранный список секретных чатов (из списка чатов → «секретные чаты»).
   if (isSecretList) {
     return (
       <div className="h-full flex flex-col bg-kd-bg kd-safe-top">
@@ -97,37 +116,20 @@ export function MobileShell() {
   return (
     <div className="h-full grid grid-rows-[minmax(0,1fr)_auto] bg-kd-bg text-kd-text font-sans overflow-hidden kd-safe-top">
       <div className="min-h-0 overflow-hidden flex flex-col">
-        {tab === 'chats' && (
-          <>
-            <button
-              type="button"
-              onClick={() => navigate('/secret')}
-              className="shrink-0 flex items-center gap-2 px-4 py-2 border-b border-kd-border bg-kd-warm-bg text-kd-warm hover:bg-kd-warm hover:text-white transition-colors"
-            >
-              <Icon.Lock size={14} />
-              <span className="text-[12px] font-mono font-semibold">секретные чаты</span>
-              <Icon.ChevronRight size={14} className="ml-auto" />
-            </button>
-            <DmList activeChannelId={null} />
-          </>
-        )}
+        {tab === 'chats' && <MobileDmList />}
         {tab === 'calls' && (
           <div className="flex-1 flex items-center justify-center px-6">
             <EmptyState
               glyph="📞"
               title="звонки"
-              body={'история звонков появится здесь.\nзвонок 1:1 — из переписки (T-087).'}
+              body={'история звонков появится здесь.\nзвонок 1:1 — из переписки или профиля.'}
             />
           </div>
         )}
         {tab === 'profile' && (
-          <div className="flex-1 flex items-center justify-center px-6">
-            <EmptyState
-              glyph="🙂"
-              title="профиль"
-              body={'настройки профиля приедут в T-089.'}
-            />
-          </div>
+          userId
+            ? <MobileProfileScreen userId={userId} />
+            : <div className="flex-1 flex items-center justify-center font-mono text-[11px] text-kd-text-mute">загрузка…</div>
         )}
       </div>
       <MobileBottomNav
