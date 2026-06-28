@@ -1,7 +1,7 @@
 import React, { type ClipboardEvent, type DragEvent, type KeyboardEvent, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 
-import type { Attachment, CustomEmoji, GifEmbed, MemberPublic, Message } from '@kakdela/ginzu/api-types'
+import type { Attachment, CustomEmoji, GifEmbed, MemberPublic, Message, StickerRef } from '@kakdela/ginzu/api-types'
 
 import { Avatar } from '../../components/Avatar.js'
 import { Icon } from '../../components/Icon.js'
@@ -22,6 +22,7 @@ import { Attachments, type PendingAttachment } from './Attachments.js'
 
 const LazyEmojiPicker = React.lazy(() => import('./EmojiPicker.js'))
 const LazyGifPicker = React.lazy(() => import('../giphy/GifPicker.js'))
+const LazyStickerPicker = React.lazy(() => import('../stickers/StickerPicker.js'))
 
 const MAX_ATTACHMENTS = 10
 
@@ -52,7 +53,7 @@ interface ComposerProps {
   /** Показывать ли @everyone / @here в автокомплите (серверные каналы). */
   allowBroadcast?: boolean
   onCancelReply: () => void
-  onSend: (content: string, attachments: Attachment[], gif?: GifEmbed) => void
+  onSend: (content: string, attachments: Attachment[], gif?: GifEmbed, sticker?: StickerRef) => void
 }
 
 const TYPING_THROTTLE_MS = 3_000
@@ -148,6 +149,7 @@ export function Composer({
   const [warning, setWarning] = useState<string | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
   const [gifOpen, setGifOpen] = useState(false)
+  const [stickerOpen, setStickerOpen] = useState(false)
   // Всплывашка форматирования — пока в textarea есть выделение.
   const [hasSelection, setHasSelection] = useState(false)
   // @упоминание под курсором: позиция '@' и набранный кусок имени.
@@ -161,6 +163,7 @@ export function Composer({
   const fileInputRef = useRef<HTMLInputElement>(null)
   const pickerContainerRef = useRef<HTMLDivElement>(null)
   const gifContainerRef = useRef<HTMLDivElement>(null)
+  const stickerContainerRef = useRef<HTMLDivElement>(null)
   const dragCounter = useRef(0)
 
   // Включён ли GIF-пикер (есть ли GIPHY_API_KEY на сервере). Спрашиваем раз.
@@ -178,6 +181,12 @@ export function Composer({
     onSend('', [], gif)
     setGifOpen(false)
   }
+
+  function sendSticker(sticker: StickerRef) {
+    // Стикер уходит отдельным сообщением (снимок StickerRef). Текст не трогаем.
+    onSend('', [], undefined, sticker)
+    setStickerOpen(false)
+  }
   const attachmentsRef = useRef<PendingAttachment[]>([])
   attachmentsRef.current = attachments
 
@@ -191,6 +200,17 @@ export function Composer({
     document.addEventListener('mousedown', handleMouseDown)
     return () => document.removeEventListener('mousedown', handleMouseDown)
   }, [gifOpen])
+
+  useEffect(() => {
+    if (!stickerOpen) return
+    function handleMouseDown(e: MouseEvent) {
+      if (stickerContainerRef.current && !stickerContainerRef.current.contains(e.target as Node)) {
+        setStickerOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleMouseDown)
+    return () => document.removeEventListener('mousedown', handleMouseDown)
+  }, [stickerOpen])
 
   useEffect(() => {
     if (!pickerOpen) return
@@ -717,7 +737,7 @@ export function Composer({
               <button
                 type="button"
                 title="гифки"
-                onClick={() => { setGifOpen((o) => !o); setPickerOpen(false) }}
+                onClick={() => { setGifOpen((o) => !o); setPickerOpen(false); setStickerOpen(false) }}
                 className={`inline-flex items-center justify-center h-5 px-1.5 text-[10px] font-mono font-bold leading-none rounded border transition-colors ${gifOpen ? 'border-kd-accent text-kd-accent' : 'border-kd-border hover:text-kd-text-soft'}`}
               >
                 GIF
@@ -731,11 +751,28 @@ export function Composer({
               )}
             </div>
           )}
+          <div className="relative" ref={stickerContainerRef}>
+            <button
+              type="button"
+              title="стикеры"
+              onClick={() => { setStickerOpen((o) => !o); setGifOpen(false); setPickerOpen(false) }}
+              className={`transition-colors ${stickerOpen ? 'text-kd-accent' : 'hover:text-kd-text-soft'}`}
+            >
+              <Icon.Sticker size={15} />
+            </button>
+            {stickerOpen && (
+              <div className="absolute bottom-8 right-0 z-50 shadow-lg">
+                <Suspense fallback={<div className="p-3 text-[11px] text-kd-text-mute bg-kd-panel rounded-kd border border-kd-border">…</div>}>
+                  <LazyStickerPicker onSelect={sendSticker} />
+                </Suspense>
+              </div>
+            )}
+          </div>
           <div className="relative" ref={pickerContainerRef}>
             <button
               type="button"
               title="эмодзи"
-              onClick={() => { setPickerOpen((o) => !o); setGifOpen(false) }}
+              onClick={() => { setPickerOpen((o) => !o); setGifOpen(false); setStickerOpen(false) }}
               className="hover:text-kd-text-soft transition-colors"
             >
               <Icon.Smile size={15} />

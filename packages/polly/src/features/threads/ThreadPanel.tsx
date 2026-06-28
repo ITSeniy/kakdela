@@ -8,6 +8,7 @@ import type {
   MemberPublic,
   Message,
   MessagesPage,
+  StickerRef,
 } from '@kakdela/ginzu/api-types'
 
 import { confirmDialog } from '../../components/ConfirmDialog.js'
@@ -80,7 +81,7 @@ export function ThreadPanel({ threadId, parentChannelId, serverId }: ThreadPanel
 
   const { emoji: serverEmoji, byName: emojiMap } = useServerEmoji(serverId)
 
-  async function handleSend(content: string, attachments: Attachment[] = [], gif?: GifEmbed) {
+  async function handleSend(content: string, attachments: Attachment[] = [], gif?: GifEmbed, sticker?: StickerRef) {
     if (!user) return
     const nonce = crypto.randomUUID()
     const replyId = replyTo?.id ?? null
@@ -94,6 +95,7 @@ export function ThreadPanel({ threadId, parentChannelId, serverId }: ThreadPanel
       editedAt: null,
       attachments,
       gif: gif ?? null,
+      sticker: sticker ?? null,
       _pending: 'sending',
       _nonce: nonce,
     }
@@ -107,6 +109,7 @@ export function ThreadPanel({ threadId, parentChannelId, serverId }: ThreadPanel
         clientNonce: nonce,
         ...(attachments.length > 0 ? { attachments: attachments.map((a) => a.id) } : {}),
         ...(gif ? { gif } : {}),
+        ...(sticker ? { sticker } : {}),
       })
       queryClient.setQueryData<MsgCache>(['messages', threadId], (old) => {
         if (!old || old.pages.length === 0) return old

@@ -4,7 +4,7 @@ import type { Attachment } from '@kakdela/ginzu/api-types'
 
 import { Icon } from '../../components/Icon.js'
 import { openExternal } from '../../lib/host/shell.js'
-import { useGifFavorites } from '../giphy/favorites.js'
+import { useFavorites } from '../favorites/api.js'
 import { Lightbox, type LightboxContext } from './Lightbox.js'
 import { AudioPlayer } from './media/AudioPlayer.js'
 import { formatBytes } from './formatBytes.js'
@@ -24,8 +24,8 @@ function isGif(att: Attachment): boolean {
 
 /** Звёздочка «в избранное» поверх gif-вложения (сосед-кнопка, не вложенная). */
 function GifFavStar({ attachment, children }: { attachment: Attachment; children: React.ReactNode }) {
-  const fav = useGifFavorites()
-  const existing = fav.byUrl.get(attachment.url)
+  const fav = useFavorites('gif')
+  const existing = fav.byRef.get(attachment.url)
   const faved = existing !== undefined
   return (
     <div className="relative inline-block group">
@@ -35,12 +35,15 @@ function GifFavStar({ attachment, children }: { attachment: Attachment; children
         onClick={() => {
           if (existing) fav.remove.mutate(existing.id)
           else fav.add.mutate({
-            gifUrl:     attachment.url,
-            mp4Url:     null,
-            previewUrl: attachment.thumbUrl ?? attachment.url,
-            width:      attachment.width ?? 200,
-            height:     attachment.height ?? 200,
-            title:      attachment.originalName,
+            refKey:  attachment.url,
+            payload: {
+              gifUrl:     attachment.url,
+              mp4Url:     null,
+              previewUrl: attachment.thumbUrl ?? attachment.url,
+              width:      attachment.width ?? 200,
+              height:     attachment.height ?? 200,
+              title:      attachment.originalName,
+            },
           })
         }}
         title={faved ? 'убрать из избранного' : 'в избранное'}

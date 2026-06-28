@@ -16,6 +16,7 @@ import { openExternal } from '../../lib/host/shell.js'
 import { pinMessage, unpinMessage } from '../chat/api.js'
 import { AttachmentList } from '../chat/AttachmentView.js'
 import { GifEmbed } from '../chat/GifEmbed.js'
+import { StickerEmbed } from '../chat/StickerEmbed.js'
 import { ContextMenu } from '../chat/ContextMenu.js'
 import { ForwardedCard } from '../chat/ForwardedCard.js'
 import { LinkPreviews } from '../chat/LinkPreviewCard.js'
@@ -258,6 +259,7 @@ function DmBubble({
   const msgReplyTo = 'replyTo' in message ? (message.replyTo ?? null) : null
   const msgAttachments = 'attachments' in message ? (message.attachments ?? []) : []
   const msgGif = message.gif ?? null
+  const msgSticker = message.sticker ?? null
 
   const name = member?.displayName ?? 'неизвестно'
   const time = fmtTime(message.createdAt)
@@ -444,6 +446,7 @@ function DmBubble({
         <LinkPreviews previews={(message as IMessage).linkPreviews} />
         {msgAttachments.length > 0 && <AttachmentList attachments={msgAttachments} />}
         {msgGif && <GifEmbed gif={msgGif} />}
+        {msgSticker && <StickerEmbed sticker={msgSticker} />}
         {showMeta && (
           <div className="flex items-center gap-1.5 mt-[2px] px-1 text-[10px] font-mono text-kd-text-mute">
             <span>{time}</span>

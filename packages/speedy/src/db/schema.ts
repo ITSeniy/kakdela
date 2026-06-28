@@ -215,6 +215,8 @@ export const messages = pgTable(
     // GIF-вложение (GifEmbed): {gifUrl, mp4Url, previewUrl, width, height}.
     // null — обычное сообщение. Хранится структурно, чтобы рендерить <video>.
     gif: jsonb('gif'),
+    // Стикер-вложение (StickerRef-снимок): {stickerId, name, imageUrl, w, h}.
+    sticker: jsonb('sticker'),
   },
   (t) => ({
     channelIdIdx:      index('messages_channel_id_id_idx').on(t.channelId, t.id),
@@ -319,24 +321,45 @@ export const emoji = pgTable(
   }),
 )
 
-// Избранные гифки пользователя (GIPHY или загруженный .gif). Дедуп по
-// (user_id, gif_url). mp4_url null у загруженных .gif без перекодирования.
-export const gifFavorites = pgTable(
-  'gif_favorites',
+// Стикеры сервера — крупнее эмодзи, отправляются отдельным сообщением (снимок
+// StickerRef). Управление под правом MANAGE_EMOJI (общее «оформление сервера»).
+export const stickers = pgTable(
+  'stickers',
   {
-    id:         uuid('id').primaryKey().$defaultFn(uuidv7),
-    userId:     uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-    gifUrl:     text('gif_url').notNull(),
-    mp4Url:     text('mp4_url'),
-    previewUrl: text('preview_url').notNull(),
-    width:      integer('width').notNull(),
-    height:     integer('height').notNull(),
-    title:      text('title').notNull().default(''),
+    id:         uuid('id').primaryKey().defaultRandom(),
+    serverId:   uuid('server_id').notNull().references(() => servers.id, { onDelete: 'cascade' }),
+    name:       text('name').notNull(),
+    imageUrl:   text('image_url').notNull(),
+    storageKey: text('storage_key').notNull(),
+    animated:   boolean('animated').notNull().default(false),
+    width:      integer('width').notNull().default(0),
+    height:     integer('height').notNull().default(0),
+    uploadedBy: uuid('uploaded_by').references(() => users.id, { onDelete: 'set null' }),
     createdAt:  timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
-    userCreatedIdx: index('gif_favorites_user_created_idx').on(t.userId, t.createdAt),
-    userGifUnique:  uniqueIndex('gif_favorites_user_gif_unique_idx').on(t.userId, t.gifUrl),
+    serverIdIdx: index('stickers_server_id_idx').on(t.serverId),
+  }),
+)
+
+// Избранное пользователя — единая таблица для гифок, стикеров и эмодзи. kind
+// различает тип, ref_key — ключ дедупа в рамках (user, kind), payload — данные
+// для рендера/отправки (jsonb-снимок).
+export const favoriteKindEnum = pgEnum('favorite_kind', ['gif', 'sticker', 'emoji'])
+
+export const favorites = pgTable(
+  'favorites',
+  {
+    id:        uuid('id').primaryKey().$defaultFn(uuidv7),
+    userId:    uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    kind:      favoriteKindEnum('kind').notNull(),
+    refKey:    text('ref_key').notNull(),
+    payload:   jsonb('payload').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    userKindCreatedIdx: index('favorites_user_kind_created_idx').on(t.userId, t.kind, t.createdAt),
+    userKindRefUnique:  uniqueIndex('favorites_user_kind_ref_unique_idx').on(t.userId, t.kind, t.refKey),
   }),
 )
 

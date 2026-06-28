@@ -10,6 +10,7 @@ import type {
   MemberPublic,
   Message,
   MessagesPage,
+  StickerRef,
 } from '@kakdela/ginzu/api-types'
 
 import { Avatar } from '../../components/Avatar.js'
@@ -351,7 +352,7 @@ export function DmScreen({ channelId, onBack }: DmScreenProps) {
       })
   }, [channelId, lastMessageId, queryClient])
 
-  async function handleSend(content: string, attachments: Attachment[] = [], gif?: GifEmbed) {
+  async function handleSend(content: string, attachments: Attachment[] = [], gif?: GifEmbed, sticker?: StickerRef) {
     if (!user) return
     const nonce = crypto.randomUUID()
     const replyId = replyTo?.id ?? null
@@ -365,6 +366,7 @@ export function DmScreen({ channelId, onBack }: DmScreenProps) {
       editedAt: null,
       attachments,
       gif: gif ?? null,
+      sticker: sticker ?? null,
       _pending: 'sending',
       _nonce: nonce,
     }
@@ -380,6 +382,7 @@ export function DmScreen({ channelId, onBack }: DmScreenProps) {
         ...(attachments.length > 0 ? { attachments: attachments.map((a) => a.id) } : {}),
         ...(spoilerIds.length > 0 ? { spoilerAttachments: spoilerIds } : {}),
         ...(gif ? { gif } : {}),
+        ...(sticker ? { sticker } : {}),
       })
       queryClient.setQueryData<MsgCache>(['messages', channelId], (old) => {
         if (!old || old.pages.length === 0) return old

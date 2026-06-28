@@ -6,12 +6,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useInfiniteQuery } from '@tanstack/react-query'
 
-import type { GifEmbed, GiphyGif } from '@kakdela/ginzu/api-types'
+import type { GifEmbed, GifFavoritePayload, GiphyGif } from '@kakdela/ginzu/api-types'
 
 import { Icon } from '../../components/Icon.js'
 import { ApiError } from '../../lib/api.js'
 import { giphySearch, giphyTrending } from './api.js'
-import { useGifFavorites } from './favorites.js'
+import { useFavorites } from '../favorites/api.js'
 
 const LIMIT = 24
 const DEBOUNCE_MS = 450
@@ -65,7 +65,7 @@ export default function GifPicker({ onSelect }: { onSelect: (gif: GifEmbed) => v
   const [input, setInput] = useState('')
   const [q, setQ] = useState('')
 
-  const fav = useGifFavorites()
+  const fav = useFavorites('gif')
 
   // Дебаунс ввода → реальный запрос. Ввод также переключает на вкладку трендов
   // (поиск живёт там), чтобы результаты были видны.
@@ -113,9 +113,9 @@ export default function GifPicker({ onSelect }: { onSelect: (gif: GifEmbed) => v
   }
 
   function toggleFav(g: { gifUrl: string; mp4Url: string | null; previewUrl: string; width: number; height: number; title: string }) {
-    const existing = fav.byUrl.get(g.gifUrl)
+    const existing = fav.byRef.get(g.gifUrl)
     if (existing) fav.remove.mutate(existing.id)
-    else fav.add.mutate({ gifUrl: g.gifUrl, mp4Url: g.mp4Url, previewUrl: g.previewUrl, width: g.width, height: g.height, title: g.title })
+    else fav.add.mutate({ refKey: g.gifUrl, payload: { gifUrl: g.gifUrl, mp4Url: g.mp4Url, previewUrl: g.previewUrl, width: g.width, height: g.height, title: g.title } })
   }
 
   const errCode = query.error instanceof ApiError ? query.error.code : null
@@ -171,18 +171,21 @@ export default function GifPicker({ onSelect }: { onSelect: (gif: GifEmbed) => v
             </div>
           ) : (
             <div className="columns-2 gap-1.5 [column-fill:_balance]">
-              {fav.favorites.map((f) => (
-                <GifTile
-                  key={f.id}
-                  previewUrl={f.previewUrl}
-                  width={f.width}
-                  height={f.height}
-                  title={f.title}
-                  faved
-                  onPick={() => pick(toEmbed(f))}
-                  onToggleFav={() => fav.remove.mutate(f.id)}
-                />
-              ))}
+              {fav.favorites.map((f) => {
+                const p = f.payload as GifFavoritePayload
+                return (
+                  <GifTile
+                    key={f.id}
+                    previewUrl={p.previewUrl}
+                    width={p.width}
+                    height={p.height}
+                    title={p.title}
+                    faved
+                    onPick={() => pick(toEmbed(p))}
+                    onToggleFav={() => fav.remove.mutate(f.id)}
+                  />
+                )
+              })}
             </div>
           )
         ) : query.isError ? (
@@ -206,7 +209,7 @@ export default function GifPicker({ onSelect }: { onSelect: (gif: GifEmbed) => v
                 width={g.width}
                 height={g.height}
                 title={g.title}
-                faved={fav.byUrl.has(g.url)}
+                faved={fav.byRef.has(g.url)}
                 onPick={() => pick(toEmbed({ gifUrl: g.url, mp4Url: g.mp4Url, previewUrl: g.previewUrl, width: g.width, height: g.height }))}
                 onToggleFav={() => toggleFav({ gifUrl: g.url, mp4Url: g.mp4Url, previewUrl: g.previewUrl, width: g.width, height: g.height, title: g.title })}
               />

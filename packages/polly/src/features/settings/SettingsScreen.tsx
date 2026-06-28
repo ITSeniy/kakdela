@@ -17,6 +17,7 @@ import { getServerDetail, listMembers } from '../servers/api.js'
 import { AppearanceSettings } from './AppearanceSettings.js'
 import { AuditLog } from './AuditLog.js'
 import { EmojiManagement } from './EmojiManagement.js'
+import { StickerManagement } from './StickerManagement.js'
 import { GeneralSettings } from './GeneralSettings.js'
 import { InviteManagement } from './InviteManagement.js'
 import { MembersSettings } from './MembersSettings.js'
@@ -41,6 +42,7 @@ const SERVER_PAGES: PageDef[] = [
   { id: 'server-members',  label: 'участники',      desc: 'кто здесь живёт' },
   { id: 'server-roles',    label: 'роли',           desc: 'роли и разрешения сервера', perm: 'MANAGE_ROLES' },
   { id: 'server-emoji',    label: 'эмодзи',         desc: 'свои эмодзи этого сервера', perm: 'MANAGE_EMOJI' },
+  { id: 'server-stickers', label: 'стикеры',        desc: 'свои стикеры этого сервера', perm: 'MANAGE_EMOJI' },
   { id: 'server-invites',  label: 'приглашения',    desc: 'кто и как может присоединиться', perm: 'MANAGE_INVITES' },
   { id: 'server-audit',    label: 'журнал событий', desc: 'журнал действий админов', perm: 'VIEW_AUDIT_LOG' },
 ]
@@ -201,6 +203,7 @@ export function SettingsScreen() {
             {current.id === 'server-members'  && serverId && <MembersSettings serverId={serverId} />}
             {current.id === 'server-roles'    && serverId && perms.can('MANAGE_ROLES') && <RolesSettings serverId={serverId} />}
             {current.id === 'server-emoji'    && serverId && perms.can('MANAGE_EMOJI') && <EmojiManagement serverId={serverId} />}
+            {current.id === 'server-stickers' && serverId && perms.can('MANAGE_EMOJI') && <StickerManagement serverId={serverId} />}
             {current.id === 'server-invites'  && serverId && perms.can('MANAGE_INVITES') && <InviteManagement serverId={serverId} />}
             {current.id === 'server-audit'    && serverId && perms.can('VIEW_AUDIT_LOG') && <AuditLog serverId={serverId} />}
             {current.id === 'profile'       && <ProfileSettings />}

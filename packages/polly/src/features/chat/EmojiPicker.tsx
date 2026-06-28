@@ -29,9 +29,10 @@ import {
 import rawData from '@emoji-mart/data'
 import type { EmojiMartData } from '@emoji-mart/data'
 
-import type { CustomEmoji } from '@kakdela/ginzu/api-types'
+import type { CustomEmoji, EmojiFavoritePayload } from '@kakdela/ginzu/api-types'
 
 import { Icon } from '../../components/Icon.js'
+import { useFavorites } from '../favorites/api.js'
 
 const DATA = rawData as EmojiMartData
 
@@ -219,6 +220,7 @@ interface ScrollProps {
   search: RenderEntry[] | null
   onPick: (e: React.MouseEvent) => void
   onHover: (e: React.MouseEvent) => void
+  onContext: (e: React.MouseEvent) => void
   registerSection: (id: string, el: HTMLDivElement | null) => void
 }
 
@@ -233,6 +235,7 @@ const EmojiScroll = memo(function EmojiScroll({
   search,
   onPick,
   onHover,
+  onContext,
   registerSection,
 }: ScrollProps) {
   const sectionNodes = useMemo(
@@ -253,6 +256,7 @@ const EmojiScroll = memo(function EmojiScroll({
       ref={scrollRef}
       onClick={onPick}
       onMouseOver={onHover}
+      onContextMenu={onContext}
       className="relative flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-1.5 py-1"
     >
       <div className={search !== null ? 'hidden' : undefined}>{sectionNodes}</div>
@@ -324,11 +328,27 @@ export function EmojiPicker({ onSelect, customEmoji }: EmojiPickerProps) {
   // «Недавние» фиксируем на момент открытия — не дёргаем стейт при выборе.
   const [frequentTokens] = useState(loadFrequent)
 
+  // Избранное эмодзи (бэкенд). favRef держим для стабильного onContext —
+  // иначе мемоизированный EmojiScroll ререндерился бы на каждое изменение fav.
+  const fav = useFavorites('emoji')
+  const favRef = useRef(fav)
+  favRef.current = fav
+
   const customMap = useMemo(() => {
     const m = new Map<string, CustomEmoji>()
     for (const e of customEmoji ?? []) m.set(e.name, e)
     return m
   }, [customEmoji])
+
+  const favoriteEntries = useMemo<RenderEntry[]>(() => {
+    return fav.favorites.map((f) => {
+      const p = f.payload as EmojiFavoritePayload
+      const name = p.imageUrl
+        ? p.token.replace(/^:|:$/g, '')
+        : (NATIVE_NAME_BY_TOKEN.get(p.token) ?? p.token)
+      return { token: p.token, name, imageUrl: p.imageUrl ?? undefined }
+    })
+  }, [fav.favorites])
 
   const customEntries = useMemo<RenderEntry[]>(
     () => (customEmoji ?? []).map((e) => ({ token: `:${e.name}:`, name: e.name, imageUrl: e.imageUrl })),
@@ -351,13 +371,14 @@ export function EmojiPicker({ onSelect, customEmoji }: EmojiPickerProps) {
 
   const sections = useMemo<RenderSection[]>(() => {
     const out: RenderSection[] = []
+    if (favoriteEntries.length) out.push({ id: 'kd-fav', label: 'Избранное', entries: favoriteEntries })
     if (customEntries.length) out.push({ id: 'kd-server', label: 'Сервер', entries: customEntries })
     if (frequentEntries.length) out.push({ id: 'frequent', label: CATEGORY_META.frequent!.label, entries: frequentEntries })
     for (const s of NATIVE_SECTIONS) {
       out.push({ id: s.id, label: CATEGORY_META[s.id]?.label ?? s.id, entries: s.emojis })
     }
     return out
-  }, [customEntries, frequentEntries])
+  }, [favoriteEntries, customEntries, frequentEntries])
 
   // Сколько секций смонтировать сразу (первый экран + запас), чтобы при открытии
   // не было пустых распорок, но и не монтировать все 1870 кнопок синхронно.
@@ -374,13 +395,14 @@ export function EmojiPicker({ onSelect, customEmoji }: EmojiPickerProps) {
 
   const tabs = useMemo<Tab[]>(() => {
     const out: Tab[] = []
+    if (favoriteEntries.length) out.push({ id: 'kd-fav', label: 'Избранное', icon: '★' })
     if (customEntries.length) out.push({ id: 'kd-server', label: 'Сервер', icon: '⭐', imageUrl: customEntries[0]?.imageUrl })
     if (frequentEntries.length) out.push({ id: 'frequent', label: CATEGORY_META.frequent!.label, icon: CATEGORY_META.frequent!.icon })
     for (const s of NATIVE_SECTIONS) {
       out.push({ id: s.id, label: CATEGORY_META[s.id]?.label ?? s.id, icon: CATEGORY_META[s.id]?.icon ?? '•' })
     }
     return out
-  }, [customEntries, frequentEntries])
+  }, [favoriteEntries, customEntries, frequentEntries])
 
   const q = query.trim().toLowerCase()
   const searching = q.length > 0
@@ -412,6 +434,18 @@ export function EmojiPicker({ onSelect, customEmoji }: EmojiPickerProps) {
     saveFrequent(token)
     onSelect(token)
   }, [onSelect])
+
+  // ПКМ по эмодзи — добавить/убрать из избранного (стабильно через favRef).
+  const onContext = useCallback((e: React.MouseEvent) => {
+    const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-token]')
+    const token = btn?.dataset.token
+    if (!token) return
+    e.preventDefault()
+    const f = favRef.current
+    const existing = f.byRef.get(token)
+    if (existing) f.remove.mutate(existing.id)
+    else f.add.mutate({ refKey: token, payload: { token, imageUrl: btn!.dataset.img ?? null } })
+  }, [])
 
   // Превью наведённой эмодзи обновляем императивно через ref — иначе hover по
   // сетке дёргал бы setState на каждое движение мыши и перерисовывал бы её.
@@ -503,6 +537,7 @@ export function EmojiPicker({ onSelect, customEmoji }: EmojiPickerProps) {
         search={search}
         onPick={onPick}
         onHover={onHover}
+        onContext={onContext}
         registerSection={registerSection}
       />
 
@@ -510,6 +545,7 @@ export function EmojiPicker({ onSelect, customEmoji }: EmojiPickerProps) {
         <img ref={previewImgRef} alt="" draggable={false} className="w-[18px] h-[18px] object-contain hidden" />
         <span ref={previewGlyphRef} className="text-[18px] leading-none" />
         <span ref={previewNameRef} className="text-[11px] font-mono text-kd-text-mute truncate">выбери эмодзи</span>
+        <span className="ml-auto shrink-0 text-[9px] font-mono text-kd-text-mute select-none">ПКМ — ★</span>
       </div>
     </div>
   )

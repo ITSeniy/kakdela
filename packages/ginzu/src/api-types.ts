@@ -137,6 +137,18 @@ export const GifEmbedSchema = z.object({
 })
 export type GifEmbed = z.infer<typeof GifEmbedSchema>
 
+// Стикер-вложение сообщения: денормализованный снимок стикера на момент
+// отправки (как ForwardedRef). Переживает удаление стикера из набора сервера —
+// уже отправленные сообщения продолжают рендериться.
+export const StickerRefSchema = z.object({
+  stickerId: z.string().uuid(),
+  name:      z.string(),
+  imageUrl:  z.string().url(),
+  width:     z.number().int().positive(),
+  height:    z.number().int().positive(),
+})
+export type StickerRef = z.infer<typeof StickerRefSchema>
+
 export const MessageSchema = z.object({
   id: z.string().uuid(),
   channelId: z.string().uuid(),
@@ -160,6 +172,8 @@ export const MessageSchema = z.object({
   linkPreviews: z.array(LinkPreviewSchema).default([]),
   /** GIF-вложение (GIPHY или загруженный .gif); null — обычное сообщение. */
   gif: GifEmbedSchema.nullable().optional(),
+  /** Стикер сервера (снимок); null — обычное сообщение. */
+  sticker: StickerRefSchema.nullable().optional(),
 })
 export type Message = z.infer<typeof MessageSchema>
 
@@ -292,9 +306,11 @@ export const SendMessageRequestSchema = z.object({
   spoilerAttachments: z.array(z.string().uuid()).max(10).optional(),
   /** GIF-вложение (отправка из пикера/избранного). */
   gif: GifEmbedSchema.optional(),
+  /** Стикер (отправка из пикера/избранного). */
+  sticker: StickerRefSchema.optional(),
 }).refine(
-  (v) => v.content.trim().length > 0 || (v.attachments && v.attachments.length > 0) || v.gif !== undefined,
-  { message: 'message must have content, attachments or a gif', path: ['content'] },
+  (v) => v.content.trim().length > 0 || (v.attachments && v.attachments.length > 0) || v.gif !== undefined || v.sticker !== undefined,
+  { message: 'message must have content, attachments, a gif or a sticker', path: ['content'] },
 )
 export type SendMessageRequest = z.infer<typeof SendMessageRequestSchema>
 
@@ -347,34 +363,71 @@ export type GiphyResponse = z.infer<typeof GiphyResponseSchema>
 export const GiphyConfigSchema = z.object({ enabled: z.boolean() })
 export type GiphyConfig = z.infer<typeof GiphyConfigSchema>
 
-// ───── Избранные гифки (per-user, хранится на бэкенде) ─────
+// ───── Избранное (единое: гифки / стикеры / эмодзи, per-user, на бэкенде) ─────
+//
+// Одна таблица + один набор роутов. kind различает тип, refKey — ключ дедупа в
+// рамках (user, kind), payload — данные для рендера/отправки/вставки. Payload
+// типизирован объединением по kind; клиент сужает по полю kind.
 
-export const GifFavoriteSchema = z.object({
-  id:         z.string().uuid(),
+export const FavoriteKindSchema = z.enum(['gif', 'sticker', 'emoji'])
+export type FavoriteKind = z.infer<typeof FavoriteKindSchema>
+
+// gif: тот же набор полей, что и GifEmbed + заголовок (refKey = gifUrl).
+export const GifFavoritePayloadSchema = z.object({
   gifUrl:     z.string().url(),
   mp4Url:     z.string().url().nullable(),
   previewUrl: z.string().url(),
   width:      z.number().int().positive(),
   height:     z.number().int().positive(),
-  title:      z.string(),
-  createdAt:  z.string(),
+  title:      z.string().default(''),
 })
-export type GifFavorite = z.infer<typeof GifFavoriteSchema>
+export type GifFavoritePayload = z.infer<typeof GifFavoritePayloadSchema>
 
-export const GifFavoritesResponseSchema = z.object({
-  favorites: z.array(GifFavoriteSchema),
+// sticker: снимок стикера (refKey = stickerId).
+export const StickerFavoritePayloadSchema = z.object({
+  stickerId: z.string().uuid(),
+  name:      z.string(),
+  imageUrl:  z.string().url(),
+  width:     z.number().int().positive(),
+  height:    z.number().int().positive(),
 })
-export type GifFavoritesResponse = z.infer<typeof GifFavoritesResponseSchema>
+export type StickerFavoritePayload = z.infer<typeof StickerFavoritePayloadSchema>
 
-export const AddGifFavoriteRequestSchema = z.object({
-  gifUrl:     z.string().url(),
-  mp4Url:     z.string().url().nullable().optional(),
-  previewUrl: z.string().url(),
-  width:      z.number().int().positive(),
-  height:     z.number().int().positive(),
-  title:      z.string().max(200).optional(),
+// emoji: token = '😀' (unicode) или ':name:' (кастом); imageUrl у кастомных.
+// refKey = token.
+export const EmojiFavoritePayloadSchema = z.object({
+  token:    z.string().min(1).max(64),
+  imageUrl: z.string().url().nullable(),
 })
-export type AddGifFavoriteRequest = z.infer<typeof AddGifFavoriteRequestSchema>
+export type EmojiFavoritePayload = z.infer<typeof EmojiFavoritePayloadSchema>
+
+export const FavoritePayloadSchema = z.union([
+  GifFavoritePayloadSchema,
+  StickerFavoritePayloadSchema,
+  EmojiFavoritePayloadSchema,
+])
+export type FavoritePayload = z.infer<typeof FavoritePayloadSchema>
+
+export const FavoriteSchema = z.object({
+  id:        z.string().uuid(),
+  kind:      FavoriteKindSchema,
+  refKey:    z.string(),
+  payload:   FavoritePayloadSchema,
+  createdAt: z.string(),
+})
+export type Favorite = z.infer<typeof FavoriteSchema>
+
+export const FavoritesResponseSchema = z.object({
+  favorites: z.array(FavoriteSchema),
+})
+export type FavoritesResponse = z.infer<typeof FavoritesResponseSchema>
+
+export const AddFavoriteRequestSchema = z.object({
+  kind:    FavoriteKindSchema,
+  refKey:  z.string().min(1).max(512),
+  payload: FavoritePayloadSchema,
+})
+export type AddFavoriteRequest = z.infer<typeof AddFavoriteRequestSchema>
 
 export const MemberPublicSchema = z.object({
   id: z.string().uuid(),
@@ -818,6 +871,40 @@ export const CreateEmojiRequestSchema = z.object({
   dataBase64:  z.string().min(1).max(512 * 1024),
 })
 export type CreateEmojiRequest = z.infer<typeof CreateEmojiRequestSchema>
+
+// ───── Стикеры (server-scoped, крупнее эмодзи; отправляются сообщением) ─────
+
+export const STICKER_MAX_BYTES = 512 * 1024
+export const STICKER_MAX_DIMENSION = 320
+export const STICKER_ALLOWED_CONTENT_TYPES = ['image/png', 'image/gif', 'image/webp'] as const
+
+// Имя стикера — просто ярлык (показывается в пикере), не токен. 1–40 символов.
+export const stickerNameSchema = z.string().trim().min(1).max(40)
+
+export const StickerSchema = z.object({
+  id:        z.string().uuid(),
+  serverId:  z.string().uuid(),
+  name:      z.string(),
+  imageUrl:  z.string().url(),
+  animated:  z.boolean(),
+  width:     z.number().int().positive(),
+  height:    z.number().int().positive(),
+  createdAt: z.string(),
+})
+export type Sticker = z.infer<typeof StickerSchema>
+
+export const StickerListResponseSchema = z.object({
+  stickers: z.array(StickerSchema),
+})
+export type StickerListResponse = z.infer<typeof StickerListResponseSchema>
+
+export const CreateStickerRequestSchema = z.object({
+  name:        stickerNameSchema,
+  contentType: z.enum(STICKER_ALLOWED_CONTENT_TYPES),
+  // 512 KB raw → ~680 KB base64; держим лимит с запасом под Fastify 1 MB body.
+  dataBase64:  z.string().min(1).max(1024 * 1024),
+})
+export type CreateStickerRequest = z.infer<typeof CreateStickerRequestSchema>
 
 export const ErrorBodySchema = z.object({
   error: z.object({

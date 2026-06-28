@@ -20,7 +20,8 @@ import { emojiRoutes } from './routes/emoji.js'
 import { filesRoutes } from './routes/files.js'
 import { inboxRoutes } from './routes/inbox.js'
 import { giphyRoutes } from './routes/giphy.js'
-import { gifFavoritesRoutes } from './routes/gif-favorites.js'
+import { favoritesRoutes } from './routes/favorites.js'
+import { stickersRoutes } from './routes/stickers.js'
 import { searchRoutes } from './routes/search.js'
 import { threadsRoutes } from './routes/threads.js'
 import { usersRoutes } from './routes/users.js'
@@ -84,7 +85,8 @@ async function main() {
   await app.register(inboxRoutes, { prefix: '/api' })
   await app.register(searchRoutes, { prefix: '/api' })
   await app.register(giphyRoutes, { prefix: '/api' })
-  await app.register(gifFavoritesRoutes, { prefix: '/api' })
+  await app.register(favoritesRoutes, { prefix: '/api' })
+  await app.register(stickersRoutes, { prefix: '/api' })
   await app.register(threadsRoutes, { prefix: '/api' })
   await app.register(usersRoutes, { prefix: '/api' })
   await app.register(voiceRoutes, { prefix: '/api' })

@@ -5,6 +5,7 @@ import { create } from 'zustand'
 export type SettingsPage =
   | 'server-overview'
   | 'server-emoji'
+  | 'server-stickers'
   | 'server-members'
   | 'server-roles'
   | 'server-invites'

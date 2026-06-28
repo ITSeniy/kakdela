@@ -14,6 +14,7 @@ import { useThreadUi } from '../threads/store.js'
 import { pinMessage, unpinMessage } from './api.js'
 import { AttachmentList } from './AttachmentView.js'
 import { GifEmbed } from './GifEmbed.js'
+import { StickerEmbed } from './StickerEmbed.js'
 import { useChatDisplaySettings } from './displaySettings.js'
 import { ContextMenu } from './ContextMenu.js'
 import { ForwardedCard } from './ForwardedCard.js'
@@ -212,6 +213,7 @@ export function Message({
   const msgAttachments = 'attachments' in message ? (message.attachments ?? []) : []
   const msgThread = 'thread' in message ? (message.thread ?? null) : null
   const msgGif = message.gif ?? null
+  const msgSticker = message.sticker ?? null
 
   // Цитата ответа — инлайном: эмодзи `:name:` и базовое форматирование.
   const replyHtml = useMemo(
@@ -503,10 +505,11 @@ export function Message({
             )}
           </div>
         </div>
-        {(msgAttachments.length > 0 || msgGif !== null || msgThread !== null || reactionsEl !== null) && (
+        {(msgAttachments.length > 0 || msgGif !== null || msgSticker !== null || msgThread !== null || reactionsEl !== null) && (
           <div className="pl-11">
             {msgAttachments.length > 0 && <AttachmentList attachments={msgAttachments} lightboxContext={lightboxContext} blur={nsfw} />}
             {msgGif && <GifEmbed gif={msgGif} />}
+            {msgSticker && <StickerEmbed sticker={msgSticker} />}
             <ThreadBadge />
             {reactionsEl}
           </div>
@@ -545,6 +548,7 @@ export function Message({
           )}
           {msgAttachments.length > 0 && <AttachmentList attachments={msgAttachments} lightboxContext={lightboxContext} blur={nsfw} />}
           {msgGif && <GifEmbed gif={msgGif} />}
+          {msgSticker && <StickerEmbed sticker={msgSticker} />}
           <ThreadBadge />
           {reactionsEl}
         </div>
@@ -604,6 +608,7 @@ export function Message({
           {linkPreviewsEl}
           {msgAttachments.length > 0 && <AttachmentList attachments={msgAttachments} lightboxContext={lightboxContext} blur={nsfw} />}
           {msgGif && <GifEmbed gif={msgGif} />}
+          {msgSticker && <StickerEmbed sticker={msgSticker} />}
           <ThreadBadge />
           {reactionsEl}
         </div>

@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { type InfiniteData, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useLocation } from 'wouter'
 
-import type { Attachment, Channel, CustomEmoji, GifEmbed, MemberPublic, Message, MessagesPage } from '@kakdela/ginzu/api-types'
+import type { Attachment, Channel, CustomEmoji, GifEmbed, MemberPublic, Message, MessagesPage, StickerRef } from '@kakdela/ginzu/api-types'
 
 type MsgCache = InfiniteData<MessagesPage, string | undefined>
 
@@ -153,7 +153,7 @@ export function ChatScreen({ serverId, channelId }: ChatScreenProps) {
 
   const { emoji: serverEmoji, byName: emojiMap } = useServerEmoji(serverId)
 
-  async function handleSend(content: string, attachments: Attachment[] = [], gif?: GifEmbed) {
+  async function handleSend(content: string, attachments: Attachment[] = [], gif?: GifEmbed, sticker?: StickerRef) {
     if (!user) return
     const nonce = crypto.randomUUID()
     const replyId = replyTo?.id ?? null
@@ -167,6 +167,7 @@ export function ChatScreen({ serverId, channelId }: ChatScreenProps) {
       editedAt: null,
       attachments,
       gif: gif ?? null,
+      sticker: sticker ?? null,
       _pending: 'sending',
       _nonce: nonce,
     }
@@ -182,6 +183,7 @@ export function ChatScreen({ serverId, channelId }: ChatScreenProps) {
         ...(attachments.length > 0 ? { attachments: attachments.map((a) => a.id) } : {}),
         ...(spoilerIds.length > 0 ? { spoilerAttachments: spoilerIds } : {}),
         ...(gif ? { gif } : {}),
+        ...(sticker ? { sticker } : {}),
       })
       queryClient.setQueryData<InfiniteData<MessagesPage, string | undefined>>(
         ['messages', channelId],
