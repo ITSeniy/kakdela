@@ -44,6 +44,7 @@ const {
   alreadyProcessed,
   handleWebhookEvent,
   parseChannelIdFromRoom,
+  parseDmChannelIdFromRoom,
 } = await import('./webhook.js')
 
 const CHANNEL_ID = '11111111-1111-1111-1111-111111111111'
@@ -92,6 +93,20 @@ describe('parseChannelIdFromRoom', () => {
     expect(parseChannelIdFromRoom('chat-abc')).toBeNull()
     expect(parseChannelIdFromRoom(undefined)).toBeNull()
     expect(parseChannelIdFromRoom('voice-')).toBeNull()
+  })
+  it('does not match dm- rooms (those go through the DM branch)', () => {
+    expect(parseChannelIdFromRoom('dm-abc')).toBeNull()
+  })
+})
+
+describe('parseDmChannelIdFromRoom', () => {
+  it('returns channelId for dm-<id> names', () => {
+    expect(parseDmChannelIdFromRoom('dm-abc')).toBe('abc')
+  })
+  it('returns null for non-dm rooms', () => {
+    expect(parseDmChannelIdFromRoom('voice-abc')).toBeNull()
+    expect(parseDmChannelIdFromRoom(undefined)).toBeNull()
+    expect(parseDmChannelIdFromRoom('dm-')).toBeNull()
   })
 })
 

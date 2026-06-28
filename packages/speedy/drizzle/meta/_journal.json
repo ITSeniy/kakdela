@@ -162,6 +162,13 @@
       "when": 1782543538275,
       "tag": "0022_giant_la_nuit",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1782618791307,
+      "tag": "0023_nosy_shatterstar",
+      "breakpoints": true
     }
   ]
 }

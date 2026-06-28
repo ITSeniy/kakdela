@@ -3,7 +3,7 @@
 // те же обработчики из DmScreen — другой только рендер (свои справа на
 // kd-accent, чужие слева на kd-panel, время под пузырём).
 
-import { type MouseEvent, type TouchEvent, useEffect, useMemo, useRef, useState } from 'react'
+import { type MouseEvent, type TouchEvent, Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 
 import type { Channel, CustomEmoji, DmSummary, MemberPublic, Message as IMessage } from '@kakdela/ginzu/api-types'
@@ -70,6 +70,43 @@ function minutesBetween(a: string, b: string): number {
 // «приклеиваются» — без повторного аватара и с плотным отступом.
 const GROUP_WINDOW_MIN = 5
 
+const LazyEmojiPicker = lazy(() => import('../chat/EmojiPicker.js'))
+
+// Кнопка «реакция» в hover-кластере десктопа: открывает полный emoji-picker.
+// Вынесена из общей ленты (Reactions сворачивается, когда реакций нет), чтобы
+// сообщения не занимали лишнюю высоту, но добавить реакцию по-прежнему легко.
+function ReactionAddButton({
+  emojiList, onPick,
+}: {
+  emojiList?: CustomEmoji[]
+  onPick: (emoji: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    function onDown(e: globalThis.MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [open])
+  return (
+    <div className="relative" ref={ref}>
+      <button type="button" onClick={() => setOpen((o) => !o)} title="реакция" className="hover:text-kd-text p-1 block">
+        <Icon.Smile size={13} />
+      </button>
+      {open && (
+        <div className="absolute bottom-full right-0 mb-1 z-50 shadow-lg">
+          <Suspense fallback={<div className="p-3 text-[11px] text-kd-text-mute bg-kd-panel rounded-kd border border-kd-border">…</div>}>
+            <LazyEmojiPicker customEmoji={emojiList} onSelect={(emoji) => { onPick(emoji); setOpen(false) }} />
+          </Suspense>
+        </div>
+      )}
+    </div>
+  )
+}
+
 const EDIT_WINDOW_MS = 30 * 24 * 60 * 60 * 1000
 
 function scrollToMessage(id: string) {
@@ -90,6 +127,61 @@ function UnreadDivider() {
         непрочитанное
       </span>
       <div className="flex-1 h-px bg-kd-warm" />
+    </div>
+  )
+}
+
+// Русская плюрализация: one / few / many.
+function plural(n: number, one: string, few: string, many: string): string {
+  const mod10 = n % 10
+  const mod100 = n % 100
+  if (mod10 === 1 && mod100 !== 11) return one
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return few
+  return many
+}
+
+function humanDuration(sec: number): string {
+  if (sec >= 3600) {
+    const h = Math.round(sec / 3600)
+    return `${h} ${plural(h, 'час', 'часа', 'часов')}`
+  }
+  if (sec >= 60) {
+    const m = Math.round(sec / 60)
+    return `${m} ${plural(m, 'минуту', 'минуты', 'минут')}`
+  }
+  return `${sec} ${plural(sec, 'секунду', 'секунды', 'секунд')}`
+}
+
+function fmtSystemWhen(iso: string): string {
+  const d = new Date(iso)
+  const time = d.toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' })
+  const now = new Date()
+  const sameDate = (a: Date, b: Date) =>
+    a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
+  const yesterday = new Date(now)
+  yesterday.setDate(now.getDate() - 1)
+  if (sameDate(d, now)) return `сегодня, в ${time}`
+  if (sameDate(d, yesterday)) return `вчера, в ${time}`
+  return `${d.toLocaleDateString('ru', { day: '2-digit', month: '2-digit' })}, в ${time}`
+}
+
+// Системная строка в ленте (designs — call-log): по центру, приглушённая,
+// иконка-телефон + текст «<имя> начал звонок, который продлился N». Не «пузырь».
+function SystemLine({ message, member }: { message: IMessage; member: MemberPublic | undefined }) {
+  const name = member?.displayName ?? 'кто-то'
+  const sys = message.system
+  let text: string
+  if (sys?.kind === 'call') {
+    text = `${name} начал звонок, который продлился ${humanDuration(sys.durationSec)}`
+  } else {
+    text = message.content
+  }
+  return (
+    <div className="px-5 py-1.5 flex items-center justify-center gap-2 text-center select-none">
+      <Icon.Phone size={12} className="text-kd-online shrink-0" />
+      <span className="text-[11px] text-kd-text-mute">
+        {text}. <span className="font-mono text-kd-text-mute/80">{fmtSystemWhen(message.createdAt)}</span>
+      </span>
     </div>
   )
 }
@@ -225,6 +317,7 @@ function DmBubble({
       hideStartThread
       pinned={(message as IMessage).pinned}
       canPin
+      onPickReaction={(emoji) => onAddReaction(message.id, emoji)}
       onReply={() => onReply(message as IMessage)}
       onForward={() => openForward(message as IMessage)}
       onPin={() => handlePinToggle(true)}
@@ -368,6 +461,10 @@ function DmBubble({
       </div>
       {!pendingStatus && !isMobile && (
         <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 text-kd-text-mute self-center shrink-0">
+          <ReactionAddButton
+            emojiList={emojiMap && emojiMap.size > 0 ? [...emojiMap.values()] : undefined}
+            onPick={(emoji) => onAddReaction(message.id, emoji)}
+          />
           <button type="button" onClick={() => onReply(message as IMessage)} title="ответить" className="hover:text-kd-text p-1">
             <Icon.Reply size={13} />
           </button>
@@ -546,6 +643,7 @@ export function DmBubbleList({
   type ItemRow =
     | { type: 'day'; label: string }
     | { type: 'unread' }
+    | { type: 'system'; msg: IMessage }
     | {
         type: 'msg'
         msg: IMessage | PendingMessage
@@ -554,32 +652,43 @@ export function DmBubbleList({
       }
 
   const rows: ItemRow[] = []
+  // prevForMsg — для day-разделителя (любое последнее сообщение); groupAnchor —
+  // последнее ОБЫЧНОЕ сообщение для склейки (системные строки её разрывают).
   let prevForMsg: IMessage | PendingMessage | null = null
+  let groupAnchor: IMessage | PendingMessage | null = null
   for (let i = 0; i < messages.length; i += 1) {
     const m = messages[i]!
     const dayBreak = prevForMsg === null || !sameDay(prevForMsg.createdAt, m.createdAt)
     if (dayBreak) rows.push({ type: 'day', label: formatDay(m.createdAt) })
     const unreadHere = i === firstUnreadIndex
     if (unreadHere) rows.push({ type: 'unread' })
+    if ((m as IMessage).system) {
+      rows.push({ type: 'system', msg: m })
+      groupAnchor = null // системная строка разрывает склейку
+      prevForMsg = m
+      continue
+    }
     // Ответ-сообщение всегда начинает новую «реплику» — со своим аватаром и
     // отступом, чтобы цитата читалась.
     const hasReply = 'replyTo' in m && (m as IMessage).replyTo != null
     const grouped =
       !dayBreak && !unreadHere && !hasReply
-      && prevForMsg !== null
-      && prevForMsg.authorId === m.authorId
-      && minutesBetween(prevForMsg.createdAt, m.createdAt) < GROUP_WINDOW_MIN
+      && groupAnchor !== null
+      && groupAnchor.authorId === m.authorId
+      && minutesBetween(groupAnchor.createdAt, m.createdAt) < GROUP_WINDOW_MIN
     rows.push({ type: 'msg', msg: m, isPending: false, grouped })
     prevForMsg = m
+    groupAnchor = m
   }
   for (let i = 0; i < pending.length; i += 1) {
     const p = pending[i]!
     const grouped =
-      prevForMsg !== null
-      && prevForMsg.authorId === p.authorId
-      && minutesBetween(prevForMsg.createdAt, p.createdAt) < GROUP_WINDOW_MIN
+      groupAnchor !== null
+      && groupAnchor.authorId === p.authorId
+      && minutesBetween(groupAnchor.createdAt, p.createdAt) < GROUP_WINDOW_MIN
     rows.push({ type: 'msg', msg: p, isPending: true, grouped })
     prevForMsg = p
+    groupAnchor = p
   }
 
   // Карточка начала переписки (designs/final-dm.jsx): показываем, когда вся
@@ -614,6 +723,9 @@ export function DmBubbleList({
       {rows.map((row, idx) => {
         if (row.type === 'day') return <DayDivider key={`day-${idx}`} label={row.label} />
         if (row.type === 'unread') return <UnreadDivider key={`unread-${idx}`} />
+        if (row.type === 'system') {
+          return <SystemLine key={row.msg.id} message={row.msg} member={memberMap.get(row.msg.authorId)} />
+        }
         const m = row.msg
         const key = row.isPending ? (m as PendingMessage)._nonce : m.id
         return (

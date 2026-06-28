@@ -152,6 +152,10 @@ export function useNotifyTriggers(): void {
           // всегда — даже если toast'ы про личку выключены в настройках.
           void queryClient.invalidateQueries({ queryKey: ['dm-list'] })
 
+          // Системные сообщения (call-log T-087) обновляют превью списка, но
+          // не дёргают тостом/звуком — оба уже были в звонке.
+          if (event.message.system) return
+
           // Дальше — только сам toast: по настройкам и фокусу.
           if (!useNotifyPrefs.getState().dms) return
           if (!shouldNotify(event.channelId, uiRef.current, focusedRef.current)) return

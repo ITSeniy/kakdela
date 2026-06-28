@@ -7,15 +7,20 @@ import {
 
 import type { ServerEvent } from '@kakdela/ginzu/ws-events'
 
-import { channels } from '../db/schema.js'
+import type { Message, SystemEvent } from '@kakdela/ginzu/api-types'
+
+import { channels, messages } from '../db/schema.js'
 import { db } from '../lib/db.js'
 import { redis } from '../lib/redis.js'
-import { broadcastToServer } from '../ws/broadcast.js'
+import { broadcastToChannel, broadcastToServer } from '../ws/broadcast.js'
 
 // Имена комнат в guido — `voice-${channelId}`. Если webhook прилетел с
 // другим префиксом — это либо чужая комната, либо мы что-то неправильно
 // деплоим; в любом случае молча игнорируем (debug-уровень в логах).
 const VOICE_ROOM_PREFIX = 'voice-'
+// DM-звонки (T-087) живут в `dm-${channelId}`. Они НЕ серверные голос-каналы:
+// presence-броадкаст не нужен, но на room_finished пишем call-log в чат.
+const DM_ROOM_PREFIX = 'dm-'
 
 const roomUsersKey = (channelId: string) => `voice:channel:${channelId}:users`
 const participantsCacheKey = (channelId: string) =>
@@ -54,6 +59,12 @@ export function parseChannelIdFromRoom(roomName: string | undefined): string | n
   return id.length > 0 ? id : null
 }
 
+export function parseDmChannelIdFromRoom(roomName: string | undefined): string | null {
+  if (!roomName || !roomName.startsWith(DM_ROOM_PREFIX)) return null
+  const id = roomName.slice(DM_ROOM_PREFIX.length)
+  return id.length > 0 ? id : null
+}
+
 function computeMutedFromTracks(p: ParticipantInfo): boolean {
   // muted = у участника нет ни одной опубликованной микрофонной дорожки,
   // которая была бы не-замьючена. Track-mute toggles вебхуками не приходят,
@@ -87,10 +98,128 @@ async function invalidateParticipantsCache(channelId: string): Promise<void> {
   await redis.del(participantsCacheKey(channelId))
 }
 
+// ───── DM-звонки: call-log в чат на room_finished (T-087) ─────
+//
+// Состав 1:1-комнаты для самого звонка ведёт LiveKit на клиентах; здесь нам
+// нужен лишь итог: кто инициировал, состоялся ли (зашёл второй) и сколько
+// длился. Держим это в одном Redis-ключе на канал, на room_finished пишем
+// системное сообщение в DM. Неотвеченный звонок не логируем.
+const dmCallLogKey = (channelId: string) => `dm:call:${channelId}:log`
+const DM_CALL_LOG_TTL_SEC = 60 * 60 * 24
+
+interface DmCallLogMeta {
+  initiator: string
+  startedAt: number
+  answered: boolean
+}
+
+async function handleDmRoomEvent(
+  event: WebhookEvent,
+  channelId: string,
+  log: WebhookLogger,
+): Promise<void> {
+  const key = dmCallLogKey(channelId)
+  switch (event.event) {
+    case 'participant_joined': {
+      const identity = event.participant?.identity
+      if (!identity) return
+      const raw = await redis.get(key)
+      if (!raw) {
+        const meta: DmCallLogMeta = { initiator: identity, startedAt: Date.now(), answered: false }
+        await redis.set(key, JSON.stringify(meta), 'EX', DM_CALL_LOG_TTL_SEC)
+        return
+      }
+      const meta = parseDmCallLog(raw)
+      if (meta && !meta.answered && identity !== meta.initiator) {
+        meta.answered = true
+        await redis.set(key, JSON.stringify(meta), 'EX', DM_CALL_LOG_TTL_SEC)
+      }
+      return
+    }
+    case 'room_finished': {
+      const raw = await redis.get(key)
+      await redis.del(key)
+      const meta = parseDmCallLog(raw)
+      // Логируем только состоявшийся звонок (зашёл второй участник).
+      if (!meta || !meta.answered) return
+      const durationSec = Math.max(1, Math.round((Date.now() - meta.startedAt) / 1000))
+      await postDmCallLog(channelId, meta.initiator, durationSec, log)
+      return
+    }
+    default:
+      return
+  }
+}
+
+function parseDmCallLog(raw: string | null | undefined): DmCallLogMeta | null {
+  if (!raw) return null
+  try {
+    const p = JSON.parse(raw) as Partial<DmCallLogMeta>
+    if (typeof p.initiator !== 'string' || typeof p.startedAt !== 'number') return null
+    return { initiator: p.initiator, startedAt: p.startedAt, answered: p.answered === true }
+  } catch {
+    return null
+  }
+}
+
+async function postDmCallLog(
+  channelId: string,
+  initiator: string,
+  durationSec: number,
+  log: WebhookLogger,
+): Promise<void> {
+  // Канал должен быть живым DM (FK + проверка типа).
+  const rows = await db
+    .select({ kind: channels.kind })
+    .from(channels)
+    .where(eq(channels.id, channelId))
+    .limit(1)
+  const ch = rows[0]
+  if (!ch || ch.kind !== 'dm') return
+
+  const system: SystemEvent = { kind: 'call', durationSec }
+  const inserted = await db
+    .insert(messages)
+    .values({ channelId, authorId: initiator, content: 'Звонок', system })
+    .returning({ id: messages.id, createdAt: messages.createdAt })
+  const row = inserted[0]
+  if (!row) {
+    log.warn({ channelId }, 'dm call-log insert returned no rows')
+    return
+  }
+
+  const message: Message = {
+    id: row.id,
+    channelId,
+    authorId: initiator,
+    content: 'Звонок',
+    replyToId: null,
+    replyTo: null,
+    createdAt: row.createdAt.toISOString(),
+    editedAt: null,
+    reactions: [],
+    attachments: [],
+    thread: null,
+    pinned: false,
+    pinnedAt: null,
+    forwarded: null,
+    linkPreviews: [],
+    system,
+  }
+  await broadcastToChannel(channelId, { t: 'msg.new', channelId, message })
+}
+
 export async function handleWebhookEvent(
   event: WebhookEvent,
   log: WebhookLogger = NOOP_LOG,
 ): Promise<void> {
+  // DM-звонок (`dm-`): отдельная ветка — call-log, без серверного presence.
+  const dmChannelId = parseDmChannelIdFromRoom(event.room?.name)
+  if (dmChannelId) {
+    await handleDmRoomEvent(event, dmChannelId, log)
+    return
+  }
+
   const channelId = parseChannelIdFromRoom(event.room?.name)
 
   switch (event.event) {

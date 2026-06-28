@@ -31,3 +31,19 @@ export async function focusMainWindow(): Promise<void> {
     console.warn('[tray] focus_main_window failed', err)
   }
 }
+
+// Входящий DM-звонок (T-087): на desktop поднять окно поверх всех и попросить
+// внимания (active=true), снять always-on-top после ответа (active=false).
+// В web — best-effort window.focus(), в остальном no-op.
+export async function setCallAlert(active: boolean): Promise<void> {
+  if (!isTauri()) {
+    if (active && typeof window !== 'undefined') window.focus()
+    return
+  }
+  try {
+    const mod = await import('@tauri-apps/api/core')
+    await mod.invoke('set_call_alert', { active })
+  } catch (err) {
+    console.warn('[tray] set_call_alert failed', err)
+  }
+}

@@ -33,6 +33,7 @@ pub fn run() {
             greet,
             focus_main_window,
             set_tray_badge,
+            set_call_alert,
             commands::crypto_init,
             commands::crypto_publish_keys,
             commands::crypto_topup,
@@ -165,6 +166,29 @@ fn set_tray_badge(app: tauri::AppHandle, count: u32) {
     }
     #[cfg(not(desktop))]
     let _ = (app, count);
+}
+
+/// Входящий DM-звонок (T-087): на desktop поднимаем главное окно поверх всех
+/// и просим внимания, чтобы тост-звонок было видно, даже когда КакДела свёрнут
+/// или перекрыт другим окном. `active=false` снимает always-on-top после
+/// принятия/отклонения. На mobile — no-op.
+#[tauri::command]
+fn set_call_alert(app: tauri::AppHandle, active: bool) {
+    #[cfg(desktop)]
+    {
+        let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) else { return };
+        if active {
+            let _ = window.show();
+            let _ = window.unminimize();
+            let _ = window.set_always_on_top(true);
+            let _ = window.set_focus();
+            let _ = window.request_user_attention(Some(tauri::UserAttentionType::Critical));
+        } else {
+            let _ = window.set_always_on_top(false);
+        }
+    }
+    #[cfg(not(desktop))]
+    let _ = (app, active);
 }
 
 #[cfg(desktop)]

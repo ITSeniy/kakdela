@@ -55,6 +55,11 @@ export function Reactions({ messageId, reactions, currentUserId, memberMap, emoj
     return () => document.removeEventListener('mousedown', handleMouseDown)
   }, [pickerOpen])
 
+  // Нет реакций — не занимаем вертикальное место под каждым сообщением
+  // («длинные» промежутки в ленте). Добавить первую реакцию можно из
+  // hover-кластера (десктоп) и контекст-меню (right-click / long-press).
+  if (reactions.length === 0) return null
+
   return (
     <div className="mt-1 flex flex-wrap gap-1 items-center">
       {reactions.map((r) => {

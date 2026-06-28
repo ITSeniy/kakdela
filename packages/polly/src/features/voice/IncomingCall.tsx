@@ -8,6 +8,7 @@ import { useLocation } from 'wouter'
 
 import { Avatar } from '../../components/Avatar.js'
 import { Icon } from '../../components/Icon.js'
+import { setCallAlert } from '../../lib/host/tray.js'
 import { wsClient } from '../../lib/ws.js'
 import { useAuthStore } from '../auth/store.js'
 import { playSound } from '../sounds/sounds.js'
@@ -46,15 +47,17 @@ export function IncomingCall() {
     })
   }, [userId])
 
-  // Звук + авто-снятие, пока висит инвайт.
+  // Звук + авто-снятие + подъём окна поверх всех (desktop), пока висит инвайт.
   useEffect(() => {
     if (!invite) return undefined
+    void setCallAlert(true)
     playSound('ring')
     const ring = setInterval(() => playSound('ring'), RING_REPEAT_MS)
     const dismiss = setTimeout(() => setInvite(null), AUTO_DISMISS_MS)
     return () => {
       clearInterval(ring)
       clearTimeout(dismiss)
+      void setCallAlert(false)
     }
   }, [invite])
 

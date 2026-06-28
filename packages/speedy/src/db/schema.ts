@@ -209,6 +209,9 @@ export const messages = pgTable(
     // OG-превью ссылок (LinkPreview[]); снимаются асинхронно после отправки.
     // null = ещё не обрабатывалось; [] = ссылок без превью / превью нет.
     linkPreviews: jsonb('link_previews'),
+    // Системное событие (SystemEvent), напр. итог DM-звонка (T-087). null —
+    // обычное сообщение. Рендерится отдельной строкой, не «пузырём».
+    system: jsonb('system'),
   },
   (t) => ({
     channelIdIdx:      index('messages_channel_id_id_idx').on(t.channelId, t.id),
