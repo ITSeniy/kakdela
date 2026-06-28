@@ -17,7 +17,6 @@ import { Avatar } from '../../components/Avatar.js'
 import { Icon } from '../../components/Icon.js'
 import { toast } from '../../components/toast/index.js'
 import { useThemeStore } from '../../lib/theme.js'
-import { useSettingsUi } from '../settings/store.js'
 import { getUserProfile } from './api.js'
 import { fmtJoined, fmtTzNow } from './format.js'
 
@@ -43,8 +42,8 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 }
 
 function ProfileHead({ profile, onBack }: { profile: UserProfile; onBack: () => void }) {
+  const [, navigate] = useLocation()
   const tzNow = profile.timezone ? fmtTzNow(profile.timezone) : null
-  const openSettings = useSettingsUi((s) => s.open)
   const meta = [tzNow, STATUS_LABEL[profile.status]].filter(Boolean).join(' · ')
 
   return (
@@ -62,7 +61,7 @@ function ProfileHead({ profile, onBack }: { profile: UserProfile; onBack: () => 
             </button>
           )}
           {profile.isSelf && (
-            <button type="button" onClick={() => openSettings()} title="настройки" className="text-white/90 active:text-white">
+            <button type="button" onClick={() => navigate('/settings')} title="настройки" className="text-white/90 active:text-white">
               <Icon.Settings size={21} />
             </button>
           )}
@@ -128,19 +127,19 @@ function OtherActions({ profile }: { profile: UserProfile }) {
 }
 
 function SelfActions() {
-  const openSettings = useSettingsUi((s) => s.open)
+  const [, navigate] = useLocation()
   return (
     <div className="px-5 pt-5 flex gap-2.5">
       <button
         type="button"
-        onClick={() => openSettings('profile')}
+        onClick={() => navigate('/settings/profile')}
         className="flex-1 flex items-center justify-center gap-2 py-3 bg-kd-accent text-white rounded-kd text-[14px] font-bold active:bg-kd-accent-deep"
       >
         <Icon.Edit size={17} /> редактировать профиль
       </button>
       <button
         type="button"
-        onClick={() => openSettings()}
+        onClick={() => navigate('/settings')}
         title="настройки"
         className="w-12 flex items-center justify-center bg-kd-panel border border-kd-border rounded-kd text-kd-text-soft active:bg-kd-panel-hi"
       >
@@ -152,11 +151,10 @@ function SelfActions() {
 
 function SelfRows() {
   const [, navigate] = useLocation()
-  const openSettings = useSettingsUi((s) => s.open)
   const cycleTheme = useThemeStore((s) => s.cycleMode)
   const rows: { icon: React.ReactNode; label: string; onClick: () => void }[] = [
     { icon: <Icon.Lock size={18} />, label: 'мои ключи и safety numbers', onClick: () => navigate('/secret') },
-    { icon: <Icon.Bell size={18} />, label: 'уведомления', onClick: () => openSettings('notifications') },
+    { icon: <Icon.Bell size={18} />, label: 'уведомления', onClick: () => navigate('/settings/notifications') },
     { icon: <Icon.Moon size={18} />, label: 'тема оформления', onClick: cycleTheme },
   ]
   return (

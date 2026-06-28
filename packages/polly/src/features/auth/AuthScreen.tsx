@@ -265,13 +265,24 @@ export function AuthScreen({ initialMode = 'login', initialInviteCode = '' }: Au
       <AuthArt />
 
       {/* Form panel */}
-      <div className="w-full md:w-[440px] shrink-0 bg-kd-bg px-10 py-14 flex flex-col overflow-y-auto">
+      <div className="w-full md:w-[440px] shrink-0 bg-kd-bg px-6 sm:px-10 py-10 sm:py-14 flex flex-col overflow-y-auto">
+        {/* Mobile-only cozy wordmark (на десктопе его роль играет AuthArt) */}
+        <div className="md:hidden flex items-center gap-3 mb-7">
+          <div className="w-11 h-11 rounded-[14px] bg-gradient-to-br from-kd-profile-grad-from to-kd-profile-grad-to flex items-center justify-center text-white font-extrabold text-[18px] select-none">
+            КД
+          </div>
+          <div>
+            <div className="text-[22px] font-extrabold text-kd-text tracking-[-0.02em] leading-none">как дела</div>
+            <div className="text-[11px] text-kd-text-mute font-mono mt-1.5">уютный чат для своих</div>
+          </div>
+        </div>
+
         {/* Mode badge + help */}
         <div className="flex items-center justify-between mb-6">
           <div className="px-2 py-0.5 bg-kd-panel border border-kd-border rounded text-[10px] text-kd-text-soft font-mono">
             {mode === 'login' ? '01 · вход' : '02 · регистрация'}
           </div>
-          <div className="text-[11px] text-kd-text-mute font-mono">⌘K · помощь</div>
+          <div className="hidden md:block text-[11px] text-kd-text-mute font-mono">⌘K · помощь</div>
         </div>
 
         <h2 className="text-[22px] font-bold text-kd-text tracking-[-0.02em] mb-1">

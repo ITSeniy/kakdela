@@ -10,6 +10,7 @@ import { DmScreen } from '../features/dm/DmScreen.js'
 import { MobileDmList } from '../features/dm/MobileDmList.js'
 import { NewChatScreen } from '../features/dm/NewChatScreen.js'
 import { MobileProfileScreen } from '../features/profile/MobileProfileScreen.js'
+import { MobileSettingsScreen } from '../features/settings/MobileSettingsScreen.js'
 import { initSecretChats, startSecretChatListener } from '../features/secret/api.js'
 import { SecretChatList } from '../features/secret/SecretChatList.js'
 import { SecretChatScreen } from '../features/secret/SecretChatScreen.js'
@@ -33,6 +34,8 @@ export function MobileShell() {
   const [, dmWith] = useRoute<{ userId: string }>('/dm/with/:userId')
   const [, secretPeer] = useRoute<{ userId: string }>('/secret/:userId')
   const [, otherProfile] = useRoute<{ userId: string }>('/u/:userId')
+  const [, settingsSub] = useRoute<{ page: string }>('/settings/:page')
+  const [isSettings] = useRoute('/settings')
   const [isSecretList] = useRoute('/secret')
   const [isNewChat] = useRoute('/new')
   const [isCalls] = useRoute('/calls')
@@ -80,6 +83,20 @@ export function MobileShell() {
     return (
       <div className="h-full flex flex-col bg-kd-bg kd-safe-top">
         <NewChatScreen />
+      </div>
+    )
+  }
+  if (settingsSub) {
+    return (
+      <div className="h-full flex flex-col bg-kd-bg kd-safe-top">
+        <MobileSettingsScreen page={settingsSub.page} />
+      </div>
+    )
+  }
+  if (isSettings) {
+    return (
+      <div className="h-full flex flex-col bg-kd-bg kd-safe-top">
+        <MobileSettingsScreen />
       </div>
     )
   }
