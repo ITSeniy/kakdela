@@ -128,6 +128,18 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
         });
     }
 
+    // Окно-попап звонка (T-087) переиспользуется: любое закрытие (Alt+F4) —
+    // прячем, а не уничтожаем, иначе следующий звонок не найдёт окно.
+    if let Some(popup) = app.get_webview_window(CALL_POPUP_LABEL) {
+        let popup_clone = popup.clone();
+        popup.on_window_event(move |event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = popup_clone.hide();
+            }
+        });
+    }
+
     Ok(())
 }
 
@@ -180,12 +192,13 @@ fn set_tray_badge(app: tauri::AppHandle, count: u32) {
     let _ = (app, count);
 }
 
-/// Входящий DM-звонок (T-087): на desktop поднимаем отдельное маленькое окно
+/// Входящий DM-звонок (T-087): на desktop ПОКАЗЫВАЕМ отдельное маленькое окно
 /// поверх всех окон — звонок видно, даже когда КакДела свёрнут или перекрыт.
-/// Окно presentational: данные звонка кладём init-скриптом в window.__CALL_POPUP__,
-/// а его кнопки шлют глобальный tauri-event `call-popup-action`, который ловит
-/// главное окно (см. features/voice/IncomingCall.tsx). На mobile — no-op
-/// (там хватает тоста в самом приложении).
+/// Окно НЕ создаём на лету (рантайм-создание второго webview на Windows виснет
+/// белым) — оно заранее объявлено в tauri.conf.json (label `call-popup`,
+/// visible:false) и грузит статичную public/call-popup.html. Здесь лишь кладём
+/// данные в state, дёргаем страницу событием `call-popup-show` (она перечитает
+/// get_call_popup_data) и показываем окно. На mobile — no-op (хватает тоста).
 #[tauri::command]
 fn open_call_popup(
     app: tauri::AppHandle,
@@ -206,36 +219,15 @@ fn open_call_popup(
     }
     #[cfg(desktop)]
     {
-        use tauri::{WebviewUrl, WebviewWindowBuilder};
-        // Повторный invite до закрытия прежнего попапа — пересоздаём.
-        if let Some(existing) = app.get_webview_window(CALL_POPUP_LABEL) {
-            let _ = existing.close();
-        }
-        // Грузим ОТДЕЛЬНУЮ статичную страницу (public/call-popup.html) по ЧИСТОМУ
-        // пути, без query: WebviewUrl::App percent-кодирует `?` → 404 → белое
-        // окно. Данные идут не через URL, а через get_call_popup_data.
-        let built = WebviewWindowBuilder::new(
-            &app,
-            CALL_POPUP_LABEL,
-            WebviewUrl::App("call-popup.html".into()),
-        )
-        .title("Входящий звонок")
-        .inner_size(340.0, 128.0)
-        .resizable(false)
-        .decorations(false)
-        .always_on_top(true)
-        .skip_taskbar(true)
-        .focused(false)
-        .build();
-        match built {
-            Ok(win) => {
-                position_call_popup(&win);
-                // В debug-сборке (`pnpm dev:polly`) сразу открываем DevTools
-                // попапа — иначе окно «немое»: контекстного меню/хоткея нет.
-                #[cfg(debug_assertions)]
-                win.open_devtools();
-            }
-            Err(err) => eprintln!("[call-popup] build failed: {err}"),
+        use tauri::Emitter;
+        if let Some(win) = app.get_webview_window(CALL_POPUP_LABEL) {
+            // Просим (уже загруженную) страницу перечитать данные и показываем.
+            let _ = win.emit("call-popup-show", ());
+            let _ = win.show();
+            // current_monitor знает монитор только после show — позиционируем после.
+            position_call_popup(&win);
+            let _ = win.set_always_on_top(true);
+            let _ = win.set_focus();
         }
     }
     #[cfg(not(desktop))]
@@ -248,13 +240,14 @@ fn get_call_popup_data(state: tauri::State<'_, PendingCall>) -> Option<String> {
     state.0.lock().ok().and_then(|g| g.clone())
 }
 
-/// Закрыть попап входящего звонка (после принятия/отклонения/таймаута/отмены).
+/// Скрыть попап входящего звонка (после принятия/отклонения/таймаута/отмены).
+/// Именно hide (не close): окно переиспользуется, не пересоздаётся.
 #[tauri::command]
 fn close_call_popup(app: tauri::AppHandle) {
     #[cfg(desktop)]
     {
         if let Some(win) = app.get_webview_window(CALL_POPUP_LABEL) {
-            let _ = win.close();
+            let _ = win.hide();
         }
     }
     #[cfg(not(desktop))]

@@ -5,7 +5,6 @@
   "windows": ["main", "call-popup"],
   "permissions": [
     "core:default",
-    "core:window:allow-close",
     "os:allow-platform",
     "os:allow-version",
     "os:allow-os-type",
