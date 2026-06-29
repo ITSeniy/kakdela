@@ -43,10 +43,17 @@ pnpm build
 **Single-package commands** use the `--filter` flag:
 ```bash
 pnpm --filter @kakdela/speedy typecheck
-pnpm --filter @kakdela/polly tauri:build    # produces .msi in src-tauri/target/release/bundle/
+pnpm --filter @kakdela/polly tauri:build    # NSIS .exe installer → src-tauri/target/release/bundle/nsis/
 pnpm --filter @kakdela/speedy db:generate   # drizzle-kit generate
 pnpm --filter @kakdela/speedy db:studio     # drizzle-kit studio
 ```
+
+**Tauri build prerequisite**: the Rust crate pulls in libsignal (secret chats), whose
+`spqr` build script needs the Protocol Buffers compiler `protoc` on `PATH` (or via the
+`PROTOC` env var). Install it (`choco install protoc` / `scoop install protobuf` /
+`winget install protobuf`) before `tauri:build`, else the build fails at `spqr`.
+Windows bundles NSIS only — the MSI (WiX) target was dropped because `light.exe` chokes
+on the Cyrillic product name «как дела» under the `en-US` culture.
 
 **VPS deploy**: full guide in `docs/DEPLOY.md`. Two compose files on a shared `kd-net` network: `docker-compose.prod.yml` (data: postgres/redis/minio/livekit/backup) + `docker-compose.app.yml` (speedy + caddy with the web client baked in). Secrets template: `.env.prod.example`; LiveKit config template: `ops/livekit/livekit.prod.example.yaml`. The speedy image runs on tsx (not compiled dist — ginzu exports TS sources) and bundles francine for migrations/seeding.
 
