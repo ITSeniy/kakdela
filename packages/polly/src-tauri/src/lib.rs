@@ -30,20 +30,47 @@ const CALL_POPUP_LABEL: &str = "call-popup";
 #[derive(Default)]
 struct PendingCall(std::sync::Mutex<Option<String>>);
 
+/// Закрывать окно в трей (true) или выходить (false). Управляется из настроек
+/// (set_close_to_tray); читается в обработчике CloseRequested. Дефолт — в трей.
+struct CloseToTray(std::sync::atomic::AtomicBool);
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    #[allow(unused_mut)]
+    let mut builder = tauri::Builder::default();
+
+    // single-instance ОБЯЗАН быть первым плагином (Tauri docs): повторный запуск
+    // не плодит окно, а фокусирует уже открытое. Автозапуск регистрируется с
+    // флагом --minimized — фронт по нему + настройке решает, прятать ли окно.
+    #[cfg(desktop)]
+    {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            show_main_window(app);
+        }));
+        builder = builder.plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec!["--minimized"]),
+        ));
+    }
+
+    builder
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
         .manage(commands::CryptoState::default())
         .manage(commands::HistoryState::default())
         .manage(PendingCall::default())
+        .manage(CloseToTray(std::sync::atomic::AtomicBool::new(true)))
         .invoke_handler(tauri::generate_handler![
             greet,
             focus_main_window,
             notify_with_target,
             set_tray_badge,
+            set_taskbar_badge,
+            set_close_to_tray,
+            keep_awake,
+            hide_main_window,
+            launched_minimized,
             open_call_popup,
             close_call_popup,
             get_call_popup_data,
@@ -117,14 +144,22 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
         })
         .build(app)?;
 
-    // Close-to-tray: перехватываем закрытие главного окна и прячем его.
-    // Полный quit делается только через меню трея.
+    // Close-to-tray: перехватываем закрытие главного окна. Если в настройках
+    // выбрано «сворачивать в трей» (дефолт) — прячем; иначе даём окну закрыться
+    // (приложение завершится). Полный quit всегда доступен через меню трея.
     if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
         let win_clone = window.clone();
         window.on_window_event(move |event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = win_clone.hide();
+                let to_tray = win_clone
+                    .app_handle()
+                    .state::<CloseToTray>()
+                    .0
+                    .load(std::sync::atomic::Ordering::Relaxed);
+                if to_tray {
+                    api.prevent_close();
+                    let _ = win_clone.hide();
+                }
             }
         });
     }
@@ -157,6 +192,94 @@ fn focus_main_window(app: tauri::AppHandle) {
     show_main_window(&app);
     #[cfg(not(desktop))]
     let _ = app;
+}
+
+/// Спрятать главное окно в трей (используется при автозапуске с --minimized).
+#[tauri::command]
+fn hide_main_window(app: tauri::AppHandle) {
+    #[cfg(desktop)]
+    {
+        use tauri::Manager;
+        if let Some(w) = app.get_webview_window("main") {
+            let _ = w.hide();
+        }
+    }
+    #[cfg(not(desktop))]
+    let _ = app;
+}
+
+/// Запущено ли приложение с флагом автозапуска (--minimized). Фронт по нему +
+/// настройке «стартовать свёрнутым» решает, прятать ли окно.
+#[tauri::command]
+fn launched_minimized() -> bool {
+    std::env::args().any(|a| a == "--minimized")
+}
+
+/// Переключатель «закрывать в трей vs выходить» — пишет в managed-флаг, который
+/// читает обработчик CloseRequested.
+#[tauri::command]
+fn set_close_to_tray(app: tauri::AppHandle, to_tray: bool) {
+    use tauri::Manager;
+    app.state::<CloseToTray>()
+        .0
+        .store(to_tray, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Числовой бейдж непрочитанного на иконке таскбара (Windows). Картинку рисует
+/// фронт (canvas → base64 PNG); `None` — снять бейдж. На Windows нативный
+/// set_badge_count не работает — используется overlay-иконка.
+#[tauri::command]
+fn set_taskbar_badge(app: tauri::AppHandle, icon_base64: Option<String>) {
+    #[cfg(windows)]
+    {
+        use tauri::image::Image;
+        use tauri::Manager;
+        let Some(window) = app.get_webview_window("main") else { return };
+        match icon_base64 {
+            Some(b64) => {
+                use base64::engine::general_purpose::STANDARD;
+                use base64::Engine;
+                if let Ok(bytes) = STANDARD.decode(b64.as_bytes()) {
+                    if let Ok(img) = Image::from_bytes(&bytes) {
+                        let _ = window.set_overlay_icon(Some(img));
+                    }
+                }
+            }
+            None => {
+                let _ = window.set_overlay_icon(None);
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = (app, icon_base64);
+}
+
+/// Не давать системе уснуть/гасить экран, пока true (на время звонка). На
+/// Windows — SetThreadExecutionState на главном потоке (там состояние
+/// долгоживущее и корректно сбрасывается тем же вызовом с ES_CONTINUOUS).
+#[tauri::command]
+fn keep_awake(app: tauri::AppHandle, on: bool) {
+    #[cfg(windows)]
+    {
+        let _ = app.run_on_main_thread(move || {
+            const ES_CONTINUOUS: u32 = 0x8000_0000;
+            const ES_SYSTEM_REQUIRED: u32 = 0x0000_0001;
+            const ES_DISPLAY_REQUIRED: u32 = 0x0000_0002;
+            extern "system" {
+                fn SetThreadExecutionState(es_flags: u32) -> u32;
+            }
+            let flags = if on {
+                ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED
+            } else {
+                ES_CONTINUOUS
+            };
+            unsafe {
+                SetThreadExecutionState(flags);
+            }
+        });
+    }
+    #[cfg(not(windows))]
+    let _ = (app, on);
 }
 
 /// Готовит круглую иконку тоста (appLogoOverride): аватар автора, отрисованный

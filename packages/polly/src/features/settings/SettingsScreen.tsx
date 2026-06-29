@@ -14,9 +14,11 @@ import type { PermissionFlag } from '@kakdela/ginzu/permissions'
 
 import { useServerPermissions } from '../roles/permissions.js'
 import { getServerDetail, listMembers } from '../servers/api.js'
+import { isDesktop } from '../../lib/host/desktop.js'
 import { AppearanceSettings } from './AppearanceSettings.js'
 import { AuditLog } from './AuditLog.js'
 import { ChatSettings } from './ChatSettings.js'
+import { DesktopSettings } from './DesktopSettings.js'
 import { EmojiManagement } from './EmojiManagement.js'
 import { StickerManagement } from './StickerManagement.js'
 import { GeneralSettings } from './GeneralSettings.js'
@@ -57,6 +59,11 @@ const ACCOUNT_PAGES: PageDef[] = [
   { id: 'sounds',        label: 'звуки',         desc: 'звуки интерфейса и пак на вкус' },
   { id: 'shortcuts',     label: 'клавиши',       desc: 'горячие клавиши приложения' },
 ]
+
+// Десктоп-вкладка добавляется только в Tauri-клиенте (в браузере смысла нет).
+const DESKTOP_PAGE: PageDef = {
+  id: 'desktop', label: 'приложение', desc: 'автозапуск, окно, разрешения Windows',
+}
 
 function NavItem({
   page, active, count, onClick,
@@ -149,7 +156,7 @@ export function SettingsScreen() {
 
   const pages = serverId
     ? SERVER_PAGES.filter((p) => !p.perm || perms.can(p.perm))
-    : ACCOUNT_PAGES
+    : (isDesktop() ? [...ACCOUNT_PAGES, DESKTOP_PAGE] : ACCOUNT_PAGES)
   const current = pages.find((p) => p.id === page) ?? pages[0]!
   const serverName = serverDetail?.server.name ?? 'сервер'
 
@@ -217,6 +224,7 @@ export function SettingsScreen() {
             {current.id === 'voice'         && <VoiceSettings />}
             {current.id === 'sounds'        && <SoundSettings />}
             {current.id === 'shortcuts'     && <ShortcutsSettings />}
+            {current.id === 'desktop'       && <DesktopSettings />}
           </div>
         </div>
       </div>

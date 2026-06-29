@@ -22,6 +22,7 @@ import { useThreadUi } from '../features/threads/store.js'
 import { useNotifyTriggers } from '../features/notify/triggers.js'
 import { useUnreadIndicators } from '../features/notify/unread.js'
 import { useAutoIdle } from '../features/presence/useAutoIdle.js'
+import { useDesktopIntegration } from '../features/desktop/useDesktopIntegration.js'
 import { VoiceScreen } from '../features/voice/VoiceScreen.js'
 import { useAudioDeviceSync } from '../features/voice/deviceSettings.js'
 import { useNoiseSuppressionSync } from '../features/voice/noiseSettings.js'
@@ -38,6 +39,7 @@ export function Shell() {
   useNotifyTriggers()
   useUnreadIndicators()
   useAutoIdle()
+  useDesktopIntegration()
   useVoicePingSampler()
   useAudioDeviceSync()
   const [location, navigate] = useLocation()

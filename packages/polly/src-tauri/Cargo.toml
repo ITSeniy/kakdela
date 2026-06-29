@@ -41,6 +41,12 @@ async-trait = "0.1"
 pollster = "0.4"
 base64 = "0.22"
 
+# Десктоп-плагины: один экземпляр (повторный запуск фокусирует окно) и
+# автозапуск при входе в систему. Мобильным сборкам не нужны.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-single-instance = "2"
+tauri-plugin-autostart = "2"
+
 # Свой клик-обработчик нативных тостов на Windows: плагин на desktop активацию
 # в JS не пробрасывает (notify-rust `.show()` без on_activated). Версия совпадает
 # с той, что тащит notify-rust транзитивно.

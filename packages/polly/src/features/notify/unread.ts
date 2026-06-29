@@ -13,6 +13,8 @@ import { useEffect, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 
 import { setTrayBadge } from '../../lib/host/tray.js'
+import { setTaskbarBadge } from '../../lib/host/desktop.js'
+import { renderBadgeIconBase64 } from '../../lib/host/badgeIcon.js'
 import { listDms } from '../dm/api.js'
 import { listInboxMentions } from '../inbox/api.js'
 
@@ -67,5 +69,8 @@ export function useUnreadIndicators(): void {
       document.title = total > 0 ? `(${total > 99 ? '99+' : total}) ${APP_TITLE}` : APP_TITLE
     }
     void setTrayBadge(total)
+    // Числовой overlay-бейдж на иконке таскбара (Windows): рисуем PNG и шлём
+    // в Rust; 0 → null снимает бейдж.
+    void setTaskbarBadge(renderBadgeIconBase64(total))
   }, [total])
 }

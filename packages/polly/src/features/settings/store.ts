@@ -17,6 +17,7 @@ export type SettingsPage =
   | 'voice'
   | 'sounds'
   | 'shortcuts'
+  | 'desktop'
 
 interface SettingsUiState {
   isOpen: boolean

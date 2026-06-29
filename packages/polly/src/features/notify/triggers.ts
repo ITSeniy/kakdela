@@ -6,6 +6,8 @@ import type { Channel, DmSummary, MemberPublic } from '@kakdela/ginzu/api-types'
 
 import { useAuthStore } from '../auth/store.js'
 import { focusMainWindow } from '../../lib/host/tray.js'
+import { flashTaskbar } from '../../lib/host/desktop.js'
+import { useDesktopPrefs } from '../settings/desktopPrefs.js'
 import { notify, primeNotifyPermission } from '../../lib/host/notify.js'
 import { wsClient } from '../../lib/ws.js'
 import { listDms } from '../dm/api.js'
@@ -147,6 +149,10 @@ export function useNotifyTriggers(): void {
         // Дедуп с «все сообщения»: если это сообщение уже всплыло — не дублируем.
         if (!markNotified(event.messageId)) return
         playNotifySound()
+        // Мигнуть таскбаром, если окно не в фокусе (десктоп).
+        if (!focusedRef.current && useDesktopPrefs.getState().flashOnMention) {
+          void flashTaskbar()
+        }
         void handleMentionNotification(event.channelId, queryClient)
       }
 
