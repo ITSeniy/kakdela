@@ -3,19 +3,36 @@
 // внахлёст, секции panel-alt: о себе, статус + часовой пояс, общие комнаты.
 
 import { useEffect, useRef, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useLocation } from 'wouter'
 
-import type { UserProfile } from '@kakdela/ginzu/api-types'
+import type { MemberPublic, Role, UserProfile } from '@kakdela/ginzu/api-types'
+import { hasPermission } from '@kakdela/ginzu/permissions'
 
 import { ApiError } from '../../lib/api.js'
 import { Avatar } from '../../components/Avatar.js'
+import { Icon } from '../../components/Icon.js'
 import { Modal } from '../../components/Modal.js'
+import { toast } from '../../components/toast/index.js'
+import { useAuthStore } from '../auth/store.js'
+import { listRoles, setMemberRoles } from '../roles/api.js'
+import { listMembers } from '../servers/api.js'
 import { useSettingsUi } from '../settings/store.js'
 import { StartSecretChat } from '../secret/StartSecretChat.js'
 import { getUserProfile } from './api.js'
 import { fmtJoined, fmtTzNow } from './format.js'
 import { useProfileUi } from './store.js'
+
+// Позиция участника в иерархии ролей (зеркало lib/permissions.ts на сервере):
+// owner — выше всех, admin — выше любых кастомных, иначе — максимум позиций
+// своих кастомных ролей.
+function memberTopPosition(m: MemberPublic): number {
+  if (m.role === 'owner') return Number.POSITIVE_INFINITY
+  if (m.role === 'admin') return 1_000_000_000
+  let p = -1
+  for (const r of m.roles) if (r.position > p) p = r.position
+  return p
+}
 
 const STATUS_LABEL: Record<UserProfile['status'], string> = {
   online:  'в сети',
@@ -47,9 +64,13 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 }
 
 function ReadView({ profile }: { profile: UserProfile }) {
-  const [, navigate] = useLocation()
+  const [location, navigate] = useLocation()
   const close = useProfileUi((s) => s.close)
   const openSettings = useSettingsUi((s) => s.open)
+
+  // Сервер-контекст для назначения ролей: профиль открыли, находясь в сервере.
+  // Назначение всегда server-scoped, поэтому «+» работает в пределах этого id.
+  const activeServerId = /^\/servers\/([0-9a-f-]{36})/.exec(location)?.[1] ?? null
 
   function openDm() {
     close()
@@ -107,25 +128,6 @@ function ReadView({ profile }: { profile: UserProfile }) {
       {/* секретный чат — только на мобиле, только для чужого профиля (T-103) */}
       {!profile.isSelf && <StartSecretChat userId={profile.id} />}
 
-      {/* роли — цветные пилюли (designs/final-profile.jsx) */}
-      {profile.roles.length > 0 && (
-        <div className="mb-2.5">
-          <SectionTitle>роли · {profile.roles.length}</SectionTitle>
-          <div className="flex flex-wrap gap-1.5">
-            {profile.roles.map((r) => (
-              <span
-                key={r.id}
-                className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border bg-kd-panel-alt text-[11px] font-mono text-kd-text"
-                style={{ borderColor: r.color ? `${r.color}55` : 'var(--kd-border)' }}
-              >
-                <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: r.color ?? 'var(--kd-text-mute)' }} />
-                {r.name}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* о себе */}
       {profile.about && (
         <div className="p-3 rounded-kd bg-kd-panel-alt border border-kd-border mb-2.5">
@@ -157,6 +159,10 @@ function ReadView({ profile }: { profile: UserProfile }) {
         )}
       </div>
 
+      {/* роли — цветные пилюли + «+» для тех, кто вправе назначать (по концепту
+          секция ниже статуса/часового пояса) */}
+      <RolesSection profile={profile} activeServerId={activeServerId} />
+
       {profile.sharedServers.length > 0 && (
         <div>
           <SectionTitle>
@@ -182,6 +188,193 @@ function ReadView({ profile }: { profile: UserProfile }) {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+/**
+ * Цветная пилюля роли (designs/final-profile.jsx). Если передан `onRemove` —
+ * на наведение показывается «×», снимающий роль (для тех, кто вправе её
+ * убирать). Место под «×» зарезервировано, чтобы чип не дёргался.
+ */
+function RoleChip({
+  name, color, onRemove, busy,
+}: {
+  name: string
+  color: string | null
+  onRemove?: () => void
+  busy?: boolean
+}) {
+  return (
+    <span
+      className={[
+        'group inline-flex items-center gap-1.5 py-0.5 rounded-full border bg-kd-panel-alt text-[11px] font-mono text-kd-text',
+        onRemove ? 'pl-2 pr-1' : 'px-2',
+      ].join(' ')}
+      style={{ borderColor: color ? `${color}55` : 'var(--kd-border)' }}
+    >
+      <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: color ?? 'var(--kd-text-mute)' }} />
+      {name}
+      {onRemove && (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={onRemove}
+          title="убрать роль"
+          className="shrink-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus:opacity-100 text-kd-text-mute hover:text-kd-danger transition-opacity disabled:opacity-50"
+        >
+          <Icon.X size={11} />
+        </button>
+      )}
+    </span>
+  )
+}
+
+/**
+ * Секция «роли» с пилюлями и кнопкой «+» для назначения. «+» виден, только
+ * если профиль открыт в контексте сервера, у меня есть MANAGE_ROLES там, и я
+ * по иерархии выше цели (или это я сам). Кандидаты — роли сервера ниже моей
+ * позиции, ещё не выданные. Сами правила дублирует и проверяет сервер.
+ */
+function RolesSection({ profile, activeServerId }: { profile: UserProfile; activeServerId: string | null }) {
+  const me = useAuthStore((s) => s.user)
+  const queryClient = useQueryClient()
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  const { data: members = [] } = useQuery({
+    queryKey: ['members', activeServerId],
+    queryFn: () => listMembers(activeServerId!),
+    enabled: activeServerId !== null,
+    staleTime: 60_000,
+  })
+
+  const meMember = me ? members.find((m) => m.id === me.id) : undefined
+  const targetMember = members.find((m) => m.id === profile.id)
+  const myPosition = meMember ? memberTopPosition(meMember) : -1
+  const targetPosition = targetMember ? memberTopPosition(targetMember) : -1
+  const canManageRoles = hasPermission(meMember?.permissions ?? 0, 'MANAGE_ROLES')
+  const canAct = profile.isSelf || myPosition > targetPosition
+  const canAdd = activeServerId !== null && canManageRoles && canAct
+
+  const { data: serverRoles = [] } = useQuery({
+    queryKey: ['roles', activeServerId],
+    queryFn: () => listRoles(activeServerId!),
+    enabled: canAdd,
+    staleTime: 30_000,
+  })
+
+  const targetRoleIds = new Set((targetMember?.roles ?? []).map((r) => r.id))
+  const candidates = serverRoles
+    .filter((r) => !r.isEveryone && !targetRoleIds.has(r.id) && myPosition > r.position)
+    .sort((a, b) => b.position - a.position)
+  const showPlus = canAdd && candidates.length > 0
+
+  useEffect(() => {
+    if (!pickerOpen) return undefined
+    function onDown(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setPickerOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [pickerOpen])
+
+  async function assign(role: Role) {
+    if (!activeServerId || busy) return
+    setBusy(true)
+    // Шлём только управляемое подмножество (роли ниже меня) + новую; роли выше
+    // меня сервер сохранит сам (lockedKeep в PUT-роуте).
+    const manageable = (targetMember?.roles ?? []).filter((r) => myPosition > r.position).map((r) => r.id)
+    const next = [...new Set([...manageable, role.id])]
+    try {
+      await setMemberRoles(activeServerId, profile.id, next)
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['user-profile', profile.id] }),
+        queryClient.invalidateQueries({ queryKey: ['members', activeServerId] }),
+      ])
+      setPickerOpen(false)
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : 'не удалось назначить роль')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function removeRole(roleId: string) {
+    if (!activeServerId || busy) return
+    setBusy(true)
+    // Снимаем из управляемого подмножества; роли выше меня (locked) PUT-роут
+    // сохранит сам, поэтому их не трогаем.
+    const next = (targetMember?.roles ?? [])
+      .filter((r) => myPosition > r.position && r.id !== roleId)
+      .map((r) => r.id)
+    try {
+      await setMemberRoles(activeServerId, profile.id, next)
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['user-profile', profile.id] }),
+        queryClient.invalidateQueries({ queryKey: ['members', activeServerId] }),
+      ])
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : 'не удалось убрать роль')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // Снять можно роль, которую я вправе менять: в этом сервере, ниже моей позиции.
+  const canRemove = (roleId: string, position: number): boolean =>
+    canManageRoles && canAct && targetRoleIds.has(roleId) && myPosition > position
+
+  if (profile.roles.length === 0 && !showPlus) return null
+
+  return (
+    <div className="mb-2.5">
+      <SectionTitle>роли · {profile.roles.length}</SectionTitle>
+      <div className="flex flex-wrap items-center gap-1.5">
+        {profile.roles.map((r) => (
+          <RoleChip
+            key={r.id}
+            name={r.name}
+            color={r.color}
+            busy={busy}
+            onRemove={canRemove(r.id, r.position) ? () => void removeRole(r.id) : undefined}
+          />
+        ))}
+        {showPlus && (
+          <div className="relative" ref={ref}>
+            <button
+              type="button"
+              onClick={() => setPickerOpen((o) => !o)}
+              title="добавить роль"
+              className={[
+                'inline-flex items-center justify-center w-6 h-6 rounded-full border border-dashed text-[14px] leading-none transition-colors',
+                pickerOpen
+                  ? 'border-kd-accent text-kd-accent'
+                  : 'border-kd-border text-kd-text-mute hover:border-kd-text-mute hover:text-kd-text',
+              ].join(' ')}
+            >
+              +
+            </button>
+            {pickerOpen && (
+              <div className="absolute left-0 top-full mt-1 z-20 min-w-[180px] max-h-[180px] overflow-y-auto bg-kd-panel border border-kd-border rounded-kd shadow-lg py-1">
+                {candidates.map((r) => (
+                  <button
+                    key={r.id}
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void assign(r)}
+                    className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[12px] text-kd-text hover:bg-kd-panel-alt transition-colors disabled:opacity-50"
+                  >
+                    <span className="w-2 h-2 rounded-full shrink-0" style={{ background: r.color ?? 'var(--kd-text-mute)' }} />
+                    <span className="truncate">{r.name}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   )
 }
