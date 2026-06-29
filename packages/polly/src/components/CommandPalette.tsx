@@ -1,6 +1,7 @@
 // Командная палитра ⌘K (palette · v2). Быстрый переход: недавнее, каналы,
-// люди, серверы, действия. Fuzzy-поиск (подстрока + подпоследовательность).
-// Данные — из существующих queries (servers/channels/dm/members), своих
+// люди, серверы, действия. Карточки в две строки (имя + подпись), счётчики
+// у секций, карточное выделение, ⌘1–9 для недавнего, Tab — подставить запрос.
+// Данные — из существующих queries (servers/channels/dm/members/voice), своих
 // эндпоинтов не вводим. Все queries gated `enabled: open`.
 
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -9,13 +10,14 @@ import { createPortal } from 'react-dom'
 import { useLocation } from 'wouter'
 import { create } from 'zustand'
 
-import type { DmSummary, MemberPublic } from '@kakdela/ginzu/api-types'
+import type { Channel, DmSummary, MemberPublic } from '@kakdela/ginzu/api-types'
 
 import { useAuthStore } from '../features/auth/store.js'
 import { listDms } from '../features/dm/api.js'
 import { useRecents } from '../features/navigation/recents.js'
 import { getServerDetail, listMembers, listServers } from '../features/servers/api.js'
 import { useServerCreateJoinUi } from '../features/servers/store.js'
+import { useVoiceChannelPresence } from '../features/voice/useVoiceChannelPresence.js'
 import { Avatar } from './Avatar.js'
 import { useThemeStore } from '../lib/theme.js'
 import { Icon } from './Icon.js'
@@ -36,8 +38,14 @@ interface PaletteRow {
   key: string
   section: string
   icon: React.ReactNode
-  label: string
-  hint?: string
+  /** true → иконка это круглый Avatar (без квадратной подложки). */
+  avatar?: boolean
+  title: string
+  subtitle?: string
+  /** Правый мета-блок: бейдж непрочитанного, ⌘N и т.п. */
+  meta?: React.ReactNode
+  /** Позиция в «недавнем» (1..) — для ⌘1–9 и бейджа. */
+  recentIndex?: number
   /** Доп. вес для сортировки внутри секции (недавнее — по свежести). */
   weight?: number
   run(): void
@@ -48,6 +56,29 @@ const STATUS_LABEL: Record<MemberPublic['status'], string> = {
   idle:    'отошёл',
   dnd:     'не беспокоить',
   offline: 'не в сети',
+}
+
+/** Краткое «N назад» для подписи личек/недавнего (без date-fns). */
+function relTime(iso: string): string {
+  const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000))
+  if (s < 45) return 'только что'
+  const m = Math.round(s / 60)
+  if (m < 60) return `${m} мин назад`
+  const h = Math.round(m / 60)
+  if (h < 24) return `${h} ч назад`
+  const d = Math.round(h / 24)
+  if (d < 7) return `${d} дн назад`
+  const w = Math.round(d / 7)
+  if (w < 5) return `${w} нед назад`
+  return `${Math.round(d / 30)} мес назад`
+}
+
+/** Подпись карточки канала: категория/тип · контекст (сервер или «N в эфире»). */
+function channelSubtitle(kind: string, category: string | null | undefined, serverName: string, voiceCount: number): string {
+  if (kind === 'voice') {
+    return voiceCount > 0 ? `голосовой · ${voiceCount} в эфире` : `голосовой · ${serverName}`
+  }
+  return category ? `${category} · ${serverName}` : serverName
 }
 
 /** Подстрока — приоритетна; иначе подпоследовательность (fuzzy). null = нет. */
@@ -67,6 +98,8 @@ function fuzzyScore(text: string, q: string): number | null {
   return 100
 }
 
+const SECTION_ORDER = ['недавнее', 'каналы', 'люди', 'серверы', 'действия']
+
 export function CommandPalette() {
   const open = useCommandPalette((s) => s.open)
   const setOpen = useCommandPalette((s) => s.setOpen)
@@ -79,6 +112,7 @@ export function CommandPalette() {
 
   const [query, setQuery] = useState('')
   const [cursor, setCursor] = useState(0)
+  const [showHint, setShowHint] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
@@ -114,6 +148,19 @@ export function CommandPalette() {
     enabled: open,
   })
 
+  // Голосовой пресенс по всем каналам — для подписи «N в эфире». Пока палитра
+  // закрыта, передаём [] → участники не запрашиваются.
+  const allChannels = useMemo<Channel[]>(
+    () => (open ? detailQueries.flatMap((dq) => dq.data?.channels ?? []) : []),
+    [open, detailQueries],
+  )
+  const voicePresence = useVoiceChannelPresence(allChannels)
+  const voiceCount = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const [chId, parts] of voicePresence) m.set(chId, parts.length)
+    return m
+  }, [voicePresence])
+
   useEffect(() => {
     if (open) {
       setQuery('')
@@ -124,13 +171,13 @@ export function CommandPalette() {
 
   // Сводные карты для резолва имён каналов/личек (для «недавнего»).
   const channelById = useMemo(() => {
-    const m = new Map<string, { name: string; kind: string; serverId: string | null; serverName: string }>()
+    const m = new Map<string, { name: string; kind: string; category: string | null; serverId: string | null; serverName: string }>()
     for (const dq of detailQueries) {
       const detail = dq.data
       if (!detail) continue
       for (const c of detail.channels) {
         if (c.kind === 'dm') continue
-        m.set(c.id, { name: c.name, kind: c.kind, serverId: c.serverId, serverName: detail.server.name })
+        m.set(c.id, { name: c.name, kind: c.kind, category: c.category ?? null, serverId: c.serverId, serverName: detail.server.name })
       }
     }
     return m
@@ -149,28 +196,42 @@ export function CommandPalette() {
     // ── недавнее (только без запроса — это быстрый доступ) ──
     if (q === '') {
       let w = recents.length
+      let n = 0
       for (const r of recents) {
+        n += 1
+        const recentIndex = n
+        const badge = recentIndex <= 9
+          ? <span className="text-[9px] font-mono text-kd-text-mute px-1.5 py-0.5 rounded border border-kd-border">⌘{recentIndex}</span>
+          : undefined
         if (r.kind === 'channel') {
           const c = channelById.get(r.id)
           if (!c) continue
           all.push({
             key: `recent:ch:${r.id}`,
             section: 'недавнее',
-            icon: c.kind === 'voice' ? <Icon.Speaker size={11} /> : <Icon.Hash size={11} />,
-            label: c.name,
-            hint: c.serverName,
+            icon: c.kind === 'voice' ? <Icon.Speaker size={13} /> : <Icon.Hash size={13} />,
+            title: c.name,
+            subtitle: channelSubtitle(c.kind, c.category, c.serverName, voiceCount.get(r.id) ?? 0),
+            meta: badge,
+            recentIndex,
             weight: w--,
             run: () => navigate(`/servers/${r.serverId ?? c.serverId}/channels/${r.id}`),
           })
         } else {
           const d = dmByChannel.get(r.id)
           if (!d) continue
+          const unread = d.unreadCount > 0
+            ? <span className="text-[9px] font-mono text-white bg-kd-accent px-1.5 py-0.5 rounded-full">{d.unreadCount}</span>
+            : badge
           all.push({
             key: `recent:dm:${r.id}`,
             section: 'недавнее',
-            icon: <Avatar name={d.otherUser.displayName} avatarUrl={d.otherUser.avatarUrl} size={18} />,
-            label: d.otherUser.displayName,
-            hint: 'личные сообщения',
+            icon: <Avatar name={d.otherUser.displayName} avatarUrl={d.otherUser.avatarUrl} size={26} status={d.otherUser.status} />,
+            avatar: true,
+            title: d.otherUser.displayName,
+            subtitle: d.lastMessage ? `ЛС · ${relTime(d.lastMessage.createdAt)}` : 'личные сообщения',
+            meta: unread,
+            recentIndex,
             weight: w--,
             run: () => navigate(`/dm/${r.id}`),
           })
@@ -189,9 +250,9 @@ export function CommandPalette() {
         all.push({
           key: `ch:${c.id}`,
           section: 'каналы',
-          icon: c.kind === 'voice' ? <Icon.Speaker size={11} /> : <Icon.Hash size={11} />,
-          label: c.name,
-          hint: c.kind === 'voice' ? `${detail.server.name} · голосовой` : detail.server.name,
+          icon: c.kind === 'voice' ? <Icon.Speaker size={13} /> : <Icon.Hash size={13} />,
+          title: c.name,
+          subtitle: channelSubtitle(c.kind, c.category, detail.server.name, voiceCount.get(c.id) ?? 0),
           weight: score,
           run: () => navigate(`/servers/${c.serverId}/channels/${c.id}`),
         })
@@ -212,14 +273,14 @@ export function CommandPalette() {
         )
         if (score < 0) continue
         seenPeople.add(member.id)
-        const status = STATUS_LABEL[member.status]
-        const hint = member.customStatus ? `${member.customStatus}` : status
+        const custom = member.customStatus?.trim()
         all.push({
           key: `ppl:${member.id}`,
           section: 'люди',
-          icon: <Avatar name={member.displayName} avatarUrl={member.avatarUrl} size={18} />,
-          label: member.displayName,
-          hint,
+          icon: <Avatar name={member.displayName} avatarUrl={member.avatarUrl} size={26} status={member.status} />,
+          avatar: true,
+          title: member.displayName,
+          subtitle: custom ? custom : STATUS_LABEL[member.status],
           weight: score,
           run: () => navigate(`/dm/with/${member.id}`),
         })
@@ -233,9 +294,9 @@ export function CommandPalette() {
       all.push({
         key: `srv:${s.id}`,
         section: 'серверы',
-        icon: <span className="text-[10px] font-bold">{s.name.slice(0, 1).toUpperCase()}</span>,
-        label: s.name,
-        hint: 'сервер',
+        icon: <span className="text-[11px] font-bold">{s.name.slice(0, 1).toUpperCase()}</span>,
+        title: s.name,
+        subtitle: 'сервер',
         weight: score,
         run: () => navigate(`/servers/${s.id}`),
       })
@@ -243,21 +304,20 @@ export function CommandPalette() {
 
     // ── действия ──
     const actions: Omit<PaletteRow, 'weight'>[] = [
-      { key: 'a:dm', section: 'действия', icon: <span className="text-[9px] font-bold font-mono">кд</span>, label: 'личные сообщения', run: () => navigate('/dm') },
-      { key: 'a:inbox', section: 'действия', icon: <Icon.Inbox size={11} />, label: 'входящие', run: () => navigate('/inbox') },
-      { key: 'a:search', section: 'действия', icon: <Icon.Search size={11} />, label: 'поиск по сообщениям', run: () => navigate('/search') },
-      { key: 'a:create', section: 'действия', icon: <Icon.Plus size={11} />, label: 'создать сервер', run: openCreate },
-      { key: 'a:join', section: 'действия', icon: <span className="text-[11px] font-mono">↪</span>, label: 'принять инвайт', run: openJoin },
-      { key: 'a:theme', section: 'действия', icon: <Icon.Sparkle size={11} />, label: 'переключить тему', hint: 'light/dark/system', run: cycleTheme },
+      { key: 'a:dm', section: 'действия', icon: <span className="text-[9px] font-bold font-mono">кд</span>, title: 'личные сообщения', subtitle: 'все диалоги', run: () => navigate('/dm') },
+      { key: 'a:inbox', section: 'действия', icon: <Icon.Inbox size={13} />, title: 'входящие', subtitle: 'упоминания и ответы', run: () => navigate('/inbox') },
+      { key: 'a:search', section: 'действия', icon: <Icon.Search size={13} />, title: 'поиск по сообщениям', subtitle: 'полнотекстовый поиск', run: () => navigate('/search') },
+      { key: 'a:create', section: 'действия', icon: <Icon.Plus size={13} />, title: 'создать сервер', subtitle: 'новое пространство', run: openCreate },
+      { key: 'a:join', section: 'действия', icon: <span className="text-[12px] font-mono">↪</span>, title: 'принять инвайт', subtitle: 'по коду-приглашению', run: openJoin },
+      { key: 'a:theme', section: 'действия', icon: <Icon.Sparkle size={13} />, title: 'переключить тему', subtitle: 'светлая / тёмная / системная', run: cycleTheme },
     ]
     for (const a of actions) {
-      const score = fuzzyScore(a.label, q)
+      const score = fuzzyScore(a.title, q)
       if (score === null) continue
       all.push({ ...a, weight: score })
     }
 
     // Сортируем внутри секций по весу, секции — в фиксированном порядке.
-    const SECTION_ORDER = ['недавнее', 'каналы', 'люди', 'серверы', 'действия']
     all.sort((a, b) => {
       const sa = SECTION_ORDER.indexOf(a.section)
       const sb = SECTION_ORDER.indexOf(b.section)
@@ -266,7 +326,7 @@ export function CommandPalette() {
     })
 
     return all.slice(0, 40)
-  }, [servers, detailQueries, memberQueries, dms, recents, channelById, dmByChannel, query, navigate, openCreate, openJoin, cycleTheme, me])
+  }, [servers, detailQueries, memberQueries, dms, recents, channelById, dmByChannel, voiceCount, query, navigate, openCreate, openJoin, cycleTheme, me])
 
   useEffect(() => {
     setCursor((c) => Math.min(c, Math.max(0, rows.length - 1)))
@@ -289,6 +349,13 @@ export function CommandPalette() {
   }
 
   function onKeyDown(e: React.KeyboardEvent) {
+    if ((e.ctrlKey || e.metaKey) && e.key >= '1' && e.key <= '9') {
+      // ⌘1–9 — быстрый переход к N-му недавнему.
+      e.preventDefault()
+      const n = Number(e.key)
+      runRow(rows.find((r) => r.recentIndex === n))
+      return
+    }
     if (e.key === 'Escape') {
       e.preventDefault()
       setOpen(false)
@@ -298,33 +365,45 @@ export function CommandPalette() {
     } else if (e.key === 'ArrowUp') {
       e.preventDefault()
       setCursor((c) => Math.max(c - 1, 0))
+    } else if (e.key === 'Tab') {
+      // Подставить выбранное в строку запроса — уточнить поиск.
+      e.preventDefault()
+      const row = rows[cursor]
+      if (row) { setQuery(row.title); setCursor(0) }
     } else if (e.key === 'Enter') {
       e.preventDefault()
       runRow(rows[cursor])
     }
   }
 
-  let lastSection = ''
+  // Группируем по секциям (rows уже отсортированы по порядку секций).
+  const groups: { name: string; rows: { row: PaletteRow; index: number }[] }[] = []
+  rows.forEach((row, index) => {
+    const last = groups[groups.length - 1]
+    if (last && last.name === row.section) last.rows.push({ row, index })
+    else groups.push({ name: row.section, rows: [{ row, index }] })
+  })
+
   const matchCount = rows.length
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 bg-kd-overlay-soft backdrop-blur-[2px] flex justify-center"
+      className="fixed inset-0 z-50 bg-kd-overlay-soft backdrop-blur-[2px] flex items-center justify-center p-4"
       onClick={(e) => { if (e.target === e.currentTarget) setOpen(false) }}
     >
       <div
-        className="mt-[14vh] w-[640px] max-w-[92vw] h-fit max-h-[60vh] bg-kd-panel border border-kd-border rounded-[10px] shadow-kd-modal overflow-hidden flex flex-col"
+        className="w-[680px] max-w-[92vw] h-fit max-h-[70vh] bg-kd-panel border border-kd-border rounded-[12px] shadow-kd-modal overflow-hidden flex flex-col kd-pop-in"
         onKeyDown={onKeyDown}
       >
-        <div className="px-3.5 py-2.5 bg-kd-panel-alt border-b border-kd-border flex items-center gap-2.5">
-          <Icon.Search size={13} className="text-kd-text-mute shrink-0" />
+        <div className="px-4 py-3 bg-kd-panel-alt border-b border-kd-border flex items-center gap-2.5">
+          <Icon.Search size={14} className="text-kd-text-mute shrink-0" />
           <input
             ref={inputRef}
             type="text"
             value={query}
             onChange={(e) => { setQuery(e.target.value); setCursor(0) }}
             placeholder="канал, человек, сервер или действие…"
-            className="flex-1 bg-transparent outline-none text-[13px] text-kd-text placeholder:text-kd-text-mute"
+            className="flex-1 bg-transparent outline-none text-[14px] text-kd-text placeholder:text-kd-text-mute"
           />
           {query && (
             <span className="text-[10px] font-mono text-kd-text-mute shrink-0">
@@ -334,51 +413,73 @@ export function CommandPalette() {
           <span className="text-[9px] font-mono text-kd-text-mute shrink-0 px-1.5 py-0.5 rounded border border-kd-border">esc</span>
         </div>
 
-        <div ref={listRef} className="flex-1 overflow-y-auto py-1.5">
+        {showHint && (
+          <div className="px-4 py-1.5 bg-kd-bg-deep border-b border-kd-border-soft text-[10px] font-mono text-kd-text-mute">
+            ⌘1–9 — недавнее · Tab — подставить в запрос · ↵ — открыть · Esc — закрыть
+          </div>
+        )}
+
+        <div ref={listRef} className="flex-1 overflow-y-auto py-2">
           {rows.length === 0 && (
-            <div className="px-4 py-6 text-center text-[11px] font-mono text-kd-text-mute">
+            <div className="px-4 py-8 text-center text-[11px] font-mono text-kd-text-mute">
               ничего не нашлось
             </div>
           )}
-          {rows.map((row, i) => {
-            const showSection = row.section !== lastSection
-            lastSection = row.section
-            const active = i === cursor
-            return (
-              <div key={row.key} data-row-index={i}>
-                {showSection && (
-                  <div className="px-3.5 pt-2 pb-1 text-[9px] font-mono font-bold uppercase tracking-[0.05em] text-kd-text-mute select-none">
-                    — {row.section}
-                  </div>
-                )}
-                <button
-                  type="button"
-                  onMouseEnter={() => setCursor(i)}
-                  onClick={() => runRow(row)}
-                  className={[
-                    'w-full flex items-center gap-2.5 px-3.5 py-1.5 text-left transition-colors',
-                    active
-                      ? 'bg-kd-panel-hi border-l-2 border-kd-accent pl-3'
-                      : 'border-l-2 border-transparent',
-                  ].join(' ')}
-                >
-                  <span className="w-[22px] h-[22px] rounded-kd bg-kd-panel-alt border border-kd-border flex items-center justify-center text-kd-text-soft shrink-0 overflow-hidden">
-                    {row.icon}
-                  </span>
-                  <span className="flex-1 min-w-0 truncate text-[12px] text-kd-text">{row.label}</span>
-                  {row.hint && (
-                    <span className="text-[10px] font-mono text-kd-text-mute shrink-0 max-w-[220px] truncate">{row.hint}</span>
-                  )}
-                  {active && <span className="text-[9px] font-mono text-kd-text-mute shrink-0">⏎</span>}
-                </button>
+          {groups.map((g) => (
+            <div key={g.name} className="mb-1">
+              <div className="px-4 pt-2 pb-1 text-[9px] font-mono font-bold uppercase tracking-[0.05em] text-kd-text-mute select-none">
+                — {g.name}{g.name !== 'недавнее' && <span className="opacity-70"> · {g.rows.length}</span>}
               </div>
-            )
-          })}
+              <div className="px-1.5">
+                {g.rows.map(({ row, index }) => {
+                  const active = index === cursor
+                  return (
+                    <button
+                      key={row.key}
+                      type="button"
+                      data-row-index={index}
+                      onMouseEnter={() => setCursor(index)}
+                      onClick={() => runRow(row)}
+                      className={[
+                        'w-full flex items-center gap-3 px-2.5 py-1.5 rounded-kd text-left transition-colors',
+                        active ? 'bg-kd-panel-hi ring-1 ring-kd-border' : 'hover:bg-kd-panel-alt/60',
+                      ].join(' ')}
+                    >
+                      {row.avatar ? (
+                        row.icon
+                      ) : (
+                        <span className="w-7 h-7 rounded-kd bg-kd-panel-alt border border-kd-border flex items-center justify-center text-kd-text-soft shrink-0 overflow-hidden">
+                          {row.icon}
+                        </span>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[12px] font-semibold text-kd-text truncate leading-tight">{row.title}</div>
+                        {row.subtitle && (
+                          <div className="text-[10px] text-kd-text-mute truncate leading-tight mt-0.5">{row.subtitle}</div>
+                        )}
+                      </div>
+                      {row.meta
+                        ? <span className="shrink-0">{row.meta}</span>
+                        : active && <span className="text-[10px] font-mono text-kd-text-mute shrink-0">↵</span>}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
         </div>
 
-        <div className="px-3.5 py-1.5 bg-kd-panel-alt border-t border-kd-border flex gap-3 text-[9px] font-mono text-kd-text-mute select-none">
-          <span>↑↓ навигация</span>
-          <span>⏎ открыть</span>
+        <div className="px-4 py-2 bg-kd-panel-alt border-t border-kd-border flex items-center gap-3.5 text-[9px] font-mono text-kd-text-mute select-none">
+          <span>↕ навигация</span>
+          <span>↵ открыть</span>
+          <span>⇄ заменить запрос</span>
+          <button
+            type="button"
+            onClick={() => setShowHint((v) => !v)}
+            className={`transition-colors ${showHint ? 'text-kd-text-soft' : 'hover:text-kd-text-soft'}`}
+          >
+            ? подсказка
+          </button>
           <span className="flex-1" />
           <span>palette · v2</span>
         </div>
