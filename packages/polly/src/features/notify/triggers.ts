@@ -179,7 +179,8 @@ export function useNotifyTriggers(): void {
             playNotifySound()
             const channelName = detail?.channels.find((c) => c.id === event.channelId)?.name ?? 'канал'
             const members = queryClient.getQueryData<MemberPublic[]>(['members', serverId])
-            const authorName = members?.find((m) => m.id === event.message.authorId)?.displayName ?? 'новое сообщение'
+            const author = members?.find((m) => m.id === event.message.authorId)
+            const authorName = author?.displayName ?? 'новое сообщение'
             const trimmed = event.message.content.replace(/\s+/g, ' ').trim()
             const body = trimmed
               ? (trimmed.length > 140 ? trimmed.slice(0, 139) + '…' : trimmed)
@@ -190,6 +191,7 @@ export function useNotifyTriggers(): void {
               body,
               tag: `msg:${event.channelId}`,
               navigateTo: `/servers/${sid}/channels/${event.channelId}#msg:${event.message.id}`,
+              icon: { name: authorName, avatarUrl: author?.avatarUrl ?? null },
             })
             return
           }
@@ -234,6 +236,7 @@ export function useNotifyTriggers(): void {
             body,
             tag:   `dm:${event.channelId}`,
             navigateTo: `/dm/${event.channelId}`,
+            icon: { name: dm.otherUser.displayName, avatarUrl: dm.otherUser.avatarUrl },
           })
         })()
         return
@@ -282,6 +285,7 @@ async function handleMentionNotification(
   let body  = ''
   let serverId: string | null = null
   let messageId: string | null = null
+  let icon: { name: string; avatarUrl: string | null } | undefined
 
   try {
     const page = await listInboxMentions({ limit: 5, unreadOnly: true })
@@ -293,6 +297,7 @@ async function handleMentionNotification(
       body = trimmed.length > 140 ? trimmed.slice(0, 139) + '…' : (trimmed || '@упоминание')
       serverId  = top.serverId
       messageId = top.messageId
+      icon = { name: top.authorName, avatarUrl: top.authorAvatarUrl }
     }
   } catch (err) {
     // Сеть моргнула или прав не хватило — отдадим хотя бы generic-toast.
@@ -303,6 +308,7 @@ async function handleMentionNotification(
     title,
     body: body || 'нажмите, чтобы прочитать',
     tag:  `mention:${channelId}`,
+    ...(icon ? { icon } : {}),
     ...(serverId && messageId
       ? { navigateTo: `/servers/${serverId}/channels/${channelId}#msg:${messageId}` }
       : { onClick: () => void focusMainWindow() }),

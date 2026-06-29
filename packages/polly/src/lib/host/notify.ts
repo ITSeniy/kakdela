@@ -10,6 +10,7 @@
 //            событие `notify-activated` с целевым URL — слушаем его здесь.
 
 import { focusMainWindow } from './tray.js'
+import { renderToastIconBase64 } from './toastIcon.js'
 
 function isTauri(): boolean {
   if (typeof window === 'undefined') return false
@@ -59,6 +60,8 @@ export interface NotifyOptions {
   navigateTo?: string
   /** Web-only: явный обработчик клика (когда нет простого URL-перехода). */
   onClick?: () => void
+  /** Круглая иконка тоста (Tauri/Windows): аватар автора или инициалы. */
+  icon?: { name: string; avatarUrl: string | null }
 }
 
 /** Переход к цели по клику уведомления: показать окно и сменить роут. */
@@ -99,13 +102,18 @@ export async function notify(opts: NotifyOptions): Promise<void> {
   if (isTauri()) {
     try {
       if (opts.navigateTo) {
-        // Свой тост с обработчиком клика (Rust on_activated → событие сюда).
+        // Свой тост с обработчиком клика (Rust on_activated → событие сюда) и
+        // круглой иконкой (аватар автора/инициалы → base64, см. toastIcon.ts).
         await ensureTauriActivationListener()
+        const iconBase64 = opts.icon
+          ? await renderToastIconBase64(opts.icon.name, opts.icon.avatarUrl)
+          : null
         const { invoke } = await import('@tauri-apps/api/core')
         await invoke('notify_with_target', {
           title: opts.title,
           body: opts.body,
           target: opts.navigateTo,
+          iconBase64,
         })
       } else {
         // Без перехода — обычный плагинный тост.

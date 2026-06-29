@@ -159,17 +159,55 @@ fn focus_main_window(app: tauri::AppHandle) {
     let _ = app;
 }
 
+/// Готовит круглую иконку тоста (appLogoOverride): аватар автора, отрисованный
+/// фронтом в canvas (base64 PNG), а при его отсутствии/ошибке — встроенное лого
+/// приложения. Пишем во временный файл (WinRT грузит картинку по file:// в
+/// момент показа). Слотов 16 по кругу — старый тост к моменту переиспользования
+/// слота уже скрыт, гонки нет.
+#[cfg(windows)]
+fn write_toast_icon(icon_base64: Option<String>) -> Option<std::path::PathBuf> {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static SLOT: AtomicU32 = AtomicU32::new(0);
+
+    let dir = std::env::temp_dir();
+    if let Some(b64) = icon_base64 {
+        use base64::engine::general_purpose::STANDARD;
+        use base64::Engine;
+        if let Ok(bytes) = STANDARD.decode(b64.as_bytes()) {
+            let slot = SLOT.fetch_add(1, Ordering::Relaxed) % 16;
+            let path = dir.join(format!("kakdela-toast-{slot}.png"));
+            if std::fs::write(&path, &bytes).is_ok() {
+                return Some(path);
+            }
+        }
+    }
+    // Фолбэк — встроенное лого приложения (всегда доступно, без сети).
+    const LOGO: &[u8] = include_bytes!("../icons/128x128.png");
+    let path = dir.join("kakdela-toast-logo.png");
+    if std::fs::write(&path, LOGO).is_ok() {
+        return Some(path);
+    }
+    None
+}
+
 /// Нативный тост с переходом по клику. Десктоп-плагин активацию в JS не
 /// пробрасывает (notify-rust `.show()` без обработчика), поэтому на Windows
-/// показываем тост сами через `tauri-winrt-notification` и ловим клик в
-/// `on_activated` → эмитим `notify://activated` с целевым URL. Фронт слушает
+/// показываем тост сами через `tauri-winrt-notification`: круглая иконка слева
+/// (appLogoOverride) + жирный заголовок + строка (в духе Discord), клик ловим в
+/// `on_activated` → эмитим `notify-activated` с целевым URL. Фронт слушает
 /// событие и переходит к сообщению (см. lib/host/notify.ts).
 #[tauri::command]
-fn notify_with_target(app: tauri::AppHandle, title: String, body: String, target: String) {
+fn notify_with_target(
+    app: tauri::AppHandle,
+    title: String,
+    body: String,
+    target: String,
+    icon_base64: Option<String>,
+) {
     #[cfg(windows)]
     {
         use tauri::Emitter;
-        use tauri_winrt_notification::Toast;
+        use tauri_winrt_notification::{IconCrop, Toast};
 
         // app_id: установленное приложение → его identifier (AUMID регистрирует
         // инсталлятор); dev-сборка из target/debug|release → POWERSHELL_APP_ID,
@@ -191,13 +229,19 @@ fn notify_with_target(app: tauri::AppHandle, title: String, body: String, target
             }
         };
 
+        let icon_path = write_toast_icon(icon_base64);
         let app_for_cb = app.clone();
-        let res = Toast::new(&app_id)
+
+        let mut toast = Toast::new(&app_id)
             .title(&title)
             .text1(&body)
             // Тихий тост: звук уведомления играет само приложение
             // (playSound('notification')); системный звук Windows был бы дублем.
-            .sound(None)
+            .sound(None);
+        if let Some(path) = &icon_path {
+            toast = toast.icon(path, IconCrop::Circular, "");
+        }
+        let res = toast
             .on_activated(move |_action| {
                 let _ = app_for_cb.emit("notify-activated", target.clone());
                 Ok(())
@@ -213,7 +257,7 @@ fn notify_with_target(app: tauri::AppHandle, title: String, body: String, target
         // показываем тост (приложение Windows-first, регрессии тут нет).
         use tauri_plugin_notification::NotificationExt;
         let _ = app.notification().builder().title(title).body(body).show();
-        let _ = target;
+        let _ = (target, icon_base64);
     }
 }
 
