@@ -637,7 +637,7 @@ export function ChannelList({ serverId, activeChannelId }: ChannelListProps) {
           disabled={!serverId || !detail}
           onClick={() => setMenuOpen((v) => !v)}
           title="действия сервера"
-          className="w-full px-3.5 py-2.5 border-b border-kd-border bg-kd-panel-alt hover:bg-kd-panel-hi transition-colors flex items-center justify-between text-left"
+          className="w-full px-3.5 h-12 border-b border-kd-border bg-kd-panel-alt hover:bg-kd-panel-hi transition-colors flex items-center justify-between text-left"
         >
           <div className="min-w-0">
             <div className="text-[13px] font-bold text-kd-text truncate">
@@ -733,11 +733,12 @@ export function ChannelList({ serverId, activeChannelId }: ChannelListProps) {
                   <button
                     type="button"
                     onClick={() => toggleCat(catKey)}
-                    className="flex-1 min-w-0 px-2.5 py-[3px] text-[10px] font-semibold text-kd-text-mute font-mono tracking-[0.04em] flex items-center gap-1 hover:text-kd-text-soft transition-colors text-left"
+                    className="flex-1 min-w-0 pl-3.5 pr-2 py-[3px] text-[10px] font-semibold text-kd-text-mute font-mono tracking-[0.04em] flex items-center gap-1.5 hover:text-kd-text-soft transition-colors text-left"
                   >
-                    <span className={`inline-block transition-transform ${collapsed ? '-rotate-90' : ''}`}>
-                      ⌄
-                    </span>
+                    <Icon.ChevronDown
+                      size={12}
+                      className={`shrink-0 transition-transform ${collapsed ? '-rotate-90' : ''}`}
+                    />
                     <span className="truncate">{group.name}</span>
                   </button>
                   {canManage && (

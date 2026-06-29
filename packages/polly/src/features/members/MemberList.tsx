@@ -210,13 +210,14 @@ export function MemberList({ serverId, className }: MemberListProps) {
   const onlineCount = members.filter((m) => m.status !== 'offline').length
 
   return (
-    <aside className={`bg-kd-panel border-l border-kd-border py-2.5 px-1.5 overflow-y-auto ${className ?? ''}`}>
-      <div className="px-2.5 pb-2 border-b border-kd-border mb-2 flex items-center justify-between">
+    <aside className={`bg-kd-panel border-l border-kd-border flex-col min-h-0 ${className ?? ''}`}>
+      <div className="px-3 h-12 border-b border-kd-border bg-kd-panel-alt flex items-center shrink-0">
         <div className="text-[11px] text-kd-text-mute font-mono">
           {onlineCount} / {members.length} онлайн
         </div>
       </div>
 
+      <div className="flex-1 overflow-y-auto py-2.5 px-1.5">
       {groups.map((g) => (
         <div key={g.key} className="mb-2">
           <div
@@ -238,6 +239,7 @@ export function MemberList({ serverId, className }: MemberListProps) {
           ))}
         </div>
       ))}
+      </div>
     </aside>
   )
 }

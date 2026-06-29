@@ -206,7 +206,7 @@ export function Shell() {
                   <ChannelArea serverId={serverId} channelId={channelId} />
                 </>
       }
-      {showMemberList && <MemberList serverId={serverId} className="hidden lg:block" />}
+      {showMemberList && <MemberList serverId={serverId} className="hidden lg:flex" />}
       {showThreadPanel && openThreadId && threadParentId && (
         <ThreadPanel
           threadId={openThreadId}

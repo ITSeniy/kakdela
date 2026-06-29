@@ -747,7 +747,7 @@ export function Composer({
           style={{ maxHeight: 200 }}
         />
         <div className="flex items-center gap-2 text-kd-text-mute shrink-0">
-          {!isMobile && <span className="text-[10px] font-mono opacity-70 select-none">md</span>}
+          {!isMobile && <span className="flex items-center h-5 text-[10px] font-mono opacity-70 select-none">md</span>}
           {gifEnabled && (
             <div className="relative" ref={gifContainerRef}>
               <button
@@ -772,7 +772,7 @@ export function Composer({
               type="button"
               title="стикеры"
               onClick={() => { setStickerOpen((o) => !o); setGifOpen(false); setPickerOpen(false) }}
-              className={`transition-colors ${stickerOpen ? 'text-kd-accent' : 'hover:text-kd-text-soft'}`}
+              className={`inline-flex items-center justify-center h-5 w-5 transition-colors ${stickerOpen ? 'text-kd-accent' : 'hover:text-kd-text-soft'}`}
             >
               <Icon.Sticker size={15} />
             </button>
@@ -789,7 +789,7 @@ export function Composer({
               type="button"
               title="эмодзи"
               onClick={() => { setPickerOpen((o) => !o); setGifOpen(false); setStickerOpen(false) }}
-              className="hover:text-kd-text-soft transition-colors"
+              className="inline-flex items-center justify-center h-5 w-5 hover:text-kd-text-soft transition-colors"
             >
               <Icon.Smile size={15} />
             </button>

@@ -59,7 +59,7 @@ function Header({ channel, channelId, serverId, serverName, memberCount, canPin,
     navigate('/search')
   }
   return (
-    <div className="px-4 py-2 border-b border-kd-border bg-kd-panel-alt flex items-center gap-2.5 shrink-0">
+    <div className="px-4 h-12 border-b border-kd-border bg-kd-panel-alt flex items-center gap-2.5 shrink-0">
       <Icon.Hash size={14} className="text-kd-text-soft shrink-0" />
       <span className="text-[13px] font-bold text-kd-text shrink-0">{channel?.name ?? '—'}</span>
       {channel?.nsfw && <Badge variant="nsfw">18+</Badge>}
