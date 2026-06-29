@@ -5,6 +5,8 @@ import { apiFetch } from '../../lib/api.js'
 export interface SearchMessagesOpts {
   q: string
   channelId?: string
+  /** Ограничить поиск каналами одного сервера (лупа в шапке канала). */
+  serverId?: string
   authorId?: string
   before?: string
   after?: string
@@ -16,6 +18,7 @@ export async function searchMessages(opts: SearchMessagesOpts): Promise<SearchRe
   const params = new URLSearchParams()
   params.set('q', opts.q)
   if (opts.channelId) params.set('channelId', opts.channelId)
+  if (opts.serverId)  params.set('serverId',  opts.serverId)
   if (opts.authorId)  params.set('authorId',  opts.authorId)
   if (opts.before)    params.set('before',    opts.before)
   if (opts.after)     params.set('after',     opts.after)

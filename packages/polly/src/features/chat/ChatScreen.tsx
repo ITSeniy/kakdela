@@ -16,6 +16,7 @@ import { useServerEmoji } from '../emoji/api.js'
 import { useProfileUi } from '../profile/store.js'
 import { listRoles } from '../roles/api.js'
 import { getChannelStats, getServerDetail, listMembers } from '../servers/api.js'
+import { ServerSearchOverlay } from '../search/ServerSearchOverlay.js'
 import { Composer } from './Composer.js'
 import { MessageList } from './MessageList.js'
 import { PinnedPanel } from './PinnedPanel.js'
@@ -42,21 +43,19 @@ function Header({ channel, channelId, serverId, serverName, memberCount, canPin,
   const [, navigate] = useLocation()
   const setScope = useViewScope((s) => s.setScope)
   const [showPins, setShowPins] = useState(false)
+  const [showSearch, setShowSearch] = useState(false)
   const { data: stats } = useQuery({
     queryKey: ['channel-stats', channelId],
     queryFn: () => getChannelStats(channelId),
     staleTime: 30_000,
   })
 
-  // Иконки шапки = серверные версии глобальных: открывают входящие/поиск,
-  // ограниченные этим сервером (scope подхватят InboxScreen/SearchScreen).
+  // Входящие шапки = серверная версия глобальных, ограниченная этим сервером
+  // (scope подхватит InboxScreen). Поиск же открываем оверлеем-палитрой прямо
+  // здесь — без ухода на полноэкранный /search.
   function openServerInbox() {
     setScope(serverId, serverName)
     navigate('/inbox')
-  }
-  function openServerSearch() {
-    setScope(serverId, serverName)
-    navigate('/search')
   }
   return (
     <div className="px-4 h-12 border-b border-kd-border bg-kd-panel-alt flex items-center gap-2.5 shrink-0">
@@ -104,12 +103,19 @@ function Header({ channel, channelId, serverId, serverName, memberCount, canPin,
         <button
           type="button"
           title={`поиск в ${serverName}`}
-          onClick={openServerSearch}
-          className="hover:text-kd-text-soft transition-colors"
+          onClick={() => setShowSearch(true)}
+          className={`transition-colors ${showSearch ? 'text-kd-warm' : 'hover:text-kd-text-soft'}`}
         >
           <Icon.Search size={14} />
         </button>
       </div>
+      {showSearch && (
+        <ServerSearchOverlay
+          serverId={serverId}
+          serverName={serverName}
+          onClose={() => setShowSearch(false)}
+        />
+      )}
     </div>
   )
 }
