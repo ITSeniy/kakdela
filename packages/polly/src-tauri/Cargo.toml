@@ -41,5 +41,11 @@ async-trait = "0.1"
 pollster = "0.4"
 base64 = "0.22"
 
+# Свой клик-обработчик нативных тостов на Windows: плагин на desktop активацию
+# в JS не пробрасывает (notify-rust `.show()` без on_activated). Версия совпадает
+# с той, что тащит notify-rust транзитивно.
+[target.'cfg(windows)'.dependencies]
+tauri-winrt-notification = "0.7"
+
 [features]
 custom-protocol = ["tauri/custom-protocol"]

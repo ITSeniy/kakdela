@@ -1,6 +1,15 @@
-// Тонкая обёртка над `@tauri-apps/plugin-notification` с fallback'ом на
-// браузерный Notification API. Импорт тауровского плагина — динамический,
-// чтобы `pnpm dev:web` (без Tauri) не падал на ESM-resolve'е.
+// Тонкая обёртка над нативными уведомлениями с fallback'ом на браузерный
+// Notification API. Импорты тауровских модулей — динамические, чтобы
+// `pnpm dev:web` (без Tauri) не падал на ESM-resolve'е.
+//
+// Клик по уведомлению:
+//  • web   — Notification.onclick → переход в SPA.
+//  • Tauri — десктоп-плагин НЕ зовёт JS-onClick (notify-rust `.show()` без
+//            обработчика активации). Поэтому показываем тост своей Rust-командой
+//            `notify_with_target`, которая ловит клик (on_activated) и эмитит
+//            событие `notify-activated` с целевым URL — слушаем его здесь.
+
+import { focusMainWindow } from './tray.js'
 
 function isTauri(): boolean {
   if (typeof window === 'undefined') return false
@@ -44,10 +53,38 @@ async function ensurePermission(): Promise<boolean> {
 export interface NotifyOptions {
   title: string
   body: string
-  /** Уникальный ключ — позволяет ОС объединять/заменять уведомления. */
+  /** Уникальный ключ — позволяет ОС объединять/заменять уведомления (web). */
   tag?: string
-  /** Срабатывает на user click (web only — Tauri 2 пока не пробрасывает). */
+  /** Куда перейти по клику (web и Tauri). Главный способ навигации. */
+  navigateTo?: string
+  /** Web-only: явный обработчик клика (когда нет простого URL-перехода). */
   onClick?: () => void
+}
+
+/** Переход к цели по клику уведомления: показать окно и сменить роут. */
+function navigateToTarget(url: string): void {
+  void focusMainWindow()
+  history.pushState({}, '', url)
+  // wouter слушает history → форсируем перерисовку через popstate.
+  window.dispatchEvent(new PopStateEvent('popstate'))
+}
+
+// Tauri: одноразовая подписка на событие активации тоста из Rust.
+let activationListenerReady: Promise<void> | null = null
+function ensureTauriActivationListener(): Promise<void> {
+  if (activationListenerReady) return activationListenerReady
+  activationListenerReady = (async () => {
+    try {
+      const { listen } = await import('@tauri-apps/api/event')
+      await listen<string>('notify-activated', (e) => {
+        if (typeof e.payload === 'string' && e.payload) navigateToTarget(e.payload)
+      })
+    } catch (err) {
+      console.warn('[notify] tauri activation listener failed', err)
+      activationListenerReady = null // дать шанс перерегистрации
+    }
+  })()
+  return activationListenerReady
 }
 
 /**
@@ -61,11 +98,20 @@ export async function notify(opts: NotifyOptions): Promise<void> {
 
   if (isTauri()) {
     try {
-      const mod = await import('@tauri-apps/plugin-notification')
-      mod.sendNotification({ title: opts.title, body: opts.body })
-      // onClick для Tauri 2: плагин ещё не пробрасывает события клика в JS
-      // на Windows (только app-handle в Rust). Click → focus_main_window
-      // вызовем в hook'е через WS unread-полл.
+      if (opts.navigateTo) {
+        // Свой тост с обработчиком клика (Rust on_activated → событие сюда).
+        await ensureTauriActivationListener()
+        const { invoke } = await import('@tauri-apps/api/core')
+        await invoke('notify_with_target', {
+          title: opts.title,
+          body: opts.body,
+          target: opts.navigateTo,
+        })
+      } else {
+        // Без перехода — обычный плагинный тост.
+        const mod = await import('@tauri-apps/plugin-notification')
+        mod.sendNotification({ title: opts.title, body: opts.body })
+      }
       return
     } catch (err) {
       console.warn('[notify] tauri send failed, falling back to web', err)
@@ -74,10 +120,12 @@ export async function notify(opts: NotifyOptions): Promise<void> {
 
   if (typeof Notification === 'undefined') return
   try {
+    const handler = opts.onClick
+      ?? (opts.navigateTo ? () => navigateToTarget(opts.navigateTo!) : undefined)
     const n = new Notification(opts.title, { body: opts.body, tag: opts.tag })
-    if (opts.onClick) {
+    if (handler) {
       n.onclick = () => {
-        opts.onClick?.()
+        handler()
         n.close()
         if (typeof window !== 'undefined') window.focus()
       }
@@ -92,7 +140,7 @@ export async function notify(opts: NotifyOptions): Promise<void> {
  * на user gesture — вызов Notification.requestPermission() из WS-хендлера
  * молча игнорируется, и notify() навсегда остаётся no-op. Поэтому в web-режиме
  * вешаем one-shot listener на первый клик; в Tauri спрашиваем сразу
- * (OS-диалог не требует жеста).
+ * (OS-диалог не требует жеста) и поднимаем слушатель активации тостов.
  */
 let primed = false
 export function primeNotifyPermission(): void {
@@ -100,6 +148,7 @@ export function primeNotifyPermission(): void {
   primed = true
   if (isTauri()) {
     void ensurePermission()
+    void ensureTauriActivationListener()
     return
   }
   if (typeof Notification === 'undefined') return

@@ -9,8 +9,12 @@ interface NotifyPrefs {
   mentions: boolean
   /** Уведомлять о новых личных сообщениях. */
   dms: boolean
+  /** Серверы с подпиской «все сообщения»: serverId → true. По умолчанию для
+      серверов приходят только упоминания; здесь — каждое сообщение. */
+  serverAll: Record<string, boolean>
   setMentions(on: boolean): void
   setDms(on: boolean): void
+  setServerAll(serverId: string, on: boolean): void
 }
 
 export const useNotifyPrefs = create<NotifyPrefs>()(
@@ -18,8 +22,16 @@ export const useNotifyPrefs = create<NotifyPrefs>()(
     (set) => ({
       mentions: true,
       dms: true,
+      serverAll: {},
       setMentions: (mentions) => set({ mentions }),
       setDms: (dms) => set({ dms }),
+      setServerAll: (serverId, on) =>
+        set((s) => {
+          const next = { ...s.serverAll }
+          if (on) next[serverId] = true
+          else delete next[serverId]
+          return { serverAll: next }
+        }),
     }),
     { name: 'kd:notify:prefs' },
   ),

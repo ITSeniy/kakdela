@@ -24,6 +24,7 @@ import {
   patchChannel,
   type ServerDetail,
 } from '../servers/api.js'
+import { useNotifyPrefs } from '../notify/prefs.js'
 import { clampFixed, useAppearance } from '../settings/appearance.js'
 import { useSettingsUi } from '../settings/store.js'
 import { ThreadList } from '../threads/ThreadList.js'
@@ -264,6 +265,10 @@ export function ChannelList({ serverId, activeChannelId }: ChannelListProps) {
 
   // Меню действий сервера (шапка) + модалка создания канала/категории.
   const [menuOpen, setMenuOpen] = useState(false)
+
+  // Подписка «все сообщения» для этого сервера (локальная, persisted).
+  const allMessages = useNotifyPrefs((s) => (serverId ? Boolean(s.serverAll[serverId]) : false))
+  const setServerAll = useNotifyPrefs((s) => s.setServerAll)
   const [createState, setCreateState] =
     useState<{ mode: CreateChannelMode; category?: string } | null>(null)
   const headerRef = useRef<HTMLDivElement>(null)
@@ -673,6 +678,21 @@ export function ChannelList({ serverId, activeChannelId }: ChannelListProps) {
               onClick={() => { setMenuOpen(false); openSettings('server-overview', serverId) }}
             >
               настройки сервера
+            </ServerMenuItem>
+            <div className="my-1 h-px bg-kd-border mx-2" />
+            <ServerMenuItem
+              glyph={<Icon.Bell size={12} className={allMessages ? 'text-kd-accent' : 'text-kd-text-mute'} />}
+              onClick={() => setServerAll(serverId, !allMessages)}
+            >
+              <span className="flex-1">уведомлять обо всех сообщениях</span>
+              <span
+                className={[
+                  'shrink-0 text-[9px] font-mono font-bold uppercase px-1.5 py-0.5 rounded',
+                  allMessages ? 'bg-kd-accent text-white' : 'bg-kd-panel-alt text-kd-text-mute',
+                ].join(' ')}
+              >
+                {allMessages ? 'вкл' : 'выкл'}
+              </span>
             </ServerMenuItem>
             {canManage && (
               <>

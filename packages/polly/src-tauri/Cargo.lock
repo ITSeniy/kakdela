@@ -2257,6 +2257,7 @@ dependencies = [
  "tauri-plugin-notification",
  "tauri-plugin-os",
  "tauri-plugin-shell",
+ "tauri-winrt-notification",
 ]
 
 [[package]]

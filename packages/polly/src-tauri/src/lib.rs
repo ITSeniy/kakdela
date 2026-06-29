@@ -42,6 +42,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             greet,
             focus_main_window,
+            notify_with_target,
             set_tray_badge,
             open_call_popup,
             close_call_popup,
@@ -156,6 +157,64 @@ fn focus_main_window(app: tauri::AppHandle) {
     show_main_window(&app);
     #[cfg(not(desktop))]
     let _ = app;
+}
+
+/// Нативный тост с переходом по клику. Десктоп-плагин активацию в JS не
+/// пробрасывает (notify-rust `.show()` без обработчика), поэтому на Windows
+/// показываем тост сами через `tauri-winrt-notification` и ловим клик в
+/// `on_activated` → эмитим `notify://activated` с целевым URL. Фронт слушает
+/// событие и переходит к сообщению (см. lib/host/notify.ts).
+#[tauri::command]
+fn notify_with_target(app: tauri::AppHandle, title: String, body: String, target: String) {
+    #[cfg(windows)]
+    {
+        use tauri::Emitter;
+        use tauri_winrt_notification::Toast;
+
+        // app_id: установленное приложение → его identifier (AUMID регистрирует
+        // инсталлятор); dev-сборка из target/debug|release → POWERSHELL_APP_ID,
+        // он всегда зарегистрирован и ловит клик в процессе.
+        let app_id = {
+            let identifier = app.config().identifier.clone();
+            let is_dev = tauri::utils::platform::current_exe()
+                .ok()
+                .and_then(|e| e.parent().map(|p| p.to_path_buf()))
+                .map(|d| {
+                    let s = d.to_string_lossy().to_lowercase();
+                    s.ends_with("\\target\\debug") || s.ends_with("\\target\\release")
+                })
+                .unwrap_or(false);
+            if is_dev {
+                Toast::POWERSHELL_APP_ID.to_string()
+            } else {
+                identifier
+            }
+        };
+
+        let app_for_cb = app.clone();
+        let res = Toast::new(&app_id)
+            .title(&title)
+            .text1(&body)
+            // Тихий тост: звук уведомления играет само приложение
+            // (playSound('notification')); системный звук Windows был бы дублем.
+            .sound(None)
+            .on_activated(move |_action| {
+                let _ = app_for_cb.emit("notify-activated", target.clone());
+                Ok(())
+            })
+            .show();
+        if let Err(err) = res {
+            eprintln!("[notify] winrt toast failed: {err:?}");
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        // macOS/Linux/mobile: переход по клику плагином не поддержан — просто
+        // показываем тост (приложение Windows-first, регрессии тут нет).
+        use tauri_plugin_notification::NotificationExt;
+        let _ = app.notification().builder().title(title).body(body).show();
+        let _ = target;
+    }
 }
 
 /// Badge с unread count поверх trayicon (desktop). На mobile трея нет — no-op.

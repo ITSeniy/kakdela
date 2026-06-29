@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useLocation } from 'wouter'
 
-import type { Channel, DmSummary } from '@kakdela/ginzu/api-types'
+import type { Channel, DmSummary, MemberPublic } from '@kakdela/ginzu/api-types'
 
 import { useAuthStore } from '../auth/store.js'
 import { focusMainWindow } from '../../lib/host/tray.js'
@@ -10,7 +10,7 @@ import { notify, primeNotifyPermission } from '../../lib/host/notify.js'
 import { wsClient } from '../../lib/ws.js'
 import { listDms } from '../dm/api.js'
 import { listInboxMentions } from '../inbox/api.js'
-import { getServerDetail } from '../servers/api.js'
+import { getServerDetail, listMembers, type ServerDetail } from '../servers/api.js'
 import { playSound } from '../sounds/sounds.js'
 import { useNotifyPrefs } from './prefs.js'
 
@@ -25,6 +25,17 @@ function playNotifySound(): void {
   if (now - lastSoundAt < SOUND_THROTTLE_MS) return
   lastSoundAt = now
   playSound('notification')
+}
+
+// Одно сообщение может прийти и как `mention`, и как `msg.new` (подписка «все
+// сообщения»). Дедуплицируем тосты по messageId: первый победивший помечает id,
+// второй — пропускает. Запись живёт коротко (id сообщения уникален).
+const notifiedMessageIds = new Set<string>()
+function markNotified(messageId: string): boolean {
+  if (notifiedMessageIds.has(messageId)) return false
+  notifiedMessageIds.add(messageId)
+  setTimeout(() => notifiedMessageIds.delete(messageId), 10_000)
+  return true
 }
 
 /** Инвалидирует оба счётчика непрочитанного: общий и разбивку по серверам. */
@@ -110,6 +121,17 @@ export function useNotifyTriggers(): void {
     if (currentUserId) primeNotifyPermission()
   }, [currentUserId])
 
+  // Префетч деталей/участников серверов с подпиской «все сообщения»: msg.new-
+  // обработчик резолвит serverId и имя автора из кэша, поэтому держим его тёплым.
+  const serverAll = useNotifyPrefs((s) => s.serverAll)
+  useEffect(() => {
+    for (const sid of Object.keys(serverAll)) {
+      if (!serverAll[sid]) continue
+      void queryClient.ensureQueryData({ queryKey: ['server', sid], queryFn: () => getServerDetail(sid) }).catch(() => {})
+      void queryClient.ensureQueryData({ queryKey: ['members', sid], queryFn: () => listMembers(sid) }).catch(() => {})
+    }
+  }, [serverAll, queryClient])
+
   useEffect(() => {
     if (!currentUserId) return undefined
 
@@ -122,6 +144,8 @@ export function useNotifyTriggers(): void {
         if (!useNotifyPrefs.getState().mentions) return
         // Канал открыт и окно в фокусе → toast лишний, хватит обновления badge.
         if (!shouldNotify(event.channelId, uiRef.current, focusedRef.current)) return
+        // Дедуп с «все сообщения»: если это сообщение уже всплыло — не дублируем.
+        if (!markNotified(event.messageId)) return
         playNotifySound()
         void handleMentionNotification(event.channelId, queryClient)
       }
@@ -130,6 +154,47 @@ export function useNotifyTriggers(): void {
       // диалога, всё остальное — `msg.new` в dm-канале.
       if (event.t === 'msg.new') {
         if (event.message.authorId === currentUserId) return
+
+        // ── серверный канал с подпиской «все сообщения» ──
+        // Резолвим serverId по кэшу деталей включённых серверов (дёшево, из
+        // кэша). Канал не может быть одновременно серверным и личным, поэтому
+        // при попадании сразу уведомляем и выходим, не трогая dm-путь.
+        {
+          const serverAll = useNotifyPrefs.getState().serverAll
+          let serverId: string | null = null
+          let detail: ServerDetail | undefined
+          for (const sid of Object.keys(serverAll)) {
+            if (!serverAll[sid]) continue
+            const d = queryClient.getQueryData<ServerDetail>(['server', sid])
+            if (d?.channels.some((c) => c.id === event.channelId)) {
+              serverId = sid
+              detail = d
+              break
+            }
+          }
+          if (serverId) {
+            if (event.message.system) return
+            if (!shouldNotify(event.channelId, uiRef.current, focusedRef.current)) return
+            if (!markNotified(event.message.id)) return
+            playNotifySound()
+            const channelName = detail?.channels.find((c) => c.id === event.channelId)?.name ?? 'канал'
+            const members = queryClient.getQueryData<MemberPublic[]>(['members', serverId])
+            const authorName = members?.find((m) => m.id === event.message.authorId)?.displayName ?? 'новое сообщение'
+            const trimmed = event.message.content.replace(/\s+/g, ' ').trim()
+            const body = trimmed
+              ? (trimmed.length > 140 ? trimmed.slice(0, 139) + '…' : trimmed)
+              : 'вложение'
+            const sid = serverId
+            void notify({
+              title: `${authorName} · #${channelName}`,
+              body,
+              tag: `msg:${event.channelId}`,
+              navigateTo: `/servers/${sid}/channels/${event.channelId}#msg:${event.message.id}`,
+            })
+            return
+          }
+        }
+
         void (async () => {
           // Личка ли это — выясняем по dm-list (кэш, при промахе — один fetch).
           let dms = queryClient.getQueryData<DmSummary[]>(['dm-list'])
@@ -168,11 +233,7 @@ export function useNotifyTriggers(): void {
             title: `${dm.otherUser.displayName} в личных`,
             body,
             tag:   `dm:${event.channelId}`,
-            onClick: () => {
-              void focusMainWindow()
-              history.pushState({}, '', `/dm/${event.channelId}`)
-              window.dispatchEvent(new PopStateEvent('popstate'))
-            },
+            navigateTo: `/dm/${event.channelId}`,
           })
         })()
         return
@@ -187,13 +248,7 @@ export function useNotifyTriggers(): void {
           title: 'новое личное сообщение',
           body:  'кто-то начал с вами личный диалог',
           tag:   `dm:${event.channelId}`,
-          onClick: () => {
-            void focusMainWindow()
-            window.location.hash = ''
-            // Wouter listens to history; используем history.pushState.
-            history.pushState({}, '', `/dm/${event.channelId}`)
-            window.dispatchEvent(new PopStateEvent('popstate'))
-          },
+          navigateTo: `/dm/${event.channelId}`,
         })
       }
     })
@@ -248,14 +303,9 @@ async function handleMentionNotification(
     title,
     body: body || 'нажмите, чтобы прочитать',
     tag:  `mention:${channelId}`,
-    onClick: serverId && messageId
-      ? () => {
-          void focusMainWindow()
-          const target = `/servers/${serverId}/channels/${channelId}#msg:${messageId}`
-          history.pushState({}, '', target)
-          window.dispatchEvent(new PopStateEvent('popstate'))
-        }
-      : () => void focusMainWindow(),
+    ...(serverId && messageId
+      ? { navigateTo: `/servers/${serverId}/channels/${channelId}#msg:${messageId}` }
+      : { onClick: () => void focusMainWindow() }),
   })
 
   // Прогреваем serverDetail-cache, чтобы переход был мгновенным.
