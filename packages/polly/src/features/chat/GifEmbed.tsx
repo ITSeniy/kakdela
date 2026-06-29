@@ -7,6 +7,7 @@ import { useState } from 'react'
 
 import type { Attachment, GifEmbed as GifEmbedData } from '@kakdela/ginzu/api-types'
 
+import { useChatPrefs } from '../settings/chatPrefs.js'
 import { Lightbox } from './Lightbox.js'
 
 const MAX_W = 320
@@ -14,6 +15,7 @@ const MAX_H = 240
 
 export function GifEmbed({ gif }: { gif: GifEmbedData }) {
   const [open, setOpen] = useState(false)
+  const autoplay = useChatPrefs((s) => s.autoplayGifs)
 
   // Целевой размер для тайла в ленте (длинная сторона ограничена).
   let w = gif.width
@@ -49,7 +51,7 @@ export function GifEmbed({ gif }: { gif: GifEmbedData }) {
           <video
             src={gif.mp4Url}
             poster={gif.previewUrl}
-            autoPlay
+            autoPlay={autoplay}
             loop
             muted
             playsInline

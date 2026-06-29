@@ -16,6 +16,7 @@ import { useServerPermissions } from '../roles/permissions.js'
 import { getServerDetail, listMembers } from '../servers/api.js'
 import { AppearanceSettings } from './AppearanceSettings.js'
 import { AuditLog } from './AuditLog.js'
+import { ChatSettings } from './ChatSettings.js'
 import { EmojiManagement } from './EmojiManagement.js'
 import { StickerManagement } from './StickerManagement.js'
 import { GeneralSettings } from './GeneralSettings.js'
@@ -50,6 +51,7 @@ const SERVER_PAGES: PageDef[] = [
 const ACCOUNT_PAGES: PageDef[] = [
   { id: 'profile',       label: 'мой профиль',   desc: 'аватар, имя и пароль' },
   { id: 'notifications', label: 'уведомления',   desc: 'когда показывать нативные всплывашки' },
+  { id: 'chat',          label: 'чат',           desc: 'отправка, лента, приватность' },
   { id: 'appearance',    label: 'внешний вид',   desc: 'как «какдела» будет выглядеть у тебя' },
   { id: 'voice',         label: 'голос и видео', desc: 'микрофон, шумодав и push-to-talk' },
   { id: 'sounds',        label: 'звуки',         desc: 'звуки интерфейса и пак на вкус' },
@@ -210,6 +212,7 @@ export function SettingsScreen() {
             {current.id === 'server-audit'    && serverId && perms.can('VIEW_AUDIT_LOG') && <AuditLog serverId={serverId} />}
             {current.id === 'profile'       && <ProfileSettings />}
             {current.id === 'notifications' && <NotificationSettings />}
+            {current.id === 'chat'          && <ChatSettings />}
             {current.id === 'appearance'    && <AppearanceSettings />}
             {current.id === 'voice'         && <VoiceSettings />}
             {current.id === 'sounds'        && <SoundSettings />}

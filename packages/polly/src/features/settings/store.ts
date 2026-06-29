@@ -12,6 +12,7 @@ export type SettingsPage =
   | 'server-audit'
   | 'profile'
   | 'notifications'
+  | 'chat'
   | 'appearance'
   | 'voice'
   | 'sounds'

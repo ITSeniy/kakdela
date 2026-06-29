@@ -13,10 +13,12 @@ export function AppearanceSettings() {
   const accentId = useAppearance((s) => s.accentId)
   const radius = useAppearance((s) => s.radius)
   const hoverHighlight = useAppearance((s) => s.hoverHighlight)
+  const reduceMotion = useAppearance((s) => s.reduceMotion)
   const uiScale = useAppearance((s) => s.uiScale)
   const setAccent = useAppearance((s) => s.setAccent)
   const setRadius = useAppearance((s) => s.setRadius)
   const setHoverHighlight = useAppearance((s) => s.setHoverHighlight)
+  const setReduceMotion = useAppearance((s) => s.setReduceMotion)
   const setUiScale = useAppearance((s) => s.setUiScale)
 
   return (
@@ -86,6 +88,12 @@ export function AppearanceSettings() {
           onChange={setHoverHighlight}
           label="подсветка при наведении"
           hint="заливка строки под курсором — в чате и списках голосовых"
+        />
+        <Toggle
+          on={reduceMotion}
+          onChange={setReduceMotion}
+          label="уменьшить движение"
+          hint="отключает анимации интерфейса (поверх системной настройки)"
         />
       </Field>
 

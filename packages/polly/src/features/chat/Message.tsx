@@ -10,6 +10,7 @@ import { Icon } from '../../components/Icon.js'
 import { toast } from '../../components/toast/index.js'
 import { useProfileUi } from '../profile/store.js'
 import { useAppearance } from '../settings/appearance.js'
+import { formatClock, useChatPrefs } from '../settings/chatPrefs.js'
 import { useThreadUi } from '../threads/store.js'
 import { pinMessage, unpinMessage } from './api.js'
 import { AttachmentList } from './AttachmentView.js'
@@ -53,10 +54,6 @@ interface MessageProps {
   onReply: (message: IMessage) => void
   onAddReaction: (messageId: string, emoji: string) => void
   onRemoveReaction: (messageId: string, emoji: string) => void
-}
-
-function fmtTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' })
 }
 
 function minutesBetween(a: string, b: string): number {
@@ -273,6 +270,8 @@ export function Message({
   // --kd-hover, а не panel-alt/NN: kd-цвета в tailwind-конфиге без
   // <alpha-value>, и модификатор прозрачности на них молча не работает.
   const hoverCls = useAppearance((s) => s.hoverHighlight) ? 'hover:bg-kd-hover' : ''
+  const timeFormat = useChatPrefs((s) => s.timeFormat)
+  const showLinkPreviews = useChatPrefs((s) => s.showLinkPreviews)
   const grouped =
     prev !== null &&
     prev.authorId === message.authorId &&
@@ -281,7 +280,7 @@ export function Message({
 
   const name = member?.displayName ?? 'неизвестно'
   const role = member ? ROLE_TAG[member.role] ?? null : null
-  const time = fmtTime(message.createdAt)
+  const time = formatClock(message.createdAt, timeFormat)
   const opacityCls = pendingStatus === 'sending' ? 'opacity-60' : ''
 
   // Контекст для шапки лайтбокса: кто, где и когда отправил картинку.
@@ -339,7 +338,9 @@ export function Message({
   const forwardedEl = fwd ? (
     <ForwardedCard fwd={fwd} memberMap={memberMap} channelMap={channelMap} emojiMap={emojiMap} />
   ) : null
-  const linkPreviewsEl = <LinkPreviews previews={(message as IMessage).linkPreviews} />
+  const linkPreviewsEl = showLinkPreviews
+    ? <LinkPreviews previews={(message as IMessage).linkPreviews} />
+    : null
   const pinnedTag = (message as IMessage).pinned ? (
     <div className="flex items-center gap-1 text-[10px] text-kd-warm font-mono mb-0.5 select-none">📌 закреплено</div>
   ) : null

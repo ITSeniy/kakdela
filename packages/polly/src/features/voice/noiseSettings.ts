@@ -16,22 +16,33 @@ interface NoiseSettingsState {
    * добавляется как «pro»-режим уже поверх этого toggle.
    */
   noiseSuppression: boolean
+  /** Эхоподавление (WebRTC AEC) — убирает эхо динамиков из микрофона. */
+  echoCancellation: boolean
+  /** Авторегулировка усиления (AGC) — выравнивает громкость голоса. */
+  autoGainControl: boolean
 }
 
 interface NoiseSettingsActions {
   setNoiseSuppression(enabled: boolean): void
   toggleNoiseSuppression(): void
+  setEchoCancellation(enabled: boolean): void
+  setAutoGainControl(enabled: boolean): void
 }
 
-// Дефолт `true` — для типичного home-офиса с гудящим компьютером и
+// Дефолты `true` — для типичного home-офиса с гудящим компьютером и
 // открытым YouTube в соседней вкладке польза очевидна, а штраф по CPU
-// ничтожен. На совсем слабых машинах пользователь сам выключит.
+// ничтожен. На совсем слабых машинах или с внешней обработкой (аудиоинтерфейс,
+// OBS) пользователь сам выключит.
 export const useNoiseSettings = create<NoiseSettingsState & NoiseSettingsActions>()(
   persist(
     (set, get) => ({
       noiseSuppression: true,
+      echoCancellation: true,
+      autoGainControl:  true,
       setNoiseSuppression(enabled) { set({ noiseSuppression: enabled }) },
       toggleNoiseSuppression()     { set({ noiseSuppression: !get().noiseSuppression }) },
+      setEchoCancellation(enabled) { set({ echoCancellation: enabled }) },
+      setAutoGainControl(enabled)  { set({ autoGainControl: enabled }) },
     }),
     { name: 'kd:voice:noise' },
   ),
@@ -40,8 +51,8 @@ export const useNoiseSettings = create<NoiseSettingsState & NoiseSettingsActions
 /**
  * Базовый набор audio constraints для микрофона. Возвращаем именно
  * AudioCaptureOptions, который LiveKit принимает в `setMicrophoneEnabled`
- * и `LocalAudioTrack.restartTrack`. Эхо и AGC всегда включены — выключать
- * их некому смысла, это плохо для голосовой связи без отдельной обработки.
+ * и `LocalAudioTrack.restartTrack`. Все три фильтра — по настройкам голоса
+ * (дефолтно включены); продвинутые могут выключить эхо/AGC под свой тракт.
  */
 export function audioCaptureOptions(): {
   noiseSuppression: boolean
@@ -50,10 +61,11 @@ export function audioCaptureOptions(): {
   deviceId?: string
 } {
   const micId = useAudioDevices.getState().micId
+  const s = useNoiseSettings.getState()
   return {
-    noiseSuppression: useNoiseSettings.getState().noiseSuppression,
-    echoCancellation: true,
-    autoGainControl:  true,
+    noiseSuppression: s.noiseSuppression,
+    echoCancellation: s.echoCancellation,
+    autoGainControl:  s.autoGainControl,
     // 'default' — отдаём выбор браузеру, явный id — конкретное устройство.
     ...(micId && micId !== 'default' ? { deviceId: micId } : {}),
   }
@@ -70,7 +82,9 @@ export function audioCaptureOptions(): {
  * значения из persist, никакого пользовательского действия не было.
  */
 export function useNoiseSuppressionSync(): void {
-  const enabled = useNoiseSettings((s) => s.noiseSuppression)
+  const noiseSuppression = useNoiseSettings((s) => s.noiseSuppression)
+  const echoCancellation = useNoiseSettings((s) => s.echoCancellation)
+  const autoGainControl = useNoiseSettings((s) => s.autoGainControl)
   const firstRun = useRef(true)
 
   useEffect(() => {
@@ -79,5 +93,5 @@ export function useNoiseSuppressionSync(): void {
       return
     }
     void restartMicConstraints(audioCaptureOptions())
-  }, [enabled])
+  }, [noiseSuppression, echoCancellation, autoGainControl])
 }

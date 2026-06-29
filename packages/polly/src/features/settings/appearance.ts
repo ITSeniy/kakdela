@@ -74,10 +74,13 @@ interface AppearanceState {
   radius: number
   /** Заливка строки под курсором (сообщения, участники голосовых). */
   hoverHighlight: boolean
+  /** Ручное «уменьшить движение» поверх системного prefers-reduced-motion. */
+  reduceMotion: boolean
   uiScale: UiScale
   setAccent(id: string): void
   setRadius(radius: number): void
   setHoverHighlight(on: boolean): void
+  setReduceMotion(on: boolean): void
   setUiScale(scale: UiScale): void
 }
 
@@ -87,10 +90,12 @@ export const useAppearance = create<AppearanceState>()(
       accentId: DEFAULT_ACCENT_ID,
       radius: DEFAULT_RADIUS,
       hoverHighlight: true,
+      reduceMotion: false,
       uiScale: DEFAULT_UI_SCALE,
       setAccent: (accentId) => set({ accentId }),
       setRadius: (radius) => set({ radius: Math.min(12, Math.max(0, Math.round(radius))) }),
       setHoverHighlight: (hoverHighlight) => set({ hoverHighlight }),
+      setReduceMotion: (reduceMotion) => set({ reduceMotion }),
       setUiScale: (uiScale) => set({ uiScale }),
     }),
     { name: 'kd:appearance' },
@@ -142,10 +147,13 @@ const ACCENT_VARS = ['--kd-accent', '--kd-accent-deep', '--kd-accent-soft', '--k
 export function applyAppearance(): void {
   if (typeof document === 'undefined') return
   const root = document.documentElement
-  const { accentId, radius, uiScale } = useAppearance.getState()
+  const { accentId, radius, uiScale, reduceMotion } = useAppearance.getState()
 
   if (radius === DEFAULT_RADIUS) root.style.removeProperty('--kd-radius')
   else root.style.setProperty('--kd-radius', `${radius}px`)
+
+  if (reduceMotion) root.setAttribute('data-reduce-motion', 'true')
+  else root.removeAttribute('data-reduce-motion')
 
   const pct = UI_SCALES.find((s) => s.id === uiScale)?.pct ?? 125
   if (pct === 100) root.style.removeProperty('zoom')

@@ -8,6 +8,7 @@ import { Icon } from '../../components/Icon.js'
 import { useIsMobile } from '../../app/useIsMobile.js'
 import { wsClient } from '../../lib/ws.js'
 import { useAuthStore } from '../auth/store.js'
+import { useChatPrefs } from '../settings/chatPrefs.js'
 import { getGiphyConfig } from '../giphy/api.js'
 import {
   MAX_ATTACHMENT_SIZE,
@@ -69,6 +70,8 @@ function TypingLine({ channelId, memberMap, mobile }: {
   mobile?: boolean
 }) {
   const meId = useAuthStore((s) => s.user?.id)
+  const showTyping = useChatPrefs((s) => s.showTyping)
+  const sendKey = useChatPrefs((s) => s.sendKey)
   const [typers, setTypers] = useState<Map<string, number>>(new Map())
 
   useEffect(() => {
@@ -107,8 +110,11 @@ function TypingLine({ channelId, memberMap, mobile }: {
     return () => { unsub(); clearInterval(prune) }
   }, [channelId, meId])
 
-  const names = [...typers.keys()].map((id) => memberMap?.get(id)?.displayName ?? 'кто-то')
-  if (names.length === 0) return mobile ? null : <span>shift+⏎ — новая строка</span>
+  const hint = sendKey === 'ctrl-enter' ? 'ctrl+⏎ — отправить' : 'shift+⏎ — новая строка'
+  const names = showTyping
+    ? [...typers.keys()].map((id) => memberMap?.get(id)?.displayName ?? 'кто-то')
+    : []
+  if (names.length === 0) return mobile ? null : <span>{hint}</span>
   const label = names.length === 1
     ? `${names[0]} печатает`
     : names.length === 2
@@ -162,6 +168,8 @@ export function Composer({
   const [mentionIdx, setMentionIdx] = useState(0)
   const meId = useAuthStore((s) => s.user?.id)
   const isMobile = useIsMobile()
+  const sendKey = useChatPrefs((s) => s.sendKey)
+  const sendTyping = useChatPrefs((s) => s.sendTyping)
   const lastTypingSentRef = useRef(0)
 
   const taRef = useRef<HTMLTextAreaElement>(null)
@@ -329,8 +337,9 @@ export function Composer({
     const next = e.target.value
     setText(next)
     syncMention(next, e.target.selectionStart ?? next.length)
-    // Сигнал «печатаю» — не чаще раза в TYPING_THROTTLE_MS.
-    if (channelId && next.trim()) {
+    // Сигнал «печатаю» — не чаще раза в TYPING_THROTTLE_MS; можно выключить
+    // в настройках приватности (тогда свой статус печати не отправляем).
+    if (sendTyping && channelId && next.trim()) {
       const now = Date.now()
       if (now - lastTypingSentRef.current > TYPING_THROTTLE_MS) {
         lastTypingSentRef.current = now
@@ -608,9 +617,15 @@ export function Composer({
         return
       }
     }
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      send()
+    if (e.key === 'Enter') {
+      // ctrl-enter: отправка по Ctrl/Cmd+Enter, голый Enter — перенос строки.
+      // enter (дефолт): Enter отправляет, Shift+Enter — перенос.
+      if (sendKey === 'ctrl-enter') {
+        if (e.ctrlKey || e.metaKey) { e.preventDefault(); send() }
+      } else if (!e.shiftKey) {
+        e.preventDefault()
+        send()
+      }
     }
     if (e.key === 'Escape' && replyTo) onCancelReply()
   }

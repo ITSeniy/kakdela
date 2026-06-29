@@ -280,6 +280,10 @@ export function VoiceSettings() {
   const setPttKey = useVoiceInputSettings((s) => s.setPttKey)
   const noiseSuppression = useNoiseSettings((s) => s.noiseSuppression)
   const setNoiseSuppression = useNoiseSettings((s) => s.setNoiseSuppression)
+  const echoCancellation = useNoiseSettings((s) => s.echoCancellation)
+  const setEchoCancellation = useNoiseSettings((s) => s.setEchoCancellation)
+  const autoGainControl = useNoiseSettings((s) => s.autoGainControl)
+  const setAutoGainControl = useNoiseSettings((s) => s.setAutoGainControl)
 
   const [capturing, setCapturing] = useState(false)
   // Если режим вдруг сменился во время capture (например, через другую
@@ -335,6 +339,18 @@ export function VoiceSettings() {
           hint={noiseSuppression
             ? 'фильтруем кулер, клавиатуру и фоновое'
             : 'микрофон передаёт всё как есть'}
+        />
+        <Toggle
+          on={echoCancellation}
+          onChange={setEchoCancellation}
+          label="эхоподавление"
+          hint="убирает эхо динамиков из микрофона — выключайте только в наушниках"
+        />
+        <Toggle
+          on={autoGainControl}
+          onChange={setAutoGainControl}
+          label="автоусиление"
+          hint="выравнивает громкость голоса автоматически (AGC)"
         />
       </Field>
 
