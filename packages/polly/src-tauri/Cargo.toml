@@ -52,6 +52,22 @@ tauri-plugin-autostart = "2"
 # с той, что тащит notify-rust транзитивно.
 [target.'cfg(windows)'.dependencies]
 tauri-winrt-notification = "0.7"
+# WASAPI loopback-захват звука (T-094 Stage A/B). Версия совпадает с той, что
+# уже в дереве зависимостей (windows 0.61.x) — чтобы не тащить вторую копию.
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",                      # SECURITY_ATTRIBUTES (в сигнатуре CreateEventW)
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",  # PROPVARIANT (process-loopback params)
+    "Win32_System_Variant",                # VT_BLOB
+    "Win32_System_Threading",              # CreateEventW / WaitForSingleObject / SetEvent
+    "Win32_System_Diagnostics_ToolHelp",   # список процессов для пикера
+    "Win32_Media_Audio",
+] }
+# `#[implement]` (COM completion handler для ActivateAudioInterfaceAsync) генерит
+# пути `windows_core::...`, поэтому крейт должен быть доступен под этим именем.
+# Версия совпадает с той, что тянет windows 0.61.x.
+windows-core = "0.61"
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]

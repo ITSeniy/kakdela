@@ -1,13 +1,21 @@
 import { useCallback } from 'react'
 import {
+  LocalAudioTrack,
   ScreenSharePresets,
   Track,
+  type Room,
   type ScreenShareCaptureOptions,
   type TrackPublishOptions,
   type VideoPreset,
 } from 'livekit-client'
 
-import { getActiveRoom } from '../../lib/livekit.js'
+import { getAudioCaptureCapability } from '../../lib/host/audioCapture.js'
+import {
+  getActiveRoom,
+  registerNativeScreenAudio,
+  stopNativeScreenAudio,
+} from '../../lib/livekit.js'
+import { createNativeAudioTrack } from './nativeAudioTrack.js'
 import {
   useScreenShareSettings,
   type ScreenQuality,
@@ -42,9 +50,28 @@ interface ResolvedQuality {
   publish?: TrackPublishOptions
 }
 
+// Демку всегда публикуем VP9 + SVC. Для текста/кода/резких краёв VP9 даёт
+// заметно лучше качество-на-битрейт, чем дефолтный VP8, а спатиальные слои SVC
+// обеспечивают плавную деградацию у слабых зрителей БЕЗ отдельных simulcast-
+// слоёв (их роль берёт scalabilityMode VP9, LiveKit включает его сам).
+//
+// backupCodec выключаем: все наши клиенты — Chromium (WebView2 на desktop) или
+// современные браузеры (web), они декодируют VP9 нативно; дублирующий VP8-энкод
+// только зря грузил бы CPU у того, кто шарит.
+const SCREEN_PUBLISH_BASE = {
+  videoCodec: 'vp9',
+  backupCodec: false,
+} as const satisfies Partial<TrackPublishOptions>
+
+// contentHint='detail' просит энкодер жертвовать частотой кадров ради чёткости —
+// правильный выбор для статичного контента (IDE, документы, дашборды), который
+// и составляет почти все демонстрации.
+const SCREEN_CONTENT_HINT = 'detail' as const
+
 function presetToConfig(preset: VideoPreset): ResolvedQuality {
   return {
     capture: {
+      contentHint: SCREEN_CONTENT_HINT,
       resolution: {
         width: preset.width,
         height: preset.height,
@@ -52,6 +79,7 @@ function presetToConfig(preset: VideoPreset): ResolvedQuality {
       },
     },
     publish: {
+      ...SCREEN_PUBLISH_BASE,
       videoEncoding: {
         maxBitrate: preset.encoding.maxBitrate,
         maxFramerate: preset.encoding.maxFramerate,
@@ -61,25 +89,20 @@ function presetToConfig(preset: VideoPreset): ResolvedQuality {
 }
 
 /**
- * Маппит наш user-facing preset в `ScreenShareCaptureOptions` (resolution) +
- * `TrackPublishOptions` (bitrate, simulcast). Bitrate важно тащить отдельно —
- * resolution-only в Chromium может отдать поток на ~3 Mbps даже для 720p,
- * пока ему явно не сказано иначе.
+ * Маппит наш user-facing preset в `ScreenShareCaptureOptions` (resolution +
+ * contentHint) и `TrackPublishOptions` (кодек VP9, bitrate). Bitrate важно
+ * тащить явно — resolution-only в Chromium может отдать поток на ~3 Mbps даже
+ * для 720p, пока ему явно не сказано иначе.
  */
 function configForQuality(q: ScreenQuality): ResolvedQuality {
   switch (q) {
     case 'auto':
-      // SFU отдаёт более слабому клиенту меньшую раскладку без вмешательства
-      // source'а. Capture без явного resolution — пусть Chromium возьмёт
-      // дефолтные 1080p, simulcast вырежет два уровня.
+      // VP9 SVC: захват в дефолтном (до 1080p) разрешении, SFU сам срезает
+      // спатиальные/темпоральные слои под каждого зрителя — отдельные
+      // simulcast-слои тут не нужны.
       return {
-        capture: {},
-        publish: {
-          screenShareSimulcastLayers: [
-            ScreenSharePresets.h360fps15,
-            ScreenSharePresets.h720fps30,
-          ],
-        },
+        capture: { contentHint: SCREEN_CONTENT_HINT },
+        publish: { ...SCREEN_PUBLISH_BASE },
       }
     case '1080p30':
       return presetToConfig(ScreenSharePresets.h1080fps30)
@@ -87,6 +110,37 @@ function configForQuality(q: ScreenQuality): ResolvedQuality {
       return presetToConfig(ScreenSharePresets.h720fps30)
     case '720p15':
       return presetToConfig(ScreenSharePresets.h720fps15)
+  }
+}
+
+/**
+ * Публикует нативно захваченный системный звук (WASAPI) как ScreenShareAudio-трек
+ * той же демки (T-094 Stage C). Хэндл регистрируется в lib/livekit, чтобы трек
+ * корректно снимался при stopShare / остановке из ОС-бара / выходе из комнаты.
+ * Не критично: при ошибке демка остаётся, просто без звука.
+ */
+async function publishNativeScreenAudio(room: Room): Promise<void> {
+  try {
+    const native = await createNativeAudioTrack({})
+    // userProvidedTrack=true: трек наш (из MSTG), LiveKit не управляет его
+    // жизненным циклом и не пытается рестартить через getUserMedia.
+    const localTrack = new LocalAudioTrack(native.track, undefined, true)
+    await room.localParticipant.publishTrack(localTrack, {
+      source: Track.Source.ScreenShareAudio,
+      name: 'screen-audio',
+    })
+    registerNativeScreenAudio({
+      stop: async () => {
+        try {
+          await room.localParticipant.unpublishTrack(localTrack)
+        } catch {
+          /* комната могла уже отключиться — не страшно */
+        }
+        await native.stop()
+      },
+    })
+  } catch (err) {
+    console.warn('[voice] native screen audio publish failed', err)
   }
 }
 
@@ -103,12 +157,15 @@ export function useScreenShare(): UseScreenShare {
       if (!room) return
 
       const settings = useScreenShareSettings.getState()
-      // Если caller не сказал — берём пользовательскую настройку. Если уже
-      // известно, что аудио не поддерживается (`audioCaptureSupported === false`),
-      // не пытаемся его запросить вообще: иначе getDisplayMedia может в
-      // некоторых билдах WebView2 ругаться на audio constraint.
       const wantsAudio = opts.withAudio ?? settings.withAudio
-      const withAudio = wantsAudio && settings.audioCaptureSupported !== false
+      // Нативный WASAPI-захват (Windows) — надёжная замена getDisplayMedia-аудио
+      // (T-050a). Если он доступен, видео берём БЕЗ audio-constraint, а звук
+      // публикуем отдельным ScreenShareAudio-треком ниже (publishNativeScreenAudio).
+      const cap = await getAudioCaptureCapability()
+      const useNativeAudio = wantsAudio && cap.systemLoopback
+      // getDisplayMedia-аудио — только когда нативного пути нет (не-Windows и т.п.).
+      // Если уже известно, что оно не поддерживается — не запрашиваем вовсе.
+      const withAudio = !useNativeAudio && wantsAudio && settings.audioCaptureSupported !== false
       const quality = configForQuality(settings.screenQuality)
 
       try {
@@ -168,12 +225,16 @@ export function useScreenShare(): UseScreenShare {
         return
       }
 
-      // Capability-зонд: попросили audio, успешно опубликовались — проверяем,
-      // приехал ли вообще ScreenShareAudio. В Chromium на некоторых
-      // источниках (окно без воспроизведения, Linux webkit2gtk) audio
-      // молча НЕ публикуется, ошибки нет. Если так — кэшируем флаг, чтобы
-      // UI не врал в следующий раз.
-      if (withAudio) {
+      if (useNativeAudio) {
+        // Нативный путь: видео уже опубликовано, теперь публикуем нативный звук
+        // отдельным ScreenShareAudio-треком. Не критично — если упадёт, демка
+        // остаётся (просто без звука).
+        await publishNativeScreenAudio(room)
+      } else if (withAudio) {
+        // Capability-зонд getDisplayMedia: попросили audio, успешно опубликовались
+        // — проверяем, приехал ли ScreenShareAudio. В Chromium на некоторых
+        // источниках (окно без воспроизведения, Linux webkit2gtk) audio молча НЕ
+        // публикуется без ошибки. Если так — кэшируем флаг, чтобы UI не врал.
         const audioPub = room.localParticipant.getTrackPublication(
           Track.Source.ScreenShareAudio,
         )
@@ -186,6 +247,8 @@ export function useScreenShare(): UseScreenShare {
   const stopShare = useCallback(async (): Promise<void> => {
     const room = getActiveRoom()
     if (!room) return
+    // Сначала снимаем нативный звук (unpublish + стоп Rust-стрима), потом видео.
+    await stopNativeScreenAudio()
     try {
       await room.localParticipant.setScreenShareEnabled(false)
     } catch (err) {

@@ -55,7 +55,10 @@ services:
       - kd-caddy-config:/config
 
 volumes:
+  # Явное имя — тот же том делит контейнер livekit (data-плоскость), чтобы
+  # отдать TURNS Caddy-серт для KD_DOMAIN. См. docker-compose.prod.yml.
   kd-caddy-data:
+    name: kd-caddy-data
   kd-caddy-config:
 
 # Сеть создаёт docker-compose.prod.yml (data-плоскость) — без неё app

@@ -86,12 +86,17 @@ services:
     volumes:
       # livekit.prod.yaml создаётся из livekit.prod.example.yaml (не в git!)
       - ./ops/livekit/livekit.prod.yaml:/etc/livekit.yaml:ro
+      # Серт для TURNS переиспользуем у Caddy (он выписывает его для KD_DOMAIN):
+      # тот же named volume, что caddy монтирует под /data в app-плоскости.
+      # :ro — livekit только читает серт, писать в него не должен.
+      - kd-caddy-data:/caddy-certs:ro
     # 7880 (signaling) наружу НЕ публикуем — он ходит через caddy по WSS
-    # (https://<домен>/livekit). Наружу нужны только медиа-порты.
+    # (https://<домен>/livekit). Наружу нужны только медиа- и TURN-порты.
     ports:
-      - "7881:7881"                      # ICE/TCP fallback
-      - "7882:7882/udp"                  # UDP mux
-      - "50000-50100:50000-50100/udp"    # RTP media
+      - "7881:7881"            # ICE/TCP fallback
+      - "7882:7882/udp"        # ICE/UDP mux (все медиа-сессии)
+      - "3478:3478/udp"        # TURN/UDP
+      - "5349:5349/tcp"        # TURNS (TURN-over-TLS)
 
   # ─── Backups: cron + pg_dump + mc + rsync ─────────────────────────────
   #
@@ -142,6 +147,13 @@ volumes:
   kd-redis:
   kd-minio:
   kd-backups:
+  # Том с данными Caddy (TLS-серты). Объявлен и здесь, и в docker-compose.app.yml
+  # с одинаковым явным `name`, поэтому оба compose-проекта делят ОДИН реальный
+  # том: caddy пишет серты под /data, livekit читает их под /caddy-certs:ro для
+  # TURNS. На `prod up` том создаётся пустым (серта ещё нет — TURNS поднимется
+  # после `app up` + restart livekit); TURN/UDP работает сразу.
+  kd-caddy-data:
+    name: kd-caddy-data
 
 # Именованная сеть, общая с docker-compose.app.yml (speedy + caddy).
 networks:

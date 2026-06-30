@@ -11,6 +11,10 @@ mod error;
 mod sealed;
 mod store;
 
+// Нативный захват звука для демонстрации экрана (T-094). Stage 0 — определение
+// возможностей ОС; компилируется на всех платформах (вне Windows = Unsupported).
+mod audio;
+
 #[cfg(desktop)]
 use tauri::{
     menu::{Menu, MenuItem},
@@ -59,6 +63,7 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .manage(commands::CryptoState::default())
         .manage(commands::HistoryState::default())
+        .manage(audio::AudioStreamState::default())
         .manage(PendingCall::default())
         .manage(CloseToTray(std::sync::atomic::AtomicBool::new(true)))
         .invoke_handler(tauri::generate_handler![
@@ -88,6 +93,12 @@ pub fn run() {
             commands::secret_history_mark_read,
             commands::secret_history_list,
             commands::secret_history_peers,
+            audio::audio_capture_capability,
+            audio::audio_capture_record,
+            audio::audio_list_processes,
+            audio::audio_capture_record_process,
+            audio::audio_stream_start,
+            audio::audio_stream_stop,
         ])
         .setup(|app| {
             // Вся десктопная обвязка — в setup_desktop под cfg(desktop).

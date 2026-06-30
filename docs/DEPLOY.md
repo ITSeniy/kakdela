@@ -21,7 +21,7 @@ https://<домен>/*          → статика          web-клиент (Po
 https://s3.<домен>/*       → minio:9000      файлы, аватарки, emoji
 ```
 
-Медиа-трафик голоса (RTP) идёт мимо Caddy — напрямую в LiveKit по UDP `50000–50100` (+ TCP `7881` как fallback).
+Медиа-трафик голоса (RTP) идёт мимо Caddy — напрямую в LiveKit по UDP-mux `7882` (+ TCP `7881` как fallback). Для участников за симметричным NAT/строгим файрволом LiveKit поднимает встроенный TURN: `3478/udp` и TURNS (TLS) `5349/tcp` — см. §3a.
 
 ## 0. Что нужно заранее
 
@@ -50,8 +50,9 @@ ufw allow 80/tcp                   # ACME-челлендж + редирект н
 ufw allow 443/tcp                  # https + wss
 ufw allow 443/udp                  # HTTP/3 (опционально, но пусть будет)
 ufw allow 7881/tcp                 # LiveKit ICE/TCP fallback
-ufw allow 7882/udp                 # LiveKit UDP mux
-ufw allow 50000:50100/udp          # LiveKit RTP media
+ufw allow 7882/udp                 # LiveKit ICE/UDP mux (медиа)
+ufw allow 3478/udp                 # TURN/UDP (NAT-реле)
+ufw allow 5349/tcp                 # TURNS — TURN-over-TLS (строгий firewall)
 ufw enable
 ```
 
@@ -90,6 +91,39 @@ docker compose -f docker-compose.prod.yml ps    # ждём postgres → healthy
 ```
 
 `minio-init` отработает один раз и создаст bucket'ы (`kakdela`, `kakdela-emoji`) с анонимным download на `public/`-префиксе.
+
+## 3a. TURN/TURNS — проход через NAT
+
+LiveKit поднимает встроенный TURN-сервер (`ops/livekit/livekit.prod.yaml` → `turn:`). Это страховочный реле-путь для друзей за симметричным NAT или строгим файрволом: без него у части людей голос/демо рассыпаются или вообще не подключаются.
+
+- **TURN/UDP (3478)** работает сразу после `prod up` — сертификат ему не нужен.
+- **TURNS/TLS (5349)** переиспользует серт, который Caddy выписывает для `KD_DOMAIN`. Серт появляется только после старта app-плоскости. В `livekit.prod.yaml` строки `tls_port`/`cert_file`/`key_file` по умолчанию **закомментированы** — иначе livekit на первом `prod up` (серта ещё нет) уходит в крэш-луп. Порядок включения:
+
+```bash
+# 1. data-плоскость поднята (§3) — TURN/UDP уже работает.
+# 2. app-плоскость поднята (§4–§5) — Caddy получил сертификат Let's Encrypt.
+# 3. раскомментируй tls_port + cert_file + key_file в ops/livekit/livekit.prod.yaml
+#    (проверь путь к серту — шаг ниже), затем перечитай серт перезапуском:
+docker compose -f docker-compose.prod.yml restart livekit
+```
+
+Проверь, что путь к серту в `livekit.prod.yaml` (`cert_file`/`key_file`) совпадает с реальным — имя ACME-директории CA может отличаться:
+
+```bash
+docker compose -f docker-compose.app.yml exec caddy ls /data/caddy/certificates/
+# → acme-v02.api.letsencrypt.org-directory/   (обычно так для Let's Encrypt prod)
+```
+
+И что `domain:` в блоке `turn:` равен `KD_DOMAIN` (под него выписан серт).
+
+**Продление серта.** Caddy продлевает автоматически (~раз в 60 дней), но LiveKit перечитывает серт только при старте. Чтобы TURNS не отвалился после продления — еженедельный рестарт livekit (быстрый; активные звонки переподключатся):
+
+```bash
+# crontab -e на VPS:
+0 5 * * 1  cd /opt/kakdela && docker compose -f docker-compose.prod.yml restart livekit
+```
+
+**Проверка.** Надёжнее всего — реальный звонок с устройства в другой сети (мобильный хотспот = другой NAT). Если голос идёт там, где раньше «молчал», — TURN работает.
 
 ## 4. Сборка приложения
 
@@ -203,7 +237,9 @@ docker compose -f docker-compose.prod.yml exec backup kd-backup
 | 502 на `/api/*` | `docker logs kd-speedy`. Чаще всего — невалидный `.env` (speedy при старте печатает, какой переменной не хватает). |
 | Логин работает, сообщения не обновляются | WS: в DevTools → Network → `wss://<домен>/ws` должен быть `101 Switching Protocols`. |
 | Картинки не грузятся | `s3.<домен>` резолвится? `curl -I https://s3.<домен>` отвечает? `S3_PUBLIC_ENDPOINT` в `.env` без опечаток? |
-| Голос: подключается, но тишина | Почти всегда UDP. `ufw status` — открыт `50000:50100/udp`? В `livekit.prod.yaml` стоит `use_external_ip: true`? После правок: `docker compose -f docker-compose.prod.yml restart livekit`. |
+| Голос: подключается, но тишина | Почти всегда UDP. `ufw status` — открыт `7882/udp` (ICE-mux)? В `livekit.prod.yaml` стоит `use_external_ip: true`? После правок: `docker compose -f docker-compose.prod.yml restart livekit`. |
+| Голос рвётся/тишина у конкретного человека (а у других ок) | Его NAT не пускает прямой UDP — должен помочь TURN. `ufw status` — открыты `3478/udp` и `5349/tcp`? TURNS поднялся (см. §3a, серт + restart livekit)? В `docker logs kd-livekit` при старте есть строка про TURN. |
+| Демо/голос рассыпается у ВСЕХ сразу | Похоже на упор в исходящую полосу VPS. Во время демо открой DevTools на клиенте → `kdVoiceStats()` (dev-сборка): `qualityLimitationReason: 'bandwidth'` на screen-треке = не хватает egress сервера/аплоада. Снизь preset качества демки. |
 | Голос не подключается вообще | `docker logs kd-livekit`. `LIVEKIT_API_SECRET` в `.env` и `keys` в `livekit.prod.yaml` совпадают? |
 | `internal-error` при входе в голосовой канал | `docker logs kd-speedy`. Задан ли `LIVEKIT_ADMIN_URL=http://livekit:7880` в `.env`? Без него speedy пытается достучаться до admin-API LiveKit через публичный домен — изнутри docker-сети это hairpin, который обычно не проходит. |
 | Presence в голосовом канале не обновляется | Webhook: в `docker logs kd-livekit` ошибки доставки на `http://speedy:3001/...`? Оба контейнера в сети `kd-net` (`docker network inspect kd-net`)? |
@@ -211,7 +247,7 @@ docker compose -f docker-compose.prod.yml exec backup kd-backup
 
 ## Известные упрощения тестового деплоя
 
-- **TURN выключен** — друзьям за симметричным NAT/строгим firewall голос может не пробиться (UDP закрыт → fallback на TCP 7881; если и он закрыт — нужен TURN с TLS, см. доку LiveKit).
+- **TURN включён** (TURN/UDP `3478` + TURNS/TLS `5349`) — реле для симметричного NAT/строгого firewall. TURNS работает только после того, как Caddy выписал серт и livekit перезапущен (см. §3a); до этого момента остаётся TURN/UDP + TCP-fallback `7881`.
 - **Speedy работает на tsx** (как в dev), не на скомпилированном dist — ginzu экспортирует TS-исходники. Для 20 человек это не оверхед; «настоящая» сборка потребует билд-пайплайна для ginzu.
 - **MinIO доступен публично** через `s3.<домен>` — приватные файлы защищены только непредсказуемостью ключей (uuidv7). Для друзей — ок.
 - Серверные операции speedy с MinIO идут по внутренней сети (`S3_ENDPOINT=http://minio:9000`), клиентские ссылки — через `S3_PUBLIC_ENDPOINT`.

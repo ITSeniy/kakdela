@@ -1,7 +1,9 @@
 import {
+  ConnectionQuality,
   ConnectionState,
   LocalAudioTrack,
   LocalParticipant,
+  LocalTrack,
   LocalTrackPublication,
   LocalVideoTrack,
   Participant,
@@ -30,6 +32,33 @@ import { useVoiceVolumes, volumesFor } from '../features/voice/volumeSettings.js
 let currentRoom: Room | null = null
 let audioContainer: HTMLDivElement | null = null
 const attachedAudioElements = new Map<string, HTMLMediaElement>()
+
+// ───── Нативный screen-audio (T-094 Stage C) ─────
+//
+// Кастомный аудио-трек, опубликованный как ScreenShareAudio из нативного WASAPI-
+// захвата. Держим хэндл, чтобы корректно снять трек (unpublish + стоп Rust-стрима)
+// при stopShare, остановке демки из ОС-бара (LocalTrackUnpublished) и выходе из
+// комнаты (disposeRoom). Живёт здесь, где владеем жизненным циклом комнаты;
+// useScreenShare лишь регистрирует хэндл после публикации.
+let nativeScreenAudio: { stop: () => Promise<void> } | null = null
+
+/** Зарегистрировать активный нативный screen-audio (его stop вызовут при teardown). */
+export function registerNativeScreenAudio(handle: { stop: () => Promise<void> }): void {
+  nativeScreenAudio = handle
+}
+
+/** Снять нативный screen-audio, если есть. Идемпотентно. */
+export async function stopNativeScreenAudio(): Promise<void> {
+  const handle = nativeScreenAudio
+  nativeScreenAudio = null
+  if (handle) {
+    try {
+      await handle.stop()
+    } catch (err) {
+      console.warn('[livekit] native screen audio stop failed', err)
+    }
+  }
+}
 
 // ───── Локальный измеритель «я говорю» ─────
 //
@@ -275,6 +304,66 @@ function clearAllAttachedAudio(): void {
   attachedAudioElements.clear()
 }
 
+// ───── Диагностика качества соединения ─────
+//
+// Чтобы при жалобах «рассыпается» не гадать «сеть / сервер / энкод» — держим
+// последний ConnectionQuality по каждому участнику и умеем по запросу снять
+// RTCStatsReport с локальных треков. collectVoiceStats() удобно дёрнуть прямо
+// из DevTools во время реального звонка (в dev доступна как window.kdVoiceStats):
+// packetsLost/jitter/rtt говорят про сеть, qualityLimitationReason —
+// 'bandwidth' = упор в исходящую полосу VPS, 'cpu' = в энкодер.
+const connectionQuality = new Map<string, ConnectionQuality>()
+
+/** Последний известный ConnectionQuality участника (или свой, по identity). */
+export function getConnectionQuality(identity: string): ConnectionQuality | undefined {
+  return connectionQuality.get(identity)
+}
+
+export interface VoiceRtpStat {
+  source: string
+  kind: string
+  packetsLost?: number
+  jitter?: number
+  roundTripTime?: number
+  qualityLimitationReason?: string
+}
+
+/**
+ * Снимок RTP-статистики локальных публикаций (мик + демка) для ручной
+ * диагностики. По записи на трек: потери/джиттер/RTT берём из remote-inbound-rtp
+ * (что реально видит получатель), qualityLimitationReason — из outbound-rtp.
+ */
+export async function collectVoiceStats(): Promise<VoiceRtpStat[]> {
+  const room = currentRoom
+  if (!room) return []
+  const out: VoiceRtpStat[] = []
+  for (const pub of room.localParticipant.trackPublications.values()) {
+    const track = pub.track
+    if (!(track instanceof LocalTrack)) continue
+    const report = await track.getRTCStatsReport().catch(() => undefined)
+    if (!report) continue
+    const stat: VoiceRtpStat = { source: pub.source, kind: track.kind }
+    report.forEach((raw) => {
+      const e = raw as {
+        type?: string
+        qualityLimitationReason?: unknown
+        packetsLost?: unknown
+        jitter?: unknown
+        roundTripTime?: unknown
+      }
+      if (e.type === 'outbound-rtp' && typeof e.qualityLimitationReason === 'string') {
+        stat.qualityLimitationReason = e.qualityLimitationReason
+      } else if (e.type === 'remote-inbound-rtp') {
+        if (typeof e.packetsLost === 'number') stat.packetsLost = e.packetsLost
+        if (typeof e.jitter === 'number') stat.jitter = e.jitter
+        if (typeof e.roundTripTime === 'number') stat.roundTripTime = e.roundTripTime
+      }
+    })
+    out.push(stat)
+  }
+  return out
+}
+
 export function getActiveRoom(): Room | null {
   return currentRoom
 }
@@ -332,7 +421,18 @@ export async function createAndConnectRoom(opts: {
   url: string
   token: string
 }): Promise<Room> {
-  const room = new Room({ adaptiveStream: true, dynacast: true })
+  const room = new Room({
+    adaptiveStream: true,
+    dynacast: true,
+    publishDefaults: {
+      // Голос устойчивее к потерям пакетов: RED дублирует аудио-пакеты,
+      // DTX шлёт comfort-noise в паузах (экономит полосу, не «булькает»).
+      // Это и есть лечение «рассыпания» именно голоса — оно почти всегда от
+      // packet loss, а не от нехватки полосы.
+      red: true,
+      dtx: true,
+    },
+  })
   await room.connect(opts.url, opts.token)
   return room
 }
@@ -359,6 +459,11 @@ export function installVoiceRoom(room: Room): void {
   // Чужие демки по умолчанию не смотрим + сообщаем свой watch-список.
   for (const p of room.remoteParticipants.values()) applyScreenSubscription(p)
   broadcastWatching(room)
+
+  // Dev-доступ к диагностике: window.kdVoiceStats() в DevTools во время звонка.
+  if (import.meta.env.DEV) {
+    ;(window as unknown as Record<string, unknown>).kdVoiceStats = collectVoiceStats
+  }
 }
 
 /**
@@ -374,6 +479,10 @@ export async function disposeRoom(room: Room | null): Promise<void> {
     stopLocalSpeakingMeter()
     clearAllAttachedAudio()
     removeAudioContainer()
+    connectionQuality.clear()
+    // Выходим из комнаты во время демки — гасим нативный screen-audio (важно:
+    // останавливает и Rust-стрим WASAPI, иначе поток капчурил бы дальше).
+    await stopNativeScreenAudio()
   }
   // removeAllListeners — иначе финальный ConnectionStateChanged → Disconnected
   // догонит и перепишет status в 'failed' уже после нашего штатного leave.
@@ -560,6 +669,11 @@ function attachListeners(room: Room): void {
     store().setActiveSpeakers(speakers.map((s) => s.identity))
   })
 
+  room.on(RoomEvent.ConnectionQualityChanged, (quality: ConnectionQuality, p: Participant) => {
+    if (currentRoom !== room) return
+    connectionQuality.set(p.identity, quality)
+  })
+
   // Мик-трек публикуется ЛЕНИВО: кто зашёл замьюченным, не имеет publication
   // вовсе. При первом unmute прилетает TrackPublished (не TrackUnmuted!) —
   // без этого обработчика иконка «мик выключен» застревала, хотя человек
@@ -721,6 +835,8 @@ function attachListeners(room: Room): void {
       }
       if (pub.source !== Track.Source.ScreenShare) return
       store().setScreenSharing(false)
+      // Демку остановили (в т.ч. из ОС-бара Chromium) — снимаем и нативный звук.
+      void stopNativeScreenAudio()
       playSound('stream-end')
     },
   )
