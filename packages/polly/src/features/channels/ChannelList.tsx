@@ -12,15 +12,19 @@ import type {
 import { Avatar } from '../../components/Avatar.js'
 import { Badge } from '../../components/Badge.js'
 import { confirmDialog } from '../../components/ConfirmDialog.js'
+import { ContextMenu, type MenuEntry } from '../../components/ContextMenu.js'
 import { Icon } from '../../components/Icon.js'
 import { toast } from '../../components/toast/index.js'
+import { wsClient } from '../../lib/ws.js'
 import { useAuthStore } from '../auth/store.js'
 import {
   deleteCategory,
   deleteChannel,
   getServerDetail,
+  getServerUnread,
   leaveServer,
   listMembers,
+  markChannelRead,
   patchChannel,
   type ServerDetail,
 } from '../servers/api.js'
@@ -83,25 +87,33 @@ function groupChannels(channels: Channel[], categories: ChannelCategory[]): Cate
 }
 
 function ChannelRow({
-  channel, active, live, onClick,
+  channel, active, live, unread, onClick,
 }: {
   channel: Channel
   active: boolean
   live: boolean
+  unread?: boolean
   onClick: () => void
 }) {
+  const showUnread = unread && !active
   return (
     <button
       type="button"
       onClick={onClick}
       className={[
-        'w-[calc(100%-8px)] mx-1 flex items-center gap-1.5 text-[12px] rounded text-left transition-colors',
+        'relative w-[calc(100%-8px)] mx-1 flex items-center gap-1.5 text-[12px] rounded text-left transition-colors',
         'px-2 py-[3px] mb-px',
         active
           ? 'bg-kd-panel-hi text-kd-text font-semibold border-l-2 border-kd-accent pl-[6px]'
-          : 'text-kd-text-soft hover:text-kd-text font-medium border-l-2 border-transparent',
+          : showUnread
+            ? 'text-kd-text font-semibold border-l-2 border-transparent'
+            : 'text-kd-text-soft hover:text-kd-text font-medium border-l-2 border-transparent',
       ].join(' ')}
     >
+      {/* Белая «пилюля» непрочитанного у левого края (как в Discord). */}
+      {showUnread && (
+        <span className="absolute -left-1 top-1/2 -translate-y-1/2 w-1 h-2 rounded-r bg-kd-text" />
+      )}
       {channel.kind === 'voice' ? <Icon.Speaker size={11} /> : <Icon.Hash size={11} />}
       <span className="flex-1 truncate">{channel.name}</span>
       {channel.nsfw && <Badge variant="nsfw">18+</Badge>}
@@ -274,8 +286,9 @@ export function ChannelList({ serverId, activeChannelId }: ChannelListProps) {
   const headerRef = useRef<HTMLDivElement>(null)
 
   // Контекстные меню: ПКМ по строке канала / по заголовку категории.
+  // Канал-меню рендерится генерик-компонентом ContextMenu (он сам ловит
+  // click-outside/esc), поэтому своего ref/эффекта ему не нужно.
   const [channelMenu, setChannelMenu] = useState<{ x: number; y: number; channel: Channel } | null>(null)
-  const channelMenuRef = useRef<HTMLDivElement>(null)
   const [settingsChannel, setSettingsChannel] = useState<Channel | null>(null)
   const [catMenu, setCatMenu] = useState<{ x: number; y: number; name: string } | null>(null)
   const catMenuRef = useRef<HTMLDivElement>(null)
@@ -323,24 +336,6 @@ export function ChannelList({ serverId, activeChannelId }: ChannelListProps) {
   }, [menuOpen])
 
   useEffect(() => {
-    if (!channelMenu) return
-    function onDown(e: MouseEvent) {
-      if (channelMenuRef.current && !channelMenuRef.current.contains(e.target as Node)) {
-        setChannelMenu(null)
-      }
-    }
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') setChannelMenu(null)
-    }
-    document.addEventListener('mousedown', onDown)
-    document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('mousedown', onDown)
-      document.removeEventListener('keydown', onKey)
-    }
-  }, [channelMenu])
-
-  useEffect(() => {
     if (!catMenu) return
     function onDown(e: MouseEvent) {
       if (catMenuRef.current && !catMenuRef.current.contains(e.target as Node)) {
@@ -371,6 +366,31 @@ export function ChannelList({ serverId, activeChannelId }: ChannelListProps) {
     enabled: serverId !== null,
     staleTime: 60_000,
   })
+
+  // Непрочитанные каналы сервера (точки в списке). Активный канал исключаем —
+  // его читаем прямо сейчас (авто-read в ChatScreen).
+  const { data: unreadList = [] } = useQuery({
+    queryKey: ['unread', serverId],
+    queryFn: () => getServerUnread(serverId!),
+    enabled: serverId !== null,
+    staleTime: 15_000,
+    refetchOnWindowFocus: true,
+  })
+  const unreadSet = useMemo(() => {
+    const s = new Set(unreadList)
+    if (activeChannelId) s.delete(activeChannelId)
+    return s
+  }, [unreadList, activeChannelId])
+
+  // Новое сообщение в этом сервере — освежим непрочитанное.
+  useEffect(() => {
+    if (!serverId) return undefined
+    return wsClient.on((event) => {
+      if (event.t === 'msg.new') {
+        void queryClient.invalidateQueries({ queryKey: ['unread', serverId] })
+      }
+    })
+  }, [serverId, queryClient])
 
   const memberMap = useMemo(() => {
     const m = new Map<string, MemberPublic>()
@@ -439,6 +459,37 @@ export function ChannelList({ serverId, activeChannelId }: ChannelListProps) {
       danger: true,
     })
     if (ok) deleteChannelMutation.mutate(ch.id)
+  }
+
+  // Пункты ПКМ по каналу: «копировать ссылку» — всем; настройки/удаление —
+  // только управляющим (canManage).
+  function channelMenuItems(ch: Channel): MenuEntry[] {
+    const items: MenuEntry[] = [
+      {
+        label: 'копировать ссылку',
+        onClick: () => void navigator.clipboard?.writeText(
+          `${window.location.origin}/servers/${ch.serverId}/channels/${ch.id}`,
+        ),
+      },
+    ]
+    if (ch.kind === 'text' && unreadSet.has(ch.id)) {
+      items.push({
+        label: 'пометить прочитанным',
+        onClick: () => {
+          void markChannelRead(ch.id).then(() =>
+            queryClient.invalidateQueries({ queryKey: ['unread', serverId] }),
+          )
+        },
+      })
+    }
+    if (canManage) {
+      items.push(
+        { label: 'настройки канала', onClick: () => setSettingsChannel(ch) },
+        { kind: 'sep' },
+        { label: 'удалить канал', danger: true, onClick: () => void confirmDeleteChannel(ch) },
+      )
+    }
+    return items
   }
 
   const deleteCategoryMutation = useMutation({
@@ -818,8 +869,7 @@ export function ChannelList({ serverId, activeChannelId }: ChannelListProps) {
                       performDrop()
                     }}
                     onContextMenu={(e) => {
-                      if (!canManage) return
-                      // ПКМ по участнику обрабатывается на самой строке.
+                      // ПКМ по участнику голосового обрабатывается на самой строке.
                       if (e.defaultPrevented) return
                       e.preventDefault()
                       setChannelMenu({ x: e.clientX, y: e.clientY, channel: c })
@@ -836,6 +886,7 @@ export function ChannelList({ serverId, activeChannelId }: ChannelListProps) {
                       channel={c}
                       active={isActive}
                       live={c.kind === 'voice' && presence.length > 0}
+                      unread={unreadSet.has(c.id)}
                       onClick={() => {
                         navigate(`/servers/${c.serverId}/channels/${c.id}`)
                       }}
@@ -865,32 +916,12 @@ export function ChannelList({ serverId, activeChannelId }: ChannelListProps) {
       <UserBar />
 
       {channelMenu && (
-        <div
-          ref={channelMenuRef}
-          className="fixed z-50 min-w-[160px] bg-kd-panel border border-kd-border rounded-kd shadow-kd-modal py-1 select-none"
-          style={{
-            left: clampFixed(channelMenu.x, 168, window.innerWidth),
-            top: clampFixed(channelMenu.y, 48, window.innerHeight),
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => { setSettingsChannel(channelMenu.channel); setChannelMenu(null) }}
-            className="w-full text-left px-3 py-1.5 text-[12px] flex items-center gap-2 text-kd-text-soft hover:bg-kd-panel-hi hover:text-kd-text transition-colors"
-          >
-            <Icon.Settings size={12} />
-            настройки канала
-          </button>
-          <div className="h-px bg-kd-border my-1" />
-          <button
-            type="button"
-            onClick={() => void confirmDeleteChannel(channelMenu.channel)}
-            className="w-full text-left px-3 py-1.5 text-[12px] flex items-center gap-2 text-kd-danger hover:bg-kd-danger/10 transition-colors"
-          >
-            <Icon.Trash size={12} />
-            удалить канал
-          </button>
-        </div>
+        <ContextMenu
+          x={channelMenu.x}
+          y={channelMenu.y}
+          items={channelMenuItems(channelMenu.channel)}
+          onClose={() => setChannelMenu(null)}
+        />
       )}
 
       {settingsChannel && (

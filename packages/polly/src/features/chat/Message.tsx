@@ -19,6 +19,7 @@ import { StickerEmbed } from './StickerEmbed.js'
 import { useChatDisplaySettings } from './displaySettings.js'
 import { ContextMenu } from './ContextMenu.js'
 import { ForwardedCard } from './ForwardedCard.js'
+import { InviteEmbeds } from './InviteCard.js'
 import { LinkPreviews } from './LinkPreviewCard.js'
 import { MessagePreview } from './MessagePreview.js'
 import { useForwardUi } from './forwardStore.js'
@@ -341,6 +342,7 @@ export function Message({
   const linkPreviewsEl = showLinkPreviews
     ? <LinkPreviews previews={(message as IMessage).linkPreviews} />
     : null
+  const inviteEmbedsEl = <InviteEmbeds content={message.content} />
   const pinnedTag = (message as IMessage).pinned ? (
     <div className="flex items-center gap-1 text-[10px] text-kd-warm font-mono mb-0.5 select-none">📌 закреплено</div>
   ) : null
@@ -504,6 +506,7 @@ export function Message({
             )}
             {forwardedEl}
             {linkPreviewsEl}
+          {inviteEmbedsEl}
             {pendingStatus === 'error' && onRetry && (
               <button type="button" onClick={onRetry} className="text-[9px] text-kd-danger font-mono hover:underline ml-1">
                 ошибка · повторить?
@@ -547,6 +550,7 @@ export function Message({
           )}
           {forwardedEl}
           {linkPreviewsEl}
+          {inviteEmbedsEl}
           {pendingStatus === 'error' && onRetry && (
             <button type="button" onClick={onRetry} className="text-[9px] text-kd-danger font-mono hover:underline">
               ошибка · повторить?
@@ -612,6 +616,7 @@ export function Message({
           )}
           {forwardedEl}
           {linkPreviewsEl}
+          {inviteEmbedsEl}
           {msgAttachments.length > 0 && <AttachmentList attachments={msgAttachments} lightboxContext={lightboxContext} blur={nsfw} />}
           {msgGif && <GifEmbed gif={msgGif} />}
           {msgSticker && <StickerEmbed sticker={msgSticker} />}

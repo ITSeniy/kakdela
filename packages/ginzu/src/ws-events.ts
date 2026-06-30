@@ -19,7 +19,7 @@ export type ServerEvent =
   | { t: 'voice.leave'; channelId: string; userId: string }
   | { t: 'voice.state'; channelId: string; userId: string; muted: boolean; screen: boolean }
   | { t: 'member.join'; member: ServerMember }
-  | { t: 'member.leave'; userId: string }
+  | { t: 'member.leave'; serverId: string; userId: string }
   | { t: 'reaction.add'; channelId: string; messageId: string; userId: string; emoji: string }
   | { t: 'reaction.remove'; channelId: string; messageId: string; userId: string; emoji: string }
   | { t: 'dm.new'; channelId: string; withUserId: string }
@@ -74,7 +74,7 @@ export const ServerEventSchema = z.discriminatedUnion('t', [
   z.object({ t: z.literal('voice.leave'), channelId: uuid, userId: uuid }),
   z.object({ t: z.literal('voice.state'), channelId: uuid, userId: uuid, muted: z.boolean(), screen: z.boolean() }),
   z.object({ t: z.literal('member.join'), member: ServerMemberSchema }),
-  z.object({ t: z.literal('member.leave'), userId: uuid }),
+  z.object({ t: z.literal('member.leave'), serverId: uuid, userId: uuid }),
   z.object({ t: z.literal('reaction.add'), channelId: uuid, messageId: uuid, userId: uuid, emoji: z.string() }),
   z.object({ t: z.literal('reaction.remove'), channelId: uuid, messageId: uuid, userId: uuid, emoji: z.string() }),
   z.object({ t: z.literal('dm.new'), channelId: uuid, withUserId: uuid }),

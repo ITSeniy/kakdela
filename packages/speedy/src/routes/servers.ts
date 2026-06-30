@@ -1,4 +1,4 @@
-import { and, eq, sql } from 'drizzle-orm'
+import { and, eq, isNull, sql } from 'drizzle-orm'
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod'
 import { z } from 'zod'
 
@@ -13,13 +13,22 @@ import {
   PatchServerRequestSchema,
   ServerDetailSchema,
   ServerSchema,
+  ServerUnreadResponseSchema,
 } from '@kakdela/ginzu/api-types'
 
-import { channelCategories, channels, serverMembers, serverRoles, servers, users } from '../db/schema.js'
+import { channelCategories, channelReads, channels, memberRoles, serverMembers, serverRoles, servers, users } from '../db/schema.js'
 import { audit } from '../lib/audit.js'
 import { CHANNEL_DTO_COLS } from '../lib/channel-dto.js'
 import { db } from '../lib/db.js'
-import { assertMember, assertPermission, assertRole, notFound } from '../lib/permissions.js'
+import {
+  assertMember,
+  assertPermission,
+  assertRole,
+  canActOnMember,
+  forbidden,
+  getMemberPermissions,
+  notFound,
+} from '../lib/permissions.js'
 import { loadMemberRoleInfo } from '../lib/roles.js'
 import { presence } from '../presence/store.js'
 import { broadcastToServer } from '../ws/broadcast.js'
@@ -538,6 +547,208 @@ export const serversRoutes: FastifyPluginAsyncZod = async (app) => {
       await db
         .delete(serverMembers)
         .where(and(eq(serverMembers.serverId, serverId), eq(serverMembers.userId, userId)))
+
+      return reply.code(204).send(null)
+    },
+  )
+
+  // ───── DELETE /api/servers/:serverId/members/:userId ─────
+  //
+  // Выгнать участника. Право KICK_MEMBERS; цель должна быть ниже актора по
+  // иерархии (canActOnMember закрывает owner'а и равных). Сносим membership и
+  // его кастомные роли; broadcast member.leave — список участников обновится у
+  // всех, а у самого изгнанного клиент уведёт его с сервера.
+  app.delete(
+    '/servers/:serverId/members/:userId',
+    {
+      preHandler: app.authenticate,
+      schema: {
+        params: z.object({ serverId: z.string().uuid(), userId: z.string().uuid() }),
+        response: {
+          204: z.null(),
+          401: ErrorBodySchema,
+          403: ErrorBodySchema,
+          404: ErrorBodySchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const { serverId, userId: targetId } = req.params
+      const actorId = req.authUser!.id
+
+      const ctx = await assertPermission(actorId, serverId, 'KICK_MEMBERS')
+      const target = await getMemberPermissions(targetId, serverId) // 403, если не член
+      if (!canActOnMember(ctx, target)) {
+        throw forbidden('нельзя выгнать этого участника')
+      }
+
+      await db.transaction(async (tx) => {
+        await tx
+          .delete(memberRoles)
+          .where(and(eq(memberRoles.serverId, serverId), eq(memberRoles.userId, targetId)))
+        await tx
+          .delete(serverMembers)
+          .where(and(eq(serverMembers.serverId, serverId), eq(serverMembers.userId, targetId)))
+      })
+
+      audit.log({
+        serverId,
+        actorId,
+        action:     'member.kick',
+        targetType: 'user',
+        targetId,
+        metadata:   {},
+      })
+
+      void broadcastToServer(serverId, { t: 'member.leave', serverId, userId: targetId })
+
+      return reply.code(204).send(null)
+    },
+  )
+
+  // ───── POST /api/servers/:serverId/transfer ─────
+  //
+  // Передача владения сервером. Только текущий owner. Целевой пользователь
+  // должен быть участником и не самим owner'ом. Транзакционно: новый owner
+  // получает role='owner', прежний становится 'admin' (не теряет доступ).
+  app.post(
+    '/servers/:serverId/transfer',
+    {
+      preHandler: app.authenticate,
+      schema: {
+        params: z.object({ serverId: z.string().uuid() }),
+        body: z.object({ userId: z.string().uuid() }),
+        response: {
+          204: z.null(),
+          401: ErrorBodySchema,
+          403: ErrorBodySchema,
+          404: ErrorBodySchema,
+          422: ErrorBodySchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const { serverId } = req.params
+      const actorId = req.authUser!.id
+      const targetId = req.body.userId
+
+      await assertRole(actorId, serverId, ['owner'])
+
+      if (targetId === actorId) {
+        return reply.code(422).send({
+          error: { code: 'already-owner', message: 'вы уже владелец сервера' },
+        })
+      }
+      // Цель должна быть участником (бросит forbidden/404, если нет).
+      await assertMember(targetId, serverId)
+
+      await db.transaction(async (tx) => {
+        await tx
+          .update(serverMembers)
+          .set({ role: 'owner' })
+          .where(and(eq(serverMembers.serverId, serverId), eq(serverMembers.userId, targetId)))
+        await tx
+          .update(serverMembers)
+          .set({ role: 'admin' })
+          .where(and(eq(serverMembers.serverId, serverId), eq(serverMembers.userId, actorId)))
+      })
+
+      // Используем существующие enum-значения (member.promote/user), чтобы не
+      // вводить миграцию ради нового action; пометка transfer — в metadata.
+      audit.log({
+        serverId,
+        actorId,
+        action:     'member.promote',
+        targetType: 'user',
+        targetId:   targetId,
+        metadata:   { transfer: 'owner' },
+      })
+
+      // Обновляем роли у всех: оба участника сменили встроенную роль.
+      void broadcastToServer(serverId, { t: 'member.roles', serverId, userId: targetId })
+      void broadcastToServer(serverId, { t: 'member.roles', serverId, userId: actorId })
+
+      return reply.code(204).send(null)
+    },
+  )
+
+  // ───── GET /api/servers/:serverId/unread ─────
+  // Каналы сервера с непрочитанными: есть чужое сообщение новее последнего
+  // прочтения (или новее вступления, если канал ни разу не открывали).
+  app.get(
+    '/servers/:serverId/unread',
+    {
+      preHandler: app.authenticate,
+      schema: {
+        params: z.object({ serverId: z.string().uuid() }),
+        response: { 200: ServerUnreadResponseSchema, 401: ErrorBodySchema, 403: ErrorBodySchema },
+      },
+    },
+    async (req, reply) => {
+      const userId = req.authUser!.id
+      const { serverId } = req.params
+      await assertMember(userId, serverId)
+
+      const rows = await db
+        .select({ id: channels.id })
+        .from(channels)
+        .innerJoin(
+          serverMembers,
+          and(eq(serverMembers.serverId, channels.serverId), eq(serverMembers.userId, userId)),
+        )
+        .leftJoin(
+          channelReads,
+          and(eq(channelReads.channelId, channels.id), eq(channelReads.userId, userId)),
+        )
+        .where(and(
+          eq(channels.serverId, serverId),
+          eq(channels.kind, 'text'),
+          isNull(channels.parentChannelId),
+          sql`EXISTS (
+            SELECT 1 FROM messages m
+            WHERE m.channel_id = ${channels.id} AND m.deleted_at IS NULL
+              AND m.author_id <> ${userId}
+              AND m.created_at > COALESCE(${channelReads.lastReadAt}, ${serverMembers.joinedAt})
+          )`,
+        ))
+
+      return reply.code(200).send({ channelIds: rows.map((r) => r.id) })
+    },
+  )
+
+  // ───── POST /api/servers/:serverId/read ─────
+  // Пометить весь сервер прочитанным (все текстовые каналы верхнего уровня).
+  app.post(
+    '/servers/:serverId/read',
+    {
+      preHandler: app.authenticate,
+      schema: {
+        params: z.object({ serverId: z.string().uuid() }),
+        response: { 204: z.null(), 401: ErrorBodySchema, 403: ErrorBodySchema },
+      },
+    },
+    async (req, reply) => {
+      const userId = req.authUser!.id
+      const { serverId } = req.params
+      await assertMember(userId, serverId)
+
+      const chans = await db
+        .select({ id: channels.id })
+        .from(channels)
+        .where(and(
+          eq(channels.serverId, serverId),
+          eq(channels.kind, 'text'),
+          isNull(channels.parentChannelId),
+        ))
+      if (chans.length > 0) {
+        await db
+          .insert(channelReads)
+          .values(chans.map((c) => ({ userId, channelId: c.id })))
+          .onConflictDoUpdate({
+            target: [channelReads.userId, channelReads.channelId],
+            set: { lastReadAt: sql`NOW()` },
+          })
+      }
 
       return reply.code(204).send(null)
     },

@@ -4,9 +4,14 @@ import { useLocation } from 'wouter'
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
+import { confirmDialog } from '../../components/ConfirmDialog.js'
+import { ContextMenu, useContextMenu, type MenuEntry } from '../../components/ContextMenu.js'
 import { Icon } from '../../components/Icon.js'
 import { ServerIcon } from '../../components/ServerIcon.js'
+import { toast } from '../../components/toast/index.js'
+import { ApiError } from '../../lib/api.js'
 import { wsClient } from '../../lib/ws.js'
+import { leaveServer, markServerRead } from './api.js'
 import { listDms } from '../dm/api.js'
 import { listInboxMentions } from '../inbox/api.js'
 import { useViewScope } from '../navigation/viewScope.js'
@@ -54,6 +59,46 @@ export function ServerRail({
   // обрезает всё, что выходит за ширину рельсы, — fixed клипу не подвержен.
   const [addMenuPos, setAddMenuPos] = useState<{ x: number; y: number } | null>(null)
   const addRef = useRef<HTMLDivElement>(null)
+
+  // ПКМ по иконке сервера: настройки / пригласить / покинуть.
+  const srvMenu = useContextMenu()
+  const [menuServer, setMenuServer] = useState<{ id: string; name: string } | null>(null)
+
+  function serverMenuItems(s: { id: string; name: string }): MenuEntry[] {
+    return [
+      {
+        label: 'пометить прочитанным',
+        onClick: () => {
+          void markServerRead(s.id).then(() => queryClient.invalidateQueries({ queryKey: ['unread', s.id] }))
+        },
+      },
+      { label: 'настройки сервера', onClick: () => openSettings('server-overview', s.id) },
+      { label: 'пригласить на сервер', onClick: () => openSettings('server-invites', s.id) },
+      { kind: 'sep' },
+      {
+        label: 'покинуть сервер',
+        danger: true,
+        onClick: () => {
+          void confirmDialog({ title: `покинуть «${s.name}»?`, confirmLabel: 'покинуть', danger: true })
+            .then((ok) => {
+              if (!ok) return
+              leaveServer(s.id)
+                .then(() => {
+                  void queryClient.invalidateQueries({ queryKey: ['servers'] })
+                  navigate('/')
+                })
+                .catch((err) => {
+                  toast.error(
+                    err instanceof ApiError && err.code === 'owner-cannot-leave'
+                      ? 'хозяин не может покинуть сервер — сначала передайте владение или удалите его'
+                      : 'не удалось покинуть сервер',
+                  )
+                })
+            })
+        },
+      },
+    ]
+  }
 
   useEffect(() => {
     if (!addMenuPos) return
@@ -191,7 +236,10 @@ export function ServerRail({
             {dragServerId && dropIndex === i + 1 && (
               <span className="absolute -bottom-[6px] left-1 right-1 h-0.5 rounded bg-kd-accent pointer-events-none" />
             )}
-            <span className={dragServerId === s.id ? 'opacity-40 block' : 'block'}>
+            <span
+              className={dragServerId === s.id ? 'opacity-40 block' : 'block'}
+              onContextMenu={(e) => { setMenuServer({ id: s.id, name: s.name }); srvMenu.open(e) }}
+            >
               <ServerIcon
                 name={s.name}
                 iconUrl={s.iconUrl ?? null}
@@ -291,6 +339,10 @@ export function ServerRail({
           <Icon.Settings size={15} />
         </button>
       </div>
+
+      {srvMenu.pos && menuServer && (
+        <ContextMenu x={srvMenu.pos.x} y={srvMenu.pos.y} items={serverMenuItems(menuServer)} onClose={srvMenu.close} />
+      )}
     </aside>
   )
 }

@@ -23,6 +23,7 @@ import { useNotifyTriggers } from '../features/notify/triggers.js'
 import { useUnreadIndicators } from '../features/notify/unread.js'
 import { useAutoIdle } from '../features/presence/useAutoIdle.js'
 import { useDesktopIntegration } from '../features/desktop/useDesktopIntegration.js'
+import { useKickWatcher } from '../features/servers/useKickWatcher.js'
 import { VoiceScreen } from '../features/voice/VoiceScreen.js'
 import { useAudioDeviceSync } from '../features/voice/deviceSettings.js'
 import { useNoiseSuppressionSync } from '../features/voice/noiseSettings.js'
@@ -40,6 +41,7 @@ export function Shell() {
   useUnreadIndicators()
   useAutoIdle()
   useDesktopIntegration()
+  useKickWatcher()
   useVoicePingSampler()
   useAudioDeviceSync()
   const [location, navigate] = useLocation()

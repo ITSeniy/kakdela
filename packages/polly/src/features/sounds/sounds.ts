@@ -161,12 +161,17 @@ function loadBuffer(ac: AudioContext, url: string): Promise<AudioBuffer | null> 
   return p
 }
 
+// Общий множитель громкости поверх ползунка (0..1): делает звуки заметно
+// слышнее на той же позиции слайдера. WebAudio gain может превышать 1.
+const MASTER_GAIN = 2
+
 /** Проиграть событие текущим паком. force — для превью в настройках,
     когда звуки выключены тумблером. */
 export function playSound(event: SoundEvent, opts?: { force?: boolean; pack?: SoundPackId }): void {
-  const { enabled, volume, pack } = useSoundSettings.getState()
+  const { enabled, volume: rawVolume, pack } = useSoundSettings.getState()
   if (!enabled && !opts?.force) return
-  if (volume <= 0) return
+  if (rawVolume <= 0) return
+  const volume = rawVolume * MASTER_GAIN
   const ac = audioCtx()
   if (!ac) return
   if (ac.state === 'suspended') void ac.resume().catch(() => { /* ignore */ })

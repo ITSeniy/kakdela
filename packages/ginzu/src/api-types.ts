@@ -116,12 +116,12 @@ export const LinkPreviewSchema = z.object({
 })
 export type LinkPreview = z.infer<typeof LinkPreviewSchema>
 
-// Системное событие в ленте (не «пузырь»): сейчас — итог DM-звонка (T-087).
-// Расширяемо по полю kind. durationSec — длительность состоявшегося звонка.
-export const SystemEventSchema = z.object({
-  kind: z.literal('call'),
-  durationSec: z.number().int().nonnegative(),
-})
+// Системное событие в ленте (не «пузырь»): итог DM-звонка (T-087) или
+// присоединение участника к серверу. Дискриминируется по полю kind.
+export const SystemEventSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('call'), durationSec: z.number().int().nonnegative() }),
+  z.object({ kind: z.literal('join') }),
+])
 export type SystemEvent = z.infer<typeof SystemEventSchema>
 
 // GIF-вложение сообщения. Хранится структурно (jsonb), а не как markdown
@@ -285,8 +285,10 @@ export const AuthResponseSchema = z.object({
 export type AuthResponse = z.infer<typeof AuthResponseSchema>
 
 export const InvitePublicSchema = z.object({
+  serverId: z.string().uuid(),
   serverName: z.string(),
   serverIcon: z.string().url().nullable(),
+  memberCount: z.number().int().nonnegative(),
   expiresAt: z.string().nullable(),
 })
 export type InvitePublic = z.infer<typeof InvitePublicSchema>
@@ -490,6 +492,13 @@ export const InvitesListResponseSchema = z.object({
   invites: z.array(InviteSummarySchema),
 })
 export type InvitesListResponse = z.infer<typeof InvitesListResponseSchema>
+
+// Непрочитанные серверные каналы (per-channel read-state). channelIds — каналы,
+// где есть чужие сообщения новее последнего прочтения.
+export const ServerUnreadResponseSchema = z.object({
+  channelIds: z.array(z.string().uuid()),
+})
+export type ServerUnreadResponse = z.infer<typeof ServerUnreadResponseSchema>
 
 export const CreateChannelRequestSchema = z.object({
   name: z.string().min(1).max(64),

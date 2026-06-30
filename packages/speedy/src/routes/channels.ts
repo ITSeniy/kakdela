@@ -8,7 +8,7 @@ import {
   PatchChannelRequestSchema,
 } from '@kakdela/ginzu/api-types'
 
-import { channelCategories, channels, messages } from '../db/schema.js'
+import { channelCategories, channelReads, channels, messages } from '../db/schema.js'
 import { audit } from '../lib/audit.js'
 import { CHANNEL_DTO_COLS } from '../lib/channel-dto.js'
 import { db } from '../lib/db.js'
@@ -74,6 +74,40 @@ export const channelsRoutes: FastifyPluginAsyncZod = async (app) => {
         .from(messages)
         .where(and(eq(messages.channelId, channelId), isNull(messages.deletedAt)))
       return reply.code(200).send({ messageCount: rows[0]?.count ?? 0 })
+    },
+  )
+
+  // ───── POST /api/channels/:channelId/read ─────
+  // Пометить канал прочитанным (lastReadAt = now). Клиент шлёт при открытии
+  // канала и из ПКМ «пометить прочитанным».
+  app.post(
+    '/channels/:channelId/read',
+    {
+      preHandler: app.authenticate,
+      schema: {
+        params: z.object({ channelId: z.string().uuid() }),
+        response: {
+          204: z.null(),
+          401: ErrorBodySchema,
+          403: ErrorBodySchema,
+          404: ErrorBodySchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const userId = req.authUser!.id
+      const { channelId } = req.params
+      await assertCanAccessChannel(userId, channelId)
+
+      await db
+        .insert(channelReads)
+        .values({ userId, channelId })
+        .onConflictDoUpdate({
+          target: [channelReads.userId, channelReads.channelId],
+          set: { lastReadAt: sql`NOW()` },
+        })
+
+      return reply.code(204).send(null)
     },
   )
 

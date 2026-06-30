@@ -13,6 +13,7 @@ import {
   leaveServer,
   listMembers,
   patchServer,
+  transferOwnership,
 } from '../servers/api.js'
 import { useSettingsUi } from './store.js'
 
@@ -94,6 +95,29 @@ export function GeneralSettings({ serverId }: GeneralSettingsProps) {
     },
     onError: (err) => setError(err instanceof ApiError ? err.message : (err as Error).message),
   })
+
+  const [transferTo, setTransferTo] = useState('')
+  const transferMutation = useMutation({
+    mutationFn: (targetId: string) => transferOwnership(serverId, targetId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['members', serverId] })
+      setTransferTo('')
+      setError(null)
+    },
+    onError: (err) => setError(err instanceof ApiError ? err.message : (err as Error).message),
+  })
+
+  async function confirmTransfer() {
+    if (!detail || !transferTo) return
+    const target = members.find((m) => m.id === transferTo)
+    const ok = await confirmDialog({
+      title: `передать «${detail.server.name}» участнику ${target?.displayName ?? ''}?`,
+      body: 'этот участник станет владельцем сервера, а вы — администратором. отменить сможет только новый владелец.',
+      confirmLabel: 'передать',
+      danger: true,
+    })
+    if (ok) transferMutation.mutate(transferTo)
+  }
 
   async function pickIcon(file: File) {
     setError(null)
@@ -194,6 +218,37 @@ export function GeneralSettings({ serverId }: GeneralSettingsProps) {
       </div>
 
       <div className="h-px bg-kd-border" />
+
+      {isOwner && members.length > 1 && (
+        <Field
+          label="передать сервер"
+          hint="новый владелец получит полный контроль; вы станете администратором"
+        >
+          <div className="flex gap-2">
+            <select
+              value={transferTo}
+              onChange={(e) => setTransferTo(e.target.value)}
+              aria-label="новый владелец"
+              className="flex-1 min-w-0 px-3 py-2 rounded-kd bg-kd-bg border border-kd-border text-[12px] text-kd-text outline-none focus:border-kd-accent"
+            >
+              <option value="">— выбери участника —</option>
+              {members
+                .filter((m) => m.role !== 'owner')
+                .map((m) => (
+                  <option key={m.id} value={m.id}>{m.displayName}</option>
+                ))}
+            </select>
+            <button
+              type="button"
+              disabled={!transferTo || transferMutation.isPending}
+              onClick={() => void confirmTransfer()}
+              className="px-3.5 py-1.5 rounded bg-kd-panel border border-kd-warm text-kd-warm text-[11px] font-bold font-mono hover:bg-kd-warm hover:text-white disabled:opacity-50 shrink-0 transition-colors"
+            >
+              {transferMutation.isPending ? '…' : 'передать'}
+            </button>
+          </div>
+        </Field>
+      )}
 
       <Field
         label="опасная зона"

@@ -16,8 +16,10 @@ import type {
 import { Avatar } from '../../components/Avatar.js'
 import { Icon } from '../../components/Icon.js'
 import { toast } from '../../components/toast/index.js'
+import { ApiError } from '../../lib/api.js'
 import { wsClient } from '../../lib/ws.js'
 import { useAuthStore } from '../auth/store.js'
+import { createInvite, listServers } from '../servers/api.js'
 import { useProfileUi } from '../profile/store.js'
 import { addReaction, deleteMessage, editMessage, removeReaction, sendMessage } from '../chat/api.js'
 import { Composer } from '../chat/Composer.js'
@@ -82,8 +84,71 @@ function HeaderAction({
   )
 }
 
+// «Пригласить на сервер» в ЛС: выбираешь свой сервер → создаётся инвайт (7д) и
+// ссылка уходит сообщением, у собеседника рендерится карточкой (InviteCard).
+function InviteToDmButton({ onSendInvite }: { onSendInvite: (url: string) => void }) {
+  const [open, setOpen] = useState(false)
+  const [busyId, setBusyId] = useState<string | null>(null)
+  const ref = useRef<HTMLDivElement>(null)
+  const { data: servers = [] } = useQuery({ queryKey: ['servers'], queryFn: listServers, staleTime: 30_000 })
+
+  useEffect(() => {
+    if (!open) return undefined
+    function onDown(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [open])
+
+  async function pick(serverId: string) {
+    setBusyId(serverId)
+    try {
+      const inv = await createInvite(serverId, { expiresInDays: 7 })
+      onSendInvite(inv.url)
+      setOpen(false)
+    } catch (err) {
+      toast.error(
+        err instanceof ApiError && err.code === 'forbidden'
+          ? 'нет прав приглашать на этот сервер'
+          : 'не удалось создать приглашение',
+      )
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  return (
+    <div className="relative" ref={ref}>
+      <HeaderAction icon={<Icon.Plus size={12} />} label="пригласить" onClick={() => setOpen((o) => !o)} />
+      {open && (
+        <div className="absolute right-0 top-full mt-1 z-20 min-w-[200px] max-h-[260px] overflow-y-auto bg-kd-panel border border-kd-border rounded-kd shadow-kd-modal py-1">
+          <div className="px-3 py-1 text-[9px] font-mono text-kd-text-mute uppercase tracking-[0.05em]">— на какой сервер</div>
+          {servers.length === 0 && (
+            <div className="px-3 py-2 text-[11px] font-mono text-kd-text-mute">серверов нет</div>
+          )}
+          {servers.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              disabled={busyId !== null}
+              onClick={() => void pick(s.id)}
+              className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[12px] text-kd-text hover:bg-kd-panel-alt transition-colors disabled:opacity-50"
+            >
+              <span className="w-5 h-5 rounded bg-kd-accent text-white flex items-center justify-center text-[10px] font-bold shrink-0 overflow-hidden">
+                {s.iconUrl ? <img src={s.iconUrl} alt="" className="w-full h-full object-cover" /> : s.name.charAt(0).toUpperCase()}
+              </span>
+              <span className="truncate">{busyId === s.id ? 'создаём…' : s.name}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function Header({
-  summary, onOpenProfile, onBack, onCall, onScreen, peerTyping, callDisabled,
+  summary, onOpenProfile, onBack, onCall, onScreen, peerTyping, callDisabled, inviteAction,
 }: {
   summary: DmSummary | undefined
   onOpenProfile: (id: string) => void
@@ -92,6 +157,7 @@ function Header({
   onScreen: () => void
   peerTyping: boolean
   callDisabled: boolean
+  inviteAction?: React.ReactNode
 }) {
   const [, navigate] = useLocation()
   // `onBack` передаёт только мобильный shell — по нему отличаем мобильную шапку
@@ -200,6 +266,7 @@ function Header({
             disabled={callDisabled}
             title={callTitle}
           />
+          {inviteAction}
           <button
             type="button"
             onClick={() => onOpenProfile(summary.otherUser.id)}
@@ -492,6 +559,7 @@ export function DmScreen({ channelId, onBack }: DmScreenProps) {
         onScreen={handleScreen}
         peerTyping={peerTyping}
         callDisabled={callDisabled}
+        inviteAction={<InviteToDmButton onSendInvite={(url) => void handleSend(url)} />}
       />
       {callActiveHere && callMinimized && (
         <button

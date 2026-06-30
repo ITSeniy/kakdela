@@ -110,6 +110,10 @@ export const dmChannels = pgTable(
     userBId:    uuid('user_b_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
     lastReadA:  uuid('last_read_a'),
     lastReadB:  uuid('last_read_b'),
+    // «Закрытая» переписка скрыта из списка у этого участника до следующего
+    // сообщения (как в Discord). Per-user, чтобы не влиять на собеседника.
+    hiddenA:    boolean('hidden_a').notNull().default(false),
+    hiddenB:    boolean('hidden_b').notNull().default(false),
     createdAt:  timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
@@ -131,6 +135,22 @@ export const serverMembers = pgTable(
     pk:          primaryKey({ columns: [t.serverId, t.userId] }),
     serverIdIdx: index('server_members_server_id_idx').on(t.serverId),
     userIdIdx:   index('server_members_user_id_idx').on(t.userId),
+  }),
+)
+
+// Прочитанность серверных каналов (per-user). lastReadAt — момент последнего
+// прочтения; непрочитанное = есть чужие сообщения новее этого (или новее
+// joinedAt, если записи нет). Личка использует свой lastReadA/B в dm_channels.
+export const channelReads = pgTable(
+  'channel_reads',
+  {
+    userId:     uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    channelId:  uuid('channel_id').notNull().references(() => channels.id, { onDelete: 'cascade' }),
+    lastReadAt: timestamp('last_read_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    pk:      primaryKey({ columns: [t.userId, t.channelId] }),
+    userIdx: index('channel_reads_user_idx').on(t.userId),
   }),
 )
 

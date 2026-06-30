@@ -1,15 +1,33 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useLocation } from 'wouter'
 
 import type { MemberPublic } from '@kakdela/ginzu/api-types'
+import { hasPermission } from '@kakdela/ginzu/permissions'
 
 import { Avatar } from '../../components/Avatar.js'
 import { Badge } from '../../components/Badge.js'
+import { confirmDialog } from '../../components/ConfirmDialog.js'
+import { ContextMenu, useContextMenu, type MenuEntry } from '../../components/ContextMenu.js'
 import { Icon } from '../../components/Icon.js'
+import { toast } from '../../components/toast/index.js'
+import { ApiError } from '../../lib/api.js'
 import { wsClient } from '../../lib/ws.js'
+import { useAuthStore } from '../auth/store.js'
 import { useProfileUi } from '../profile/store.js'
-import { getServerDetail, listMembers } from '../servers/api.js'
+import { getServerDetail, kickMember, listMembers } from '../servers/api.js'
 import { useVoiceChannelPresence } from '../voice/useVoiceChannelPresence.js'
+
+/** Позиция участника в иерархии ролей (owner=∞, admin=1e9, иначе макс. позиция
+ *  кастомных ролей) — зеркало серверного lib/permissions.ts. Экспортируем для
+ *  переиспользования (профиль). */
+export function memberTopPosition(m: MemberPublic): number {
+  if (m.role === 'owner') return Number.POSITIVE_INFINITY
+  if (m.role === 'admin') return 1_000_000_000
+  let p = -1
+  for (const r of m.roles) if (r.position > p) p = r.position
+  return p
+}
 
 interface MemberListProps {
   serverId: string | null
@@ -117,11 +135,12 @@ const ROLE_TAG: Record<'owner' | 'admin' | 'member', string | null> = {
 }
 
 function MemberRow({
-  member, voice, onClick,
+  member, voice, onClick, onContextMenu,
 }: {
   member: MemberPublic
   voice?: boolean
   onClick?: () => void
+  onContextMenu?: (e: React.MouseEvent) => void
 }) {
   const isOffline = member.status === 'offline'
   const tag = ROLE_TAG[member.role]
@@ -130,6 +149,7 @@ function MemberRow({
     <button
       type="button"
       onClick={onClick}
+      onContextMenu={onContextMenu}
       title={onClick ? 'открыть профиль' : undefined}
       className={[
         'w-full flex items-center gap-2 px-2 py-1 rounded text-left transition-colors',
@@ -161,6 +181,47 @@ function MemberRow({
 export function MemberList({ serverId, className }: MemberListProps) {
   const queryClient = useQueryClient()
   const openProfile = useProfileUi((s) => s.open)
+  const [, navigate] = useLocation()
+  const me = useAuthStore((s) => s.user)
+  const menu = useContextMenu()
+  const [menuMember, setMenuMember] = useState<MemberPublic | null>(null)
+
+  async function confirmKick(m: MemberPublic) {
+    if (!serverId) return
+    const ok = await confirmDialog({
+      title: `выгнать ${m.displayName}?`,
+      body: 'участник потеряет доступ к серверу. вернуться сможет только по новому приглашению.',
+      confirmLabel: 'выгнать',
+      danger: true,
+    })
+    if (!ok) return
+    try {
+      await kickMember(serverId, m.id)
+      void queryClient.invalidateQueries({ queryKey: ['members', serverId] })
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : 'не удалось выгнать участника')
+    }
+  }
+
+  function memberMenuItems(m: MemberPublic): MenuEntry[] {
+    const items: MenuEntry[] = [
+      { label: 'профиль', onClick: () => openProfile(m.id) },
+      { label: 'написать в личные', onClick: () => navigate(`/dm/with/${m.id}`) },
+    ]
+    if (m.username) {
+      items.push({ label: 'скопировать @ник', onClick: () => void navigator.clipboard?.writeText(`@${m.username}`) })
+    }
+    // «Выгнать» — если у меня есть KICK_MEMBERS и я старше цели по иерархии.
+    const meMember = me ? members.find((x) => x.id === me.id) : undefined
+    const canKick = !!meMember && m.id !== me?.id
+      && hasPermission(meMember.permissions, 'KICK_MEMBERS')
+      && m.role !== 'owner'
+      && memberTopPosition(meMember) > memberTopPosition(m)
+    if (canKick) {
+      items.push({ kind: 'sep' }, { label: 'выгнать с сервера', danger: true, onClick: () => void confirmKick(m) })
+    }
+    return items
+  }
   const { data: members = [] } = useQuery({
     queryKey: ['members', serverId],
     queryFn: () => listMembers(serverId!),
@@ -189,6 +250,11 @@ export function MemberList({ serverId, className }: MemberListProps) {
       if ((event.t === 'role.update' || event.t === 'member.roles') && event.serverId === serverId) {
         void queryClient.invalidateQueries({ queryKey: ['members', serverId] })
         void queryClient.invalidateQueries({ queryKey: ['roles', serverId] })
+        return
+      }
+      // Кто-то покинул/выгнан — обновим список участников.
+      if (event.t === 'member.leave' && event.serverId === serverId) {
+        void queryClient.invalidateQueries({ queryKey: ['members', serverId] })
         return
       }
       if (event.t !== 'presence') return
@@ -235,11 +301,15 @@ export function MemberList({ serverId, className }: MemberListProps) {
               member={m}
               voice={g.voice}
               onClick={() => openProfile(m.id)}
+              onContextMenu={(e) => { setMenuMember(m); menu.open(e) }}
             />
           ))}
         </div>
       ))}
       </div>
+      {menu.pos && menuMember && (
+        <ContextMenu x={menu.pos.x} y={menu.pos.y} items={memberMenuItems(menuMember)} onClose={menu.close} />
+      )}
     </aside>
   )
 }

@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto'
 
-import { and, eq, gt, isNull, lt, or, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, isNull, lt, or, sql } from 'drizzle-orm'
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod'
 import { z } from 'zod'
 
@@ -9,13 +9,64 @@ import {
   ErrorBodySchema,
   InvitePublicSchema,
   InvitesListResponseSchema,
+  type Message,
+  type SystemEvent,
 } from '@kakdela/ginzu/api-types'
 
-import { invites, serverMembers, servers } from '../db/schema.js'
+import { channels, invites, messages, serverMembers, servers } from '../db/schema.js'
 import { env } from '../env.js'
 import { audit } from '../lib/audit.js'
 import { db } from '../lib/db.js'
 import { assertPermission } from '../lib/permissions.js'
+import { broadcastToChannel } from '../ws/broadcast.js'
+
+/**
+ * Системное сообщение «участник присоединился» в канал по умолчанию сервера
+ * (а если такого нет — первый текстовый верхнего уровня). Best-effort: ошибки
+ * не валят сам accept. Не дёргает уведомления — triggers пропускает system.
+ */
+async function postJoinMessage(serverId: string, userId: string): Promise<void> {
+  const chRows = await db
+    .select({ id: channels.id })
+    .from(channels)
+    .where(and(
+      eq(channels.serverId, serverId),
+      eq(channels.kind, 'text'),
+      isNull(channels.parentChannelId),
+    ))
+    .orderBy(desc(channels.isDefault), asc(channels.position))
+    .limit(1)
+  const channelId = chRows[0]?.id
+  if (!channelId) return
+
+  const system: SystemEvent = { kind: 'join' }
+  const inserted = await db
+    .insert(messages)
+    .values({ channelId, authorId: userId, content: '', system })
+    .returning({ id: messages.id, createdAt: messages.createdAt })
+  const row = inserted[0]
+  if (!row) return
+
+  const message: Message = {
+    id: row.id,
+    channelId,
+    authorId: userId,
+    content: '',
+    replyToId: null,
+    replyTo: null,
+    createdAt: row.createdAt.toISOString(),
+    editedAt: null,
+    reactions: [],
+    attachments: [],
+    thread: null,
+    pinned: false,
+    pinnedAt: null,
+    forwarded: null,
+    linkPreviews: [],
+    system,
+  }
+  await broadcastToChannel(channelId, { t: 'msg.new', channelId, message })
+}
 
 // Ровно 32 символа — каждое 5-битное значение (0..31) обязано попадать в
 // алфавит, иначе charAt(31) вернёт пустую строку и код выйдет 7-значным.
@@ -195,6 +246,7 @@ export const invitesRoutes: FastifyPluginAsyncZod = async (app) => {
           expiresAt:  invites.expiresAt,
           maxUses:    invites.maxUses,
           useCount:   invites.useCount,
+          serverId:   servers.id,
           serverName: servers.name,
           serverIcon: servers.iconUrl,
         })
@@ -214,10 +266,17 @@ export const invitesRoutes: FastifyPluginAsyncZod = async (app) => {
         return reply.code(410).send({ error: { code: 'invite-exhausted', message: 'invite has reached its maximum uses' } })
       }
 
+      const countRows = await db
+        .select({ n: sql<number>`COUNT(*)::int` })
+        .from(serverMembers)
+        .where(eq(serverMembers.serverId, invite.serverId))
+
       return reply.code(200).send({
-        serverName: invite.serverName,
-        serverIcon: invite.serverIcon ?? null,
-        expiresAt:  invite.expiresAt?.toISOString() ?? null,
+        serverId:    invite.serverId,
+        serverName:  invite.serverName,
+        serverIcon:  invite.serverIcon ?? null,
+        memberCount: countRows[0]?.n ?? 0,
+        expiresAt:   invite.expiresAt?.toISOString() ?? null,
       })
     },
   )
@@ -269,7 +328,21 @@ export const invitesRoutes: FastifyPluginAsyncZod = async (app) => {
         return reply.code(410).send({ error: { code: 'invite-expired', message: 'invite is expired, revoked, or exhausted' } })
       }
 
-      await db.insert(serverMembers).values({ serverId: row.serverId, userId }).onConflictDoNothing()
+      const memberInsert = await db
+        .insert(serverMembers)
+        .values({ serverId: row.serverId, userId })
+        .onConflictDoNothing()
+        .returning({ userId: serverMembers.userId })
+
+      // Только при ПЕРВОМ вступлении (не при повторном accept) — системное
+      // сообщение в канал. Best-effort: падение тут не должно ломать accept.
+      if (memberInsert[0]) {
+        try {
+          await postJoinMessage(row.serverId, userId)
+        } catch (err) {
+          req.log.warn({ err, serverId: row.serverId, userId }, 'join system message failed')
+        }
+      }
 
       return reply.code(200).send({ serverId: row.serverId })
     },

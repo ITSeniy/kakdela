@@ -64,6 +64,17 @@ function UnreadDivider() {
   )
 }
 
+// Системная строка по центру (вступление участника) — приглушённая, не «пузырь».
+function SystemLine({ message, name }: { message: IMessage; name: string }) {
+  const suffix = message.system?.kind === 'join' ? 'присоединился к серверу' : message.content
+  return (
+    <div className="px-4 py-1 flex items-center justify-center gap-1.5 text-[11px] text-kd-text-mute select-none">
+      <span className="text-kd-text-soft">→</span>
+      <span><span className="font-semibold text-kd-text-soft">{name}</span> {suffix}</span>
+    </div>
+  )
+}
+
 export function MessageList({
   serverId, channelId, currentUserId, memberMap, channelMap, emojiMap, roles,
   pending, threadsAllowed = true, canPin = false, nsfw = false,
@@ -271,6 +282,7 @@ export function MessageList({
   type ItemRow =
     | { type: 'day'; label: string }
     | { type: 'unread' }
+    | { type: 'system'; msg: IMessage }
     | {
         type: 'msg'
         msg: IMessage | PendingMessage
@@ -286,6 +298,13 @@ export function MessageList({
       rows.push({ type: 'day', label: formatDay(m.createdAt) })
     }
     if (i === firstUnreadIndex) rows.push({ type: 'unread' })
+    // Системное сообщение (вступление участника) — строка по центру, не «пузырь»
+    // и не склеивается с соседями.
+    if (m.system) {
+      rows.push({ type: 'system', msg: m })
+      prevForMsg = m
+      continue
+    }
     rows.push({ type: 'msg', msg: m, prev: prevForMsg, isPending: false })
     prevForMsg = m
   }
@@ -334,6 +353,15 @@ export function MessageList({
       {rows.map((row, idx) => {
         if (row.type === 'day') return <DayDivider key={`day-${idx}`} label={row.label} />
         if (row.type === 'unread') return <UnreadDivider key={`unread-${idx}`} />
+        if (row.type === 'system') {
+          return (
+            <SystemLine
+              key={row.msg.id}
+              message={row.msg}
+              name={memberMap.get(row.msg.authorId)?.displayName ?? 'кто-то'}
+            />
+          )
+        }
         const m = row.msg
         const key = row.isPending ? (m as PendingMessage)._nonce : m.id
         // Вход анимируем только у чужих сообщений новее снимка: свои отправки

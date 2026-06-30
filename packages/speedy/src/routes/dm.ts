@@ -53,6 +53,8 @@ export const dmRoutes: FastifyPluginAsyncZod = async (app) => {
           userBId:    dmChannels.userBId,
           lastReadA:  dmChannels.lastReadA,
           lastReadB:  dmChannels.lastReadB,
+          hiddenA:    dmChannels.hiddenA,
+          hiddenB:    dmChannels.hiddenB,
         })
         .from(dmChannels)
         .where(or(eq(dmChannels.userAId, userId), eq(dmChannels.userBId, userId)))
@@ -133,6 +135,11 @@ export const dmRoutes: FastifyPluginAsyncZod = async (app) => {
         const otherId = dm.userAId === userId ? dm.userBId : dm.userAId
         const other = otherUserById.get(otherId)
         if (!other) continue
+        // Закрытая переписка скрыта, пока нет непрочитанного. Новое сообщение
+        // (unread > 0) вернёт её в список автоматически.
+        const hidden = dm.userAId === userId ? dm.hiddenA : dm.hiddenB
+        const unread = unreadByChannel.get(dm.channelId) ?? 0
+        if (hidden && unread === 0) continue
         const last = lastByChannel.get(dm.channelId)
         summaries.push({
           channelId: dm.channelId,
@@ -232,6 +239,14 @@ export const dmRoutes: FastifyPluginAsyncZod = async (app) => {
 
       if (existing[0]) {
         const dm = existing[0]
+        // Явное открытие переписки снимает «скрыто» у открывшего.
+        const myHidden = me === dm.userAId ? dm.hiddenA : dm.hiddenB
+        if (myHidden) {
+          await db
+            .update(dmChannels)
+            .set(me === dm.userAId ? { hiddenA: false } : { hiddenB: false })
+            .where(eq(dmChannels.channelId, dm.channelId))
+        }
         const chRows = await db
           .select()
           .from(channels)
@@ -343,9 +358,51 @@ export const dmRoutes: FastifyPluginAsyncZod = async (app) => {
         return reply.code(204).send(null)
       }
 
+      // Чтение свежего сообщения снимает «скрыто» — переписка остаётся в списке.
       await db
         .update(dmChannels)
-        .set(isA ? { lastReadA: messageId } : { lastReadB: messageId })
+        .set(isA ? { lastReadA: messageId, hiddenA: false } : { lastReadB: messageId, hiddenB: false })
+        .where(eq(dmChannels.channelId, channelId))
+
+      return reply.code(204).send(null)
+    },
+  )
+
+  // ───── POST /api/dm/:channelId/hide ─────
+  // «Закрыть переписку»: убрать из своего списка до следующего сообщения.
+  // Per-user, собеседника не трогает.
+  app.post(
+    '/dm/:channelId/hide',
+    {
+      preHandler: app.authenticate,
+      schema: {
+        params: z.object({ channelId: z.string().uuid() }),
+        response: {
+          204: z.null(),
+          401: ErrorBodySchema,
+          403: ErrorBodySchema,
+          404: ErrorBodySchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const userId = req.authUser!.id
+      const { channelId } = req.params
+
+      const dmRows = await db
+        .select()
+        .from(dmChannels)
+        .where(eq(dmChannels.channelId, channelId))
+        .limit(1)
+      const dm = dmRows[0]
+      if (!dm) throw notFound('channel-not-found', 'dm channel not found')
+      if (dm.userAId !== userId && dm.userBId !== userId) {
+        throw forbidden('not a participant of this dm')
+      }
+
+      await db
+        .update(dmChannels)
+        .set(dm.userAId === userId ? { hiddenA: true } : { hiddenB: true })
         .where(eq(dmChannels.channelId, channelId))
 
       return reply.code(204).send(null)

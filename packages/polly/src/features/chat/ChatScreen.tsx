@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { type InfiniteData, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useLocation } from 'wouter'
 
@@ -10,15 +10,17 @@ import { Badge } from '../../components/Badge.js'
 import { Icon } from '../../components/Icon.js'
 import { toast } from '../../components/toast/index.js'
 import { ApiError } from '../../lib/api.js'
+import { wsClient } from '../../lib/ws.js'
 import { useAuthStore } from '../auth/store.js'
 import { useViewScope } from '../navigation/viewScope.js'
 import { useServerEmoji } from '../emoji/api.js'
 import { useProfileUi } from '../profile/store.js'
 import { listRoles } from '../roles/api.js'
-import { getChannelStats, getServerDetail, listMembers } from '../servers/api.js'
+import { getChannelStats, getServerDetail, listMembers, markChannelRead } from '../servers/api.js'
 import { ServerSearchOverlay } from '../search/ServerSearchOverlay.js'
 import { Composer } from './Composer.js'
 import { MessageList } from './MessageList.js'
+import { useNsfwGate } from './nsfwGate.js'
 import { PinnedPanel } from './PinnedPanel.js'
 import { addReaction, deleteMessage, editMessage, removeReaction, sendMessage } from './api.js'
 import type { PendingMessage } from './types.js'
@@ -120,10 +122,44 @@ function Header({ channel, channelId, serverId, serverName, memberCount, canPin,
   )
 }
 
+// Заслонка 18+ при первом входе в NSFW-канал (designs — предупреждение по
+// центру). Подтверждение запоминается per-channel (useNsfwGate).
+function NsfwGate({ channelName, onContinue }: { channelName: string; onContinue: () => void }) {
+  return (
+    <div className="flex-1 min-h-0 flex flex-col items-center justify-center px-6 text-center">
+      <Badge variant="nsfw">18+</Badge>
+      <div className="mt-3 text-[15px] font-bold text-kd-text">
+        {channelName ? `#${channelName}` : 'этот канал'} помечен как «для взрослых»
+      </div>
+      <div className="mt-1.5 text-[12px] text-kd-text-soft max-w-[360px] leading-relaxed">
+        здесь может быть контент 18+. заходи, только если тебе есть 18 и ты не против такого.
+      </div>
+      <div className="mt-4 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => window.history.back()}
+          className="px-3.5 py-2 rounded-kd bg-kd-panel border border-kd-border text-[12px] font-semibold text-kd-text hover:bg-kd-panel-hi transition-colors"
+        >
+          назад
+        </button>
+        <button
+          type="button"
+          onClick={onContinue}
+          className="px-3.5 py-2 rounded-kd bg-kd-accent text-white text-[12px] font-semibold hover:bg-kd-accent-deep transition-colors"
+        >
+          продолжить
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export function ChatScreen({ serverId, channelId }: ChatScreenProps) {
   const queryClient = useQueryClient()
   const user = useAuthStore((s) => s.user)
   const openProfile = useProfileUi((s) => s.open)
+  const nsfwAccepted = useNsfwGate((s) => Boolean(s.accepted[channelId]))
+  const acceptNsfw = useNsfwGate((s) => s.accept)
 
   const [pending, setPending] = useState<PendingMessage[]>([])
   const [replyTo, setReplyTo] = useState<Message | null>(null)
@@ -147,6 +183,21 @@ export function ChatScreen({ serverId, channelId }: ChatScreenProps) {
   })
 
   const channel = serverDetail?.channels.find((c) => c.id === channelId)
+
+  // Авто-«прочитано»: открыли канал или пришло новое сообщение, пока смотрим —
+  // помечаем прочитанным и освежаем точки непрочитанного в списке каналов.
+  useEffect(() => {
+    if (!channelId) return undefined
+    const markRead = () => {
+      void markChannelRead(channelId).then(() =>
+        queryClient.invalidateQueries({ queryKey: ['unread', serverId] }),
+      )
+    }
+    markRead()
+    return wsClient.on((e) => {
+      if (e.t === 'msg.new' && e.channelId === channelId) markRead()
+    })
+  }, [serverId, channelId, queryClient])
 
   // Закреплять в серверном канале могут owner/admin (T-пин).
   const myRole = user ? members.find((m) => m.id === user.id)?.role : undefined
@@ -317,38 +368,44 @@ export function ChatScreen({ serverId, channelId }: ChatScreenProps) {
         memberMap={memberMap}
         emojiMap={emojiMap}
       />
-      <MessageList
-        serverId={serverId}
-        channelId={channelId}
-        currentUserId={user?.id ?? null}
-        memberMap={memberMap}
-        channelMap={channelMap}
-        emojiMap={emojiMap}
-        roles={roles}
-        pending={pending}
-        canPin={canPin}
-        threadsAllowed={channel?.threadsAllowed ?? true}
-        nsfw={channel?.nsfw ?? false}
-        onEdit={handleEdit}
-        onDelete={handleDelete}
-        onRetry={handleRetry}
-        onReply={setReplyTo}
-        onAddReaction={handleAddReaction}
-        onRemoveReaction={handleRemoveReaction}
-        onMention={openProfile}
-      />
-      <Composer
-        channelName={channel?.name ?? ''}
-        customEmoji={serverEmoji}
-        roles={roles}
-        channelId={channelId}
-        memberMap={memberMap}
-        allowBroadcast
-        replyTo={replyTo}
-        replyAuthor={replyTo ? memberMap.get(replyTo.authorId)?.displayName : undefined}
-        onCancelReply={() => setReplyTo(null)}
-        onSend={handleSend}
-      />
+      {(channel?.nsfw ?? false) && !nsfwAccepted ? (
+        <NsfwGate channelName={channel?.name ?? ''} onContinue={() => acceptNsfw(channelId)} />
+      ) : (
+        <>
+          <MessageList
+            serverId={serverId}
+            channelId={channelId}
+            currentUserId={user?.id ?? null}
+            memberMap={memberMap}
+            channelMap={channelMap}
+            emojiMap={emojiMap}
+            roles={roles}
+            pending={pending}
+            canPin={canPin}
+            threadsAllowed={channel?.threadsAllowed ?? true}
+            nsfw={channel?.nsfw ?? false}
+            onEdit={handleEdit}
+            onDelete={handleDelete}
+            onRetry={handleRetry}
+            onReply={setReplyTo}
+            onAddReaction={handleAddReaction}
+            onRemoveReaction={handleRemoveReaction}
+            onMention={openProfile}
+          />
+          <Composer
+            channelName={channel?.name ?? ''}
+            customEmoji={serverEmoji}
+            roles={roles}
+            channelId={channelId}
+            memberMap={memberMap}
+            allowBroadcast
+            replyTo={replyTo}
+            replyAuthor={replyTo ? memberMap.get(replyTo.authorId)?.displayName : undefined}
+            onCancelReply={() => setReplyTo(null)}
+            onSend={handleSend}
+          />
+        </>
+      )}
     </div>
   )
 }

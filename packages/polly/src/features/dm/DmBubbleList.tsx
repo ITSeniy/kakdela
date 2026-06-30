@@ -19,6 +19,7 @@ import { GifEmbed } from '../chat/GifEmbed.js'
 import { StickerEmbed } from '../chat/StickerEmbed.js'
 import { ContextMenu } from '../chat/ContextMenu.js'
 import { ForwardedCard } from '../chat/ForwardedCard.js'
+import { InviteEmbeds } from '../chat/InviteCard.js'
 import { LinkPreviews } from '../chat/LinkPreviewCard.js'
 import { useForwardUi } from '../chat/forwardStore.js'
 import { Reactions } from '../chat/Reactions.js'
@@ -446,6 +447,7 @@ function DmBubble({
         )}
         {forwardedEl}
         <LinkPreviews previews={(message as IMessage).linkPreviews} />
+        <InviteEmbeds content={message.content} />
         {msgAttachments.length > 0 && <AttachmentList attachments={msgAttachments} />}
         {msgGif && <GifEmbed gif={msgGif} />}
         {msgSticker && <StickerEmbed sticker={msgSticker} />}

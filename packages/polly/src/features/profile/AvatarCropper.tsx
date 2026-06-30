@@ -203,12 +203,40 @@ export function AvatarCropper({
             className={`bg-kd-bg-deep border border-kd-border cursor-grab active:cursor-grabbing ${round ? 'rounded-full' : 'rounded-kd'}`}
             style={{ width: previewW, height: previewH }}
           />
+          {/* Явная рамка обрезки: всё внутри попадёт в итог. Для круга —
+              кольцо, для баннера — accent-рамка + сетка третей + угловые скобки. */}
+          {hasImage && (
+            <div className="absolute inset-0 pointer-events-none">
+              {round ? (
+                <div className="absolute inset-0 rounded-full ring-2 ring-kd-accent shadow-[0_0_0_9999px_rgba(0,0,0,0.35)]" />
+              ) : (
+                <>
+                  <div className="absolute inset-0 rounded-kd ring-2 ring-kd-accent" />
+                  {/* сетка третей */}
+                  <div className="absolute left-0 right-0 top-1/3 h-px bg-white/25" />
+                  <div className="absolute left-0 right-0 top-2/3 h-px bg-white/25" />
+                  <div className="absolute top-0 bottom-0 left-1/3 w-px bg-white/25" />
+                  <div className="absolute top-0 bottom-0 left-2/3 w-px bg-white/25" />
+                  {/* угловые скобки */}
+                  <span className="absolute top-0 left-0 w-4 h-4 border-t-2 border-l-2 border-kd-accent rounded-tl-kd" />
+                  <span className="absolute top-0 right-0 w-4 h-4 border-t-2 border-r-2 border-kd-accent rounded-tr-kd" />
+                  <span className="absolute bottom-0 left-0 w-4 h-4 border-b-2 border-l-2 border-kd-accent rounded-bl-kd" />
+                  <span className="absolute bottom-0 right-0 w-4 h-4 border-b-2 border-r-2 border-kd-accent rounded-br-kd" />
+                </>
+              )}
+            </div>
+          )}
           {!hasImage && (
             <div className="absolute inset-0 flex items-center justify-center text-[11px] text-kd-text-mute font-mono pointer-events-none text-center px-4">
               перетащите картинку <br /> или выберите ниже
             </div>
           )}
         </div>
+        {hasImage && (
+          <div className="text-[10px] text-kd-text-mute font-mono text-center">
+            всё, что внутри рамки, попадёт в {round ? 'аватар' : 'баннер'} · тяни и масштабируй
+          </div>
+        )}
         {hasImage && (
           <Slider
             label="масштаб"

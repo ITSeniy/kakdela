@@ -4,9 +4,11 @@ import type {
   CreateChannelRequest,
   CreateInviteResponse,
   CreateServerRequest,
+  InvitePublic,
   InviteSummary,
   InvitesListResponse,
   MemberPublic,
+  ServerUnreadResponse,
   PatchChannelRequest,
   PatchServerRequest,
   Server,
@@ -95,6 +97,35 @@ export async function leaveServer(serverId: string): Promise<void> {
   await apiFetch<void>(`/api/servers/${serverId}/members/me`, { method: 'DELETE' })
 }
 
+/** Передать владение сервером другому участнику (текущий owner → admin). */
+export async function transferOwnership(serverId: string, userId: string): Promise<void> {
+  await apiFetch<void>(`/api/servers/${serverId}/transfer`, {
+    method: 'POST',
+    body: JSON.stringify({ userId }),
+  })
+}
+
+/** Выгнать участника с сервера (нужно право KICK_MEMBERS + старшинство). */
+export async function kickMember(serverId: string, userId: string): Promise<void> {
+  await apiFetch<void>(`/api/servers/${serverId}/members/${userId}`, { method: 'DELETE' })
+}
+
+/** Пометить канал прочитанным (lastReadAt = now). */
+export async function markChannelRead(channelId: string): Promise<void> {
+  await apiFetch<void>(`/api/channels/${channelId}/read`, { method: 'POST' })
+}
+
+/** id каналов сервера с непрочитанными сообщениями. */
+export async function getServerUnread(serverId: string): Promise<string[]> {
+  const res = await apiFetch<ServerUnreadResponse>(`/api/servers/${serverId}/unread`)
+  return res.channelIds
+}
+
+/** Пометить весь сервер прочитанным. */
+export async function markServerRead(serverId: string): Promise<void> {
+  await apiFetch<void>(`/api/servers/${serverId}/read`, { method: 'POST' })
+}
+
 export async function listInvites(serverId: string): Promise<InviteSummary[]> {
   const data = await apiFetch<InvitesListResponse>(`/api/servers/${serverId}/invites`)
   return data.invites
@@ -118,4 +149,8 @@ export async function acceptInvite(code: string): Promise<{ serverId: string }> 
   return apiFetch<{ serverId: string }>(`/api/invites/${encodeURIComponent(code)}/accept`, {
     method: 'POST',
   })
+}
+
+export async function getInvitePublic(code: string): Promise<InvitePublic> {
+  return apiFetch<InvitePublic>(`/api/invites/${encodeURIComponent(code)}`)
 }

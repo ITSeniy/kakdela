@@ -17,3 +17,8 @@ export async function markDmRead(channelId: string, messageId: string): Promise<
     body: JSON.stringify({ messageId }),
   })
 }
+
+/** «Закрыть переписку» — скрыть из своего списка до следующего сообщения. */
+export async function hideDm(channelId: string): Promise<void> {
+  await apiFetch<void>(`/api/dm/${channelId}/hide`, { method: 'POST' })
+}
